@@ -1,7 +1,7 @@
 # UENO CN health＆beauty salon（元サイトの保存版）
 
 元サイト https://cn-salon-ueno.cnsalon2021.chatgpt.site を、2026年9月24日時点のまま保存したものです。
-`pages/` と `public/` の中身は、元サイトをブラウザで開いたときに届くファイルと1バイトも違いません（確認済み）。
+`pages/` と `public/` の中身は基本的に元サイトのままです。例外は、追加したページ（demo-admin.html・pm-login.html・not-found.html）と、予約確認・完了ページのラベル折り返しバグを直すために最小修正した3ファイル（BookingText-*.js・page-WafCof8Y.js・page-ChO0-Npx.js）です。
 
 ## VS Codeでの開き方
 1. VS Codeで「ファイル → フォルダーを開く」から、このフォルダを開く

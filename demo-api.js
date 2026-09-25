@@ -441,12 +441,11 @@ function getAvailability(q) {
     const open = day.enabled && d >= today && d <= addDays(today, 84);
     const slots = [];
     for (let m = 600; m <= 1500; m += 10) {
-      let ok = open;
-      if (ok && d === today && m <= nowMinJst()) ok = false; // 過ぎた時間は不可
-      if (ok) {
-        const free = freeStaffIds(d, m, m + dur, courseId, pref);
-        ok = free.length >= people && (!staffId || free.includes(staffId));
-      }
+      // 受付対象外（受付停止日・過ぎた時間）は枠自体を返さず、画面では「－」表示にする
+      if (!open) continue;
+      if (d === today && m <= nowMinJst()) continue;
+      const free = freeStaffIds(d, m, m + dur, courseId, pref);
+      const ok = free.length >= people && (!staffId || free.includes(staffId));
       slots.push({ minute: m, available: ok, start: minToMs(d, m) });
     }
     days.push({ date: d, enabled: day.enabled, slots });
