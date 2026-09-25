@@ -74,6 +74,7 @@ const state = {
     gender: s.gender,
     active: 1,
     courses: "[]", // 空=全メニュー対応
+    locked: ["山田 恵", "中村敏樹"].includes(s.name) ? 1 : 0, // 鍵（予約受付停止）
     profile: JSON.stringify({ nickname: "", personalNomination: true, genderNomination: false, nominationFee: 500, message: s.message || "", imageKey: "" }),
     sort_order: i + 1,
     profile_revision: 0,
@@ -267,7 +268,9 @@ function postSchedule(body) {
       const ev = ensureEvents(date);
       const bk = ev.bookings.find((b) => b.id === id && b.status === "confirmed");
       if (!bk) throw err(404, "notFound");
-      if (!state.staff.some((s) => s.id === staffId)) throw err(400, "invalid");
+      const mvTarget = state.staff.find((s) => s.id === staffId);
+      if (!mvTarget) throw err(400, "invalid");
+      if (mvTarget.locked) throw err(409, "soldOut"); // 鍵中のスタッフには入れられない
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end, id)) throw err(409, "soldOut");
       bk.start_at = minToMs(date, start);
@@ -291,7 +294,9 @@ function postSchedule(body) {
       checkRevision();
       const { staffId, start, course, people, consent } = body;
       const c = COURSES[course];
-      if (!consent || !c || !state.staff.some((s) => s.id === staffId)) throw err(400, "invalid");
+      const cbTarget = state.staff.find((s) => s.id === staffId);
+      if (!consent || !c || !cbTarget) throw err(400, "invalid");
+      if (cbTarget.locked) throw err(409, "soldOut"); // 鍵中のスタッフには入れられない
       const end = start + c.minutes;
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end)) throw err(409, "soldOut");
@@ -346,11 +351,13 @@ function postSchedule(body) {
         state.photos.delete(p.id);
         profile.imageKey = "";
       }
+      const prevStaff = state.staff.find((x) => x.id === p.id);
       const rec = {
         id: p.id,
         name: String(p.name),
         gender: p.gender,
         active: p.active ? 1 : 0,
+        locked: prevStaff?.locked ?? 0,
         courses: JSON.stringify(p.allCourses ? [] : p.courses || []),
         profile: JSON.stringify(profile),
         sort_order: Number(p.sortOrder) || 0,
@@ -359,6 +366,13 @@ function postSchedule(body) {
       const idx = state.staff.findIndex((s) => s.id === p.id);
       if (idx >= 0) state.staff[idx] = rec; else state.staff.push(rec);
       return { ok: true };
+    }
+    case "lockStaff": {
+      const st = state.staff.find((x) => x.id === body.staffId);
+      if (!st) throw err(400, "invalid");
+      st.locked = body.locked ? 1 : 0;
+      bump();
+      return { ok: true, locked: st.locked };
     }
     case "retryMail":
       return { ok: true };
@@ -523,7 +537,7 @@ function profileOf(st) {
 // 指名候補スタッフ一覧（受付中・個人指名あり・コース対応・性別条件）
 function nominatableStaff(courseId, genderPref) {
   return state.staff
-    .filter((st) => st.active === 1 && staffCanDo(st, courseId))
+    .filter((st) => st.active === 1 && !st.locked && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => profileOf(st).personalNomination)
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -552,7 +566,7 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref) {
     return items.some((it) => msToMin(date, it.start_at) < endMin && msToMin(date, it.end_at) > startMin);
   };
   return state.staff
-    .filter((st) => st.active === 1 && staffCanDo(st, courseId))
+    .filter((st) => st.active === 1 && !st.locked && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => {
       const sh = shifts.find((x) => x.staff_id === st.id);
@@ -764,6 +778,12 @@ function handleDemoApi(req, res, url) {
     return true;
   }
 
+  if (url.pathname === "/api/demo/locks" && (req.method === "GET" || req.method === "HEAD")) {
+    const locks = state.staff.map((st) => ({ id: st.id, name: st.name, locked: st.locked ? 1 : 0 }));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ locks }));
+    return true;
+  }
   if (url.pathname === "/api/demo/mails" && (req.method === "GET" || req.method === "HEAD")) {
     const mails = [...state.mails]
       .sort((a, b) => b.createdAt - a.createdAt)

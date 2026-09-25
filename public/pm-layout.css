@@ -4,22 +4,33 @@
 /* ---- スタッフ欄：名前の右に 🔓 ★0 を表示（施術分数の代わり） ---- */
 .ledger-row > .ledger-staff-cell {
   flex-direction: row;
-  justify-content: space-between;
   align-items: center;
+  gap: 6px;
 }
+.ledger-row > .ledger-staff-cell b { margin-right: auto; }
 .ledger-row > .ledger-staff-cell small { display: none; }
 .ledger-row > .ledger-staff-cell::after {
   content: attr(data-pmstar);
   color: #8d8d8d;
   font-size: 11px;
   white-space: nowrap;
-  padding-left: 16px;
-  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%23909090" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-.8"/></svg>') left center no-repeat;
 }
-/* 鍵が閉じているスタッフ */
-.ledger-row > .ledger-staff-cell[data-pmlock="1"]::after {
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%23555555" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
+/* 鍵（予約受付停止）トグルボタン */
+.pm-lockbtn {
+  display: inline-block;
+  width: 16px;
+  height: 15px;
+  margin-left: auto;
+  cursor: pointer;
+  border-radius: 2px;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23909090" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-.8"/></svg>') center no-repeat;
 }
+.pm-lockbtn:hover { outline: 2px solid #e9625b; outline-offset: 1px; }
+.pm-locked .pm-lockbtn {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23555555" stroke-width="2.4"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
+}
+/* 受付停止中はスタッフ欄も薄い青に */
+main.ledger-app .pm-locked > .ledger-staff-cell { background: #e2eefc !important; }
 /* シフト内は本物と同じく白スロット（保存CSSの標準は青のため上書き） */
 main.ledger-app .ledger-onshift { background: #fff !important; }
 /* 青いスロットの行（契約形態違いの表現）はこの2行だけ */

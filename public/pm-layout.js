@@ -101,13 +101,16 @@
       logo.style.cursor = "default";
     }
 
-    // 3b) スタッフ行ごとの装飾（★数・鍵・青スロット・ピンク強調・左端の色バー）
+    // 3b) スタッフ行ごとの装飾（★数・ピンク強調・左端の色バー）と、
+    //      鍵（予約受付停止）トグル。鍵の状態はサーバーの実データと連動する。
     const DECOR = {
       "藤倉 和美": { star: "50", pink: true, female: true },
-      "山田 恵": { lock: true, blue: true, female: true },
-      "中村敏樹": { lock: true, blue: true },
+      "山田 恵": { female: true },
       "川井": { female: true },
+      "佐藤みずき": { female: true },
+      "平沼 穂香": { female: true },
     };
+    refreshLocks();
     document.querySelectorAll(".ledger-row").forEach((row) => {
       const cell = row.querySelector(".ledger-staff-cell");
       const name = cell?.querySelector("b")?.textContent || "";
@@ -115,14 +118,84 @@
       const d = DECOR[name] || {};
       const star = "★" + (d.star || "0");
       if (cell.dataset.pmstar !== star) cell.dataset.pmstar = star;
-      if (!!d.lock !== (cell.dataset.pmlock === "1")) {
-        if (d.lock) cell.dataset.pmlock = "1"; else delete cell.dataset.pmlock;
-      }
-      row.classList.toggle("pm-blue", !!d.blue);
       row.classList.toggle("pm-pink", !!d.pink);
       row.classList.toggle("pm-acc-f", !!d.female);
       row.classList.toggle("pm-acc-m", !d.female);
+      const lockInfo = window.__pmLocks?.[name];
+      row.classList.toggle("pm-blue", !!lockInfo?.locked);
+      row.classList.toggle("pm-locked", !!lockInfo?.locked);
+      if (lockInfo && !cell.querySelector(".pm-lockbtn")) {
+        const b = document.createElement("span");
+        b.className = "pm-lockbtn";
+        b.setAttribute("role", "button");
+        b.tabIndex = 0;
+        b.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const cur = window.__pmLocks?.[name];
+          if (!cur || b.dataset.busy) return;
+          b.dataset.busy = "1";
+          try {
+            await fetch("/api/demo/schedule", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "lockStaff",
+                date: new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10),
+                staffId: cur.id,
+                locked: cur.locked ? 0 : 1,
+              }),
+            });
+            await refreshLocks(true);
+          } finally { delete b.dataset.busy; }
+        }, true);
+        cell.appendChild(b);
+      }
+      const btn = cell.querySelector(".pm-lockbtn");
+      if (btn && lockInfo) {
+        btn.title = lockInfo.locked
+          ? name + " は予約受付停止中（クリックで再開）"
+          : name + " の予約受付を停止する";
+      }
     });
+
+    // 3c2) 「予約台帳」メニューを本物と同じ項目構成にする
+    //      （予約受付＝日別スケジュール表示。装飾項目はデモでは飾り）
+    const navMenu = document.querySelector(".ledger-nav-menu > div");
+    if (navMenu && !navMenu.dataset.pmMenu) {
+      navMenu.dataset.pmMenu = "1";
+      const orig = [...navMenu.querySelectorAll("button")];
+      const dayBtn = orig.find((b) => b.textContent === "日別予約台帳");
+      const monthBtn = orig.find((b) => b.textContent === "月間シフト作成");
+      orig.forEach((b) => { b.style.display = "none"; });
+      const items = [
+        ["トップ", () => dayBtn?.click()],
+        ["予約受付", () => dayBtn?.click()],
+        ["予約一覧", () => {
+          dayBtn?.click();
+          setTimeout(() => {
+            [...document.querySelectorAll(".ledger-underbar button")]
+              .find((b) => b.textContent === "予約一覧")?.click();
+          }, 150);
+        }],
+        ["支払・レジ", null],
+        ["物販販売", null],
+        ["返客一覧", null],
+        ["月間シフト入力", () => monthBtn?.click()],
+        ["本日のオンライン設定状況", null],
+        ["シフトひな型設定", null],
+        ["シフトパターン設定", null],
+        ["データ不備のお知らせ", null],
+      ];
+      for (const [label, fn] of items) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        if (fn) b.addEventListener("click", fn);
+        else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
+        navMenu.appendChild(b);
+      }
+    }
 
     // 3d) 現在時刻の列を時間別概況でハイライト
     const nowJst = new Date(Date.now() + 9 * 3600e3);
@@ -288,6 +361,20 @@
       });
     }
     if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+  }
+
+  // 鍵（予約受付停止）状態の取得。3秒キャッシュで管理画面と予約サイトに追従する。
+  async function refreshLocks(force) {
+    const now = Date.now();
+    if (!force && window.__pmLocksAt && now - window.__pmLocksAt < 3000) return;
+    window.__pmLocksAt = now;
+    try {
+      const r = await fetch("/api/demo/locks", { cache: "no-store" });
+      const d = await r.json();
+      const map = {};
+      for (const l of d.locks) map[l.name] = l;
+      window.__pmLocks = map;
+    } catch {}
   }
 
   function dateISOMinus1(d) {
