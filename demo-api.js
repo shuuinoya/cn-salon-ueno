@@ -83,6 +83,8 @@ const state = {
   shifts: new Map(),   // date -> [{staff_id, date, start_at, end_at, note}]
   events: new Map(),   // date -> {bookings: [], blocks: [], assignments: []}
   notifications: [{ status: "pending", count: 0 }, { status: "cancelled", count: 0 }],
+  mails: [],       // 生成したメール（デモ。実際には送信しない）
+  mailSerial: 0,
   bookingSerial: 100,
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
@@ -174,8 +176,8 @@ function getSchedule(date) {
     blocks: ev.blocks,
     assignments: ev.assignments,
     days,
-    mailReady: false, // デモではメール送信しない
-    notifications: state.notifications,
+    mailReady: true, // デモ：メールは生成のみ（/admin/mails で内容を確認できる）
+    notifications: mailSummary(),
   };
 }
 
@@ -274,7 +276,14 @@ function postSchedule(body) {
       bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
       const as = ev.assignments.find((a) => a.booking_id === id);
       if (as) as.staff_id = staffId; else ev.assignments.push({ booking_id: id, staff_id: staffId });
-      state.notifications.find((n) => n.status === "pending").count++;
+      // 担当が変わったら指名情報も引き継ぎ直す（指名予約の担当変更は指名解除扱い）
+      if (bk.nominated_staff_id && bk.nominated_staff_id !== staffId) {
+        bk.nominated_staff_id = null;
+        bk.nominated_staff_name = null;
+        bk.total -= bk.nomination_fee || 0;
+        bk.nomination_fee = 0;
+      }
+      queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
       bump();
       return { ok: true };
     }
@@ -303,7 +312,7 @@ function postSchedule(body) {
       });
       state.bookingIndex.set(id, date);
       ev.assignments.push({ booking_id: id, staff_id: staffId });
-      state.notifications.find((n2) => n2.status === "pending").count++;
+      queueBookingMails(ev.bookings.find((b) => b.id === id));
       bump();
       return { ok: true };
     }
@@ -315,7 +324,7 @@ function postSchedule(body) {
       bk.status = "cancelled";
       const idx = ev.assignments.findIndex((a) => a.booking_id === bk.id);
       if (idx >= 0) ev.assignments.splice(idx, 1);
-      state.notifications.find((n) => n.status === "pending").count += 2; // お客様＋店舗
+      queueCancelMails(bk); // 取消通知（双方）＋未送信リマインドの破棄
       bump();
       return { ok: true };
     }
@@ -358,6 +367,141 @@ function postSchedule(body) {
   }
 }
 
+
+// ---- リマインド・通知メール（デモ：実送信はせず、内容を生成して保存する） ----
+
+const STORE_NAME = "UENO CN health＆beauty salon";
+const STORE_MAIL = "info@cn-salon-ueno.example.jp";
+
+function fmtDateJa(date) {
+  const w = ["日", "月", "火", "水", "木", "金", "土"][new Date(date + "T00:00:00Z").getUTCDay()];
+  const [y, m, d] = date.split("-").map(Number);
+  return `${y}年${m}月${d}日（${w}）`;
+}
+function fmtTime(date, ms) {
+  const min = msToMin(date, ms);
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
+  state.mailSerial++;
+  state.mails.push({
+    id: "mail-" + state.mailSerial,
+    kind,                 // "customer" | "store"
+    type,                 // "confirm" | "notify" | "remind" | "change" | "cancel"
+    to, subject, body,
+    scheduledAt,          // この時刻を過ぎたら「送信済み（デモ）」扱い
+    createdAt: Date.now(),
+    bookingId: bookingId || null,
+  });
+}
+
+function bookingLines(bk) {
+  const d = bk.service_date;
+  const staffLabel = bk.nominated_staff_name
+    ? `${bk.nominated_staff_name}（指名）`
+    : { none: "指名なし", male: "男性スタッフ希望", female: "女性スタッフ希望" }[bk.staff || "none"] || "指名なし";
+  return [
+    `予約番号：${bk.reference}`,
+    `日時：${fmtDateJa(d)} ${fmtTime(d, bk.start_at)}〜${fmtTime(d, bk.end_at)}`,
+    `メニュー：${bk.course_name}`,
+    `人数：${bk.people}名`,
+    `担当：${staffLabel}`,
+    ...(bk.nomination_fee ? [`指名料：${bk.nomination_fee.toLocaleString("ja-JP")}円`] : []),
+    `合計：${bk.total.toLocaleString("ja-JP")}円（税込）`,
+  ].join("\n");
+}
+
+const STORE_FOOTER = [
+  "", "■店舗情報", STORE_NAME,
+  "東京都台東区上野4丁目8-6 プラザUビル 3階",
+  "TEL：03-6806-0324（変更・取消はお電話で承ります）",
+].join("\n");
+
+// 予約確定時：完了メール（お客様）＋新規予約通知（店舗）＋双方のリマインドを予約する
+function queueBookingMails(bk) {
+  const now = Date.now();
+  const guest = (bk.name || "お客様") + " 様";
+  if (bk.email) {
+    queueMail("customer", "confirm", bk.email,
+      `【${STORE_NAME}】ご予約ありがとうございます（予約番号 ${bk.reference}）`,
+      `${guest}\n\nこの度はご予約いただき、誠にありがとうございます。\n以下の内容でご予約を承りました。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}\n\n当日お会いできることを楽しみにしております。`,
+      now, bk.id);
+  }
+  queueMail("store", "notify", STORE_MAIL,
+    `【新規予約】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
+    `新しい予約が入りました。\n\n■予約内容\n${bookingLines(bk)}\n\n■お客様情報\nお名前：${bk.name || "（未入力）"}\nメール：${bk.email || "（未入力)"}\n電話：${bk.phone || "（未入力）"}\nご要望：${bk.comment || "なし"}`,
+    now, bk.id);
+  // リマインド：お客様は来店24時間前、店舗は当日朝9時（過ぎていれば即時）
+  if (bk.email) {
+    queueMail("customer", "remind", bk.email,
+      `【リマインド】明日のご予約のご案内（予約番号 ${bk.reference}）`,
+      `${guest}\n\nご予約日が近づいてまいりましたので、ご案内いたします。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}\n\nご変更・お取消の場合はお早めにご連絡ください。\nご来店を心よりお待ちしております。`,
+      Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
+  }
+  queueMail("store", "remind", STORE_MAIL,
+    `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
+    `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}\n\n■お客様情報\nお名前：${bk.name || "（未入力）"}\n電話：${bk.phone || "（未入力）"}`,
+    Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+}
+
+// 変更・取消時：未送信のリマインドを整理し、双方へ通知する
+function dropPendingReminders(bookingId) {
+  const now = Date.now();
+  state.mails = state.mails.filter((m) =>
+    !(m.bookingId === bookingId && m.type === "remind" && m.scheduledAt > now));
+}
+
+function queueChangeMails(bk) {
+  const now = Date.now();
+  dropPendingReminders(bk.id);
+  if (bk.email) {
+    queueMail("customer", "change", bk.email,
+      `【${STORE_NAME}】ご予約内容変更のお知らせ（予約番号 ${bk.reference}）`,
+      `${(bk.name || "お客様")} 様\n\nご予約内容が変更されましたのでお知らせいたします。\n\n■変更後のご予約内容\n${bookingLines(bk)}${STORE_FOOTER}`,
+      now, bk.id);
+    queueMail("customer", "remind", bk.email,
+      `【リマインド】明日のご予約のご案内（予約番号 ${bk.reference}）`,
+      `${(bk.name || "お客様")} 様\n\nご予約日が近づいてまいりましたので、ご案内いたします。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}`,
+      Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
+  }
+  queueMail("store", "change", STORE_MAIL,
+    `【予約変更】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
+    `予約が変更されました。\n\n■変更後の予約内容\n${bookingLines(bk)}`,
+    now, bk.id);
+  queueMail("store", "remind", STORE_MAIL,
+    `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
+    `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}`,
+    Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+}
+
+function queueCancelMails(bk) {
+  const now = Date.now();
+  dropPendingReminders(bk.id);
+  if (bk.email) {
+    queueMail("customer", "cancel", bk.email,
+      `【${STORE_NAME}】ご予約取消のお知らせ（予約番号 ${bk.reference}）`,
+      `${(bk.name || "お客様")} 様\n\n以下のご予約を取消いたしました。\n\n■取消したご予約\n${bookingLines(bk)}${STORE_FOOTER}\n\nまたのご利用を心よりお待ちしております。`,
+      now, bk.id);
+  }
+  queueMail("store", "cancel", STORE_MAIL,
+    `【予約取消】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
+    `予約が取消されました。\n\n■取消した予約\n${bookingLines(bk)}`,
+    now, bk.id);
+}
+
+function mailStatus(m) {
+  return m.scheduledAt <= Date.now() ? "accepted" : "pending";
+}
+
+function mailSummary() {
+  let pending = 0, accepted = 0;
+  for (const m of state.mails) (mailStatus(m) === "accepted" ? accepted++ : pending++);
+  return [
+    { status: "pending", count: pending },
+    { status: "accepted", count: accepted },
+  ];
+}
 
 // ---- 予約サイト用の公開API（管理画面と同じデータを参照） -----------------
 
@@ -505,7 +649,7 @@ function createPublicBooking(body) {
   });
   ev.assignments.push({ booking_id: id, staff_id: assignee });
   state.bookingIndex.set(id, date);
-  state.notifications.find((n) => n.status === "pending").count += 2; // お客様＋店舗
+  queueBookingMails(ev.bookings.find((b) => b.id === id)); // 完了メール＋通知＋双方のリマインド
   ensureDay(date).version++;
   const result = { id, token };
   if (rk) state.requestKeys.set(rk, result);
@@ -525,7 +669,9 @@ function getPublicBooking(id, token) {
       nominatedStaffName: bk.nominated_staff_name, nominationFee: bk.nomination_fee,
       total: bk.total,
     },
-    notifications: [{ kind: "customer", status: "pending" }, { kind: "store", status: "pending" }],
+    notifications: state.mails
+      .filter((m) => m.bookingId === bk.id && (m.type === "confirm" || m.type === "notify"))
+      .map((m) => ({ kind: m.kind, status: mailStatus(m) })),
   };
 }
 
@@ -615,6 +761,15 @@ function handleDemoApi(req, res, url) {
     }
     res.writeHead(405);
     res.end();
+    return true;
+  }
+
+  if (url.pathname === "/api/demo/mails" && (req.method === "GET" || req.method === "HEAD")) {
+    const mails = [...state.mails]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((m) => ({ ...m, status: mailStatus(m) }));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ mails }));
     return true;
   }
 

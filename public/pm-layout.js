@@ -140,6 +140,18 @@
       else if (sm.textContent === "閉じる" && !sideOpen) { sm.textContent = "開く"; ic.textContent = "➜"; }
     });
 
+    // 7b) メール管理タブに、生成メールを確認するリンクを追加
+    const mailSec = document.querySelector(".ledger-mail");
+    if (mailSec && !document.getElementById("pm-maillink")) {
+      const a = document.createElement("a");
+      a.id = "pm-maillink";
+      a.className = "pm-red";
+      a.href = "/admin/mails";
+      a.textContent = "送信メールを確認（デモ）";
+      a.style.cssText = "display:inline-block;text-decoration:none;margin-left:8px;";
+      mailSec.querySelector("button")?.insertAdjacentElement("afterend", a);
+    }
+
     // 8) 予約詳細パネルを本物と同じレイアウトに組み替える
     decoratePanel();
 
