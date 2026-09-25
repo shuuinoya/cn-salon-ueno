@@ -222,8 +222,9 @@ function postSchedule(body) {
       return { ok: true };
     }
     case "bulkShift": {
-      const { start, end, cells } = body;
-      if (!(Number.isFinite(start) && Number.isFinite(end) && start < end) || !Array.isArray(cells)) throw err(400, "invalid");
+      const { start, end, cells, remove } = body;
+      if (!Array.isArray(cells) || !cells.length) throw err(400, "invalid");
+      if (!remove && !(Number.isFinite(start) && Number.isFinite(end) && start < end)) throw err(400, "invalid");
       for (const c of cells) {
         if (c.revision !== ensureDay(c.date).version) throw err(409, "scheduleConflict");
       }
@@ -235,6 +236,15 @@ function postSchedule(body) {
           ...ev.bookings.filter((b) => b.status === "confirmed" && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === c.staffId)),
           ...ev.blocks.filter((b) => b.staff_id === c.staffId),
         ];
+        if (remove) {
+          // お客様の予約が残っている日は削除しない。休憩・業務はシフトと一緒に削除する
+          const myBookings = ev.bookings.filter((b) => b.status === "confirmed" && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === c.staffId));
+          if (myBookings.length) throw err(409, "scheduleConflict");
+          ev.blocks = ev.blocks.filter((b) => b.staff_id !== c.staffId);
+          if (idx >= 0) list.splice(idx, 1);
+          bump(c.date);
+          continue;
+        }
         if (mine.some((it) => msToMin(c.date, it.start_at) < start || msToMin(c.date, it.end_at) > end)) throw err(409, "scheduleConflict");
         const rec = { staff_id: c.staffId, date: c.date, start_at: minToMs(c.date, start), end_at: minToMs(c.date, end), note: "" };
         if (idx >= 0) list[idx] = rec; else list.push(rec);

@@ -225,6 +225,9 @@
       mailSec.querySelector("button")?.insertAdjacentElement("afterend", a);
     }
 
+    // 7c) 月間シフト作成画面を本物の「月間シフト作成/目標設定」構成にする
+    decorateMonth();
+
     // 8) 予約詳細パネルを本物と同じレイアウトに組み替える
     decoratePanel();
 
@@ -361,6 +364,228 @@
       });
     }
     if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+  }
+
+  // 月間シフト作成画面：本物と同じツールバー（一括作成・シフト作成・変更/削除・出力）を組み込む
+  function decorateMonth() {
+    const month = document.querySelector(".ledger-month");
+    document.body.classList.toggle("pm-month-on", !!month);
+    if (!month) { document.getElementById("pm-month-title")?.remove(); return; }
+    month.classList.add("pm-month");
+
+    // 黄色いタイトルバー
+    if (!document.getElementById("pm-month-title")) {
+      const t = document.createElement("div");
+      t.id = "pm-month-title";
+      t.textContent = "月間シフト作成/目標設定";
+      month.insertAdjacentElement("afterbegin", t);
+    }
+
+    // 見出し行の◀▶を「前月」「翌月」ピルに
+    const heading = month.querySelector(".ledger-month-heading");
+    if (heading) {
+      const btns = [...heading.querySelectorAll("button")];
+      const prev = btns.find((b) => b.textContent === "◀" || b.textContent === "前月");
+      const next = btns.find((b) => b.textContent === "▶" || b.textContent === "翌月");
+      if (prev && prev.textContent !== "前月") prev.textContent = "前月";
+      if (next && next.textContent !== "翌月") next.textContent = "翌月";
+      prev?.classList.add("pm-pill", "pm-prev");
+      next?.classList.add("pm-pill");
+      const create = heading.querySelector(".ledger-create");
+      if (create) create.style.display = "none"; // 実体は残し、緑/青ボタンから呼ぶ
+
+      if (!document.getElementById("pm-month-tools")) {
+        // 左：目標保存＋「n人分・スタッフ・一括作成」の枠
+        const left = document.createElement("div");
+        left.id = "pm-month-left";
+        const goal = document.createElement("button");
+        goal.type = "button"; goal.className = "pm-red"; goal.textContent = "目標保存";
+        goal.title = "デモ版では使用できません";
+        const grp = document.createElement("span");
+        grp.id = "pm-bulk-group";
+        const cnt = document.createElement("select");
+        cnt.id = "pm-bulk-count";
+        cnt.innerHTML = [1, 2, 3, 4, 5].map((n) => `<option>${n}</option>`).join("");
+        const sel = document.createElement("select");
+        sel.id = "pm-bulk-staff";
+        const bulk = document.createElement("button");
+        bulk.type = "button"; bulk.className = "pm-red"; bulk.textContent = "一括作成";
+        bulk.title = "選んだスタッフの1か月分のマスをまとめて選択します";
+        bulk.addEventListener("click", () => {
+          const name = sel.value;
+          const table = month.querySelector("table");
+          if (!table) return;
+          const heads = [...table.querySelectorAll("thead th")].map((th) => th.childNodes[0]?.textContent || th.textContent);
+          table.querySelectorAll("tbody tr").forEach((tr) => {
+            [...tr.children].forEach((td, i) => {
+              if (i === 0) return;
+              if (name !== "未定" && heads[i] !== name) return;
+              const cb = td.querySelector('input[type="checkbox"]');
+              if (cb && !cb.checked) cb.click();
+            });
+          });
+        });
+        grp.append(cnt, " 人分 ", sel, " ", bulk);
+        left.append(goal, grp);
+        heading.appendChild(left);
+        // 右：シフト作成（緑）／ヘルプ作成（赤）／シフト変更・削除（青）
+        const bar = document.createElement("div");
+        bar.id = "pm-month-tools";
+        const mkBtn = (label, cls, fn, deco) => {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = cls; b.textContent = label;
+          if (fn) b.addEventListener("click", fn);
+          if (deco) b.title = "デモ版では使用できません";
+          return b;
+        };
+        const openModal = () => month.querySelector(".ledger-create")?.click();
+        bar.append(mkBtn("シフト作成", "pm-green", openModal),
+          mkBtn("ヘルプ作成", "pm-red", null, true),
+          mkBtn("シフト変更・削除", "pm-blue", openModal));
+        heading.appendChild(bar);
+      }
+      // スタッフ選択肢を最新化
+      const sel = document.getElementById("pm-bulk-staff");
+      if (sel && window.__pmLocks) {
+        const names = ["未定", ...Object.keys(window.__pmLocks)];
+        if (sel.options.length !== names.length) {
+          sel.innerHTML = names.map((n) => `<option>${n}</option>`).join("");
+        }
+      }
+    }
+
+    // 表：本物と同じ「日次予算(目標)・目標コメント」列を追加し、日付表記を合わせる
+    const headRow = month.querySelector("thead tr");
+    if (headRow && !headRow.querySelector(".pm-goal-th")) {
+      const budget = document.createElement("th");
+      budget.className = "pm-goal-th"; budget.textContent = "日次予算(目標)";
+      const comment = document.createElement("th");
+      comment.className = "pm-goal-th"; comment.textContent = "目標コメント";
+      headRow.children[0].after(budget, comment);
+    }
+    month.querySelectorAll("tbody tr").forEach((tr) => {
+      if (!tr.querySelector(".pm-goal")) {
+        const budget = document.createElement("td");
+        budget.className = "pm-goal";
+        budget.innerHTML = '<input type="text" inputmode="numeric" value="0" title="日次予算（デモ）">';
+        const comment = document.createElement("td");
+        comment.className = "pm-goal";
+        comment.innerHTML = '<input type="text" title="目標コメント（デモ）">';
+        tr.children[0].after(budget, comment);
+      }
+      // 「9月26日（土）」→「09月26日 (土)」
+      const th = tr.querySelector("th");
+      if (th) {
+        for (const n of th.childNodes) {
+          if (n.nodeType !== 3) continue;
+          if (/^\d{1,2}$/.test(n.textContent)) n.textContent = n.textContent.padStart(2, "0");
+          else if (n.textContent === "日（") n.textContent = "日 (";
+          else if (n.textContent === "）") n.textContent = ")";
+        }
+      }
+    });
+
+    // セルの時間表記を本物と同じ「10:00-22:00」に
+    month.querySelectorAll("tbody label").forEach((l) => {
+      for (const n of l.childNodes) {
+        if (n.nodeType === 3 && n.textContent.includes("〜")) n.textContent = n.textContent.replace("〜", "-");
+      }
+    });
+
+    // 下部の操作列（目標保存・シフト作成・シフト出力）
+    if (!document.getElementById("pm-month-bottom")) {
+      const bar = document.createElement("div");
+      bar.id = "pm-month-bottom";
+      const mk = (label, cls, fn, deco) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = cls; b.textContent = label;
+        if (fn) b.addEventListener("click", fn);
+        if (deco) b.title = "デモ版では使用できません";
+        return b;
+      };
+      bar.append(
+        mk("目標保存", "pm-red", null, true),
+        mk("シフト作成", "pm-green", () => month.querySelector(".ledger-create")?.click()),
+        mk("シフト出力", "pm-orange", exportShiftsCsv),
+      );
+      month.appendChild(bar);
+    }
+
+    // 一括登録モーダル：タイトルを本物に合わせ、「削除」ボタンを追加
+    const modal = [...document.querySelectorAll(".ledger-modal")].find((m) => m.textContent.includes("シフト登録（"));
+    if (modal) {
+      const h2 = modal.querySelector("h2");
+      if (h2 && !h2.dataset.pmKeep) h2.insertAdjacentHTML("beforebegin",
+        '<div class="pm-modal-note"><b>シフト一括登録</b><span>選択したスタッフのシフトを一括登録します。</span></div>');
+      if (h2) h2.dataset.pmKeep = "1";
+      const actions = modal.querySelector(".ledger-form-actions");
+      if (actions && !actions.querySelector(".pm-bulk-del")) {
+        const del = document.createElement("button");
+        del.type = "button"; del.className = "pm-red pm-bulk-del"; del.textContent = "削除";
+        del.title = "選択した枠のシフトを削除します（休憩・業務も一緒に削除。予約が残る日は削除できません）";
+        del.addEventListener("click", async () => {
+          if (!window.confirm("選択した枠のシフトを削除しますか？")) return;
+          const cells = [...document.querySelectorAll('.ledger-month tbody input[type="checkbox"]:checked')]
+            .map((cb) => (cb.getAttribute("aria-label") || "").split(" "))
+            .filter((a) => a.length >= 2);
+          if (!cells.length) return;
+          try {
+            const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
+            const sched = await (await fetch("/api/demo/schedule?date=" + cells[0][0], { cache: "no-store" })).json();
+            const rev = {};
+            for (const d of sched.days) rev[d.date] = d.version;
+            const ids = {};
+            for (const st of sched.staff) ids[st.name] = st.id;
+            const payload = {
+              action: "bulkShift", remove: true, date: today, revision: 0,
+              cells: cells.map(([d, ...n]) => ({ date: d, staffId: ids[n.join(" ")], revision: rev[d] ?? 0 })),
+            };
+            const r = await fetch("/api/demo/schedule", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error);
+            [...modal.querySelectorAll("button")].find((b) => b.textContent === "閉じる")?.click();
+            // 選択を解除する（画面は数秒以内の自動再取得で最新になる）
+            document.querySelectorAll('.ledger-month tbody input:checked').forEach((cb) => cb.click());
+          } catch (e) {
+            alert(e.message === "scheduleConflict"
+              ? "お客様の予約が残っている日が含まれているため削除できませんでした。"
+              : "削除できませんでした。");
+          }
+        });
+        actions.insertBefore(del, actions.lastElementChild);
+      }
+    }
+  }
+
+  // 表示中の月のシフトをCSVでダウンロードする
+  async function exportShiftsCsv() {
+    const monthLabel = document.querySelector(".ledger-month-heading b")?.textContent || "";
+    const m = monthLabel.match(/(\d{4})年\s*(\d{1,2})月/);
+    if (!m) return;
+    const ym = `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+    const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
+    const from = ym === today.slice(0, 7) ? today : ym + "-01";
+    const sched = await (await fetch("/api/demo/schedule?date=" + from, { cache: "no-store" })).json();
+    const names = {};
+    for (const st of sched.staff) names[st.id] = st.name;
+    const hhmm = (ms, d) => {
+      const base = Date.parse(d + "T00:00:00+09:00");
+      const min = Math.round((ms - base) / 60000);
+      return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+    };
+    const rows = [["日付", "スタッフ", "開始", "終了"]];
+    for (const sh of sched.shifts.filter((x) => x.date.startsWith(ym)).sort((a, b) => a.date.localeCompare(b.date))) {
+      rows.push([sh.date, names[sh.staff_id] || sh.staff_id, hhmm(sh.start_at, sh.date), hhmm(sh.end_at, sh.date)]);
+    }
+    const csv = "﻿" + rows.map((r) => r.join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `shift_${ym}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   // 鍵（予約受付停止）状態の取得。3秒キャッシュで管理画面と予約サイトに追従する。
