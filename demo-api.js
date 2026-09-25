@@ -126,36 +126,7 @@ function ensureEvents(date) {
     if (brStart > sStart) {
       blocks.push({ id: "blk-" + date + "-" + sh.staff_id, staff_id: sh.staff_id, date, start_at: minToMs(date, brStart), end_at: minToMs(date, brStart + 60), kind: "break", note: "休憩" });
     }
-    // 予約を1〜3件、シフト内で順番に配置
-    let cursor = sStart + Math.floor(rand() * 4) * 30;
-    const count = 1 + Math.floor(rand() * 3);
-    for (let k = 0; k < count; k++) {
-      const courseId = COURSE_IDS[Math.floor(rand() * COURSE_IDS.length)];
-      const c = COURSES[courseId];
-      const start = cursor + Math.floor(rand() * 3) * 30;
-      const end = start + c.minutes;
-      if (end > sEnd) break;
-      if (start < brStart + 60 && end > brStart) { cursor = brStart + 60; k--; continue; }
-      const people = rand() < 0.85 ? 1 : 2;
-      const late = start >= 1320 ? 2000 * people : 0;
-      const id = "bk-" + date + "-" + sh.staff_id + "-" + k;
-      state.bookingSerial++;
-      bookings.push({
-        id, reference: "DM" + String(state.bookingSerial).padStart(6, "0"),
-        service_date: date, status: "confirmed",
-        start_at: minToMs(date, start), end_at: minToMs(date, end),
-        people, course: courseId, course_name: c.name,
-        name: "", // 架空の人名は表示しない
-        email: "demo@example.com", phone: "090-0000-0000",
-        comment: rand() < 0.3 ? "強めの圧を希望します。" : "",
-        total: c.price * people + late, base_price: c.price,
-        nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
-        staff: "none", customer_token: null,
-      });
-      state.bookingIndex.set(id, date);
-      assignments.push({ booking_id: id, staff_id: sh.staff_id });
-      cursor = end + 15;
-    }
+    // 架空のお客様の予約は自動生成しない（実際に入れた予約だけが台帳に載る）
   }
   const ev = { bookings, blocks, assignments };
   state.events.set(date, ev);
