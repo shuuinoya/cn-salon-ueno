@@ -100,7 +100,17 @@ const server = http.createServer((req, res) => {
 
   // ページ（ページ移動時の裏側の通信 _rsc にも同じHTMLを返し、通常のページ読み込みにする）
   const r = routes[routeKey(url)] || routes[url.pathname];
-  if (!r || !r.file) return send404(res, head);
+  if (!r || !r.file) {
+    // チャットやメモのリンクをクリックすると、URLの直後の全角文字まで
+    // リンクに含まれてしまうことがある（例: /admin（管理画面））。
+    // 末尾の非ASCII文字を取り除いた先が存在する場合はそちらへ転送する。
+    const stripped = pathname.replace(/[^\x21-\x7e].*$/s, "") || "/";
+    if (stripped !== pathname && (routes[stripped] || stripped === "/")) {
+      res.writeHead(302, { Location: encodeURI(stripped) + url.search });
+      return res.end();
+    }
+    return send404(res, head);
+  }
   sendFile(res, path.join(ROOT, r.file), r.status, r.contentType, head, url);
 });
 

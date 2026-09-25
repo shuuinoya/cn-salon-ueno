@@ -307,7 +307,7 @@
   "__404__": {
     "status": 404,
     "contentType": "text/html; charset=utf-8",
-    "file": "pages/404.html"
+    "file": "pages/not-found.html"
   },
   "/demo/admin": {
     "status": 200,
