@@ -33,6 +33,11 @@ firstscript = html.index('<script', bstart)
 placeholder = '<div id="demo-admin-loading" style="padding:2rem;font-family:sans-serif;color:#6b7280">予約台帳（操作デモ）を読み込んでいます…</div>'
 html = html[:bstart] + placeholder + html[firstscript:]
 
+# 7) 本物の管理システムのレイアウトに合わせる上書きCSSと補完スクリプトを読み込む
+html = html.replace("</head>",
+                    '<link rel="stylesheet" href="/pm-layout.css"/>'
+                    '<script src="/pm-layout.js" defer=""></script></head>')
+
 out = os.path.join(base, "pages", "demo-admin.html")
 open(out, "w").write(html)
 print("生成:", out, len(html), "bytes")

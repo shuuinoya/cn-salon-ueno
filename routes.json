@@ -318,5 +318,15 @@
     "status": 200,
     "contentType": "text/html; charset=utf-8",
     "file": "pages/demo-admin.html"
+  },
+  "/admin-original": {
+    "status": 200,
+    "contentType": "text/html; charset=utf-8",
+    "file": "pages/admin.html"
+  },
+  "/admin/login": {
+    "status": 200,
+    "contentType": "text/html; charset=utf-8",
+    "file": "pages/pm-login.html"
   }
 }

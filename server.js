@@ -34,11 +34,27 @@ function routeKey(url) {
   return url.pathname;
 }
 
-function sendFile(res, file, status, type, head) {
+function sendFile(res, file, status, type, head, url) {
   fs.readFile(file, (err, data) => {
     if (err) return send404(res, head);
+    let body = data;
+    // 保存HTMLにはルーターの初期URL（searchParams）が保存時の値のまま埋め込まれている。
+    // 実際のリクエストのクエリパラメータを注入しないと、確認・完了ページなどが
+    // 「メニューを選択してください」表示になってしまうため、配信時に置き換える。
+    if (url && type.startsWith("text/html")) {
+      const nav = JSON.stringify({
+        pathname: url.pathname,
+        searchParams: [...url.searchParams.entries()],
+      });
+      body = Buffer.from(
+        data.toString("utf8").replace(
+          /nav:\{"pathname":"[^"]*","searchParams":\[(?:\[[^\]]*\],?)*\]\}/,
+          "nav:" + nav
+        )
+      );
+    }
     res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-cache" });
-    res.end(head ? undefined : data);
+    res.end(head ? undefined : body);
   });
 }
 
@@ -85,7 +101,7 @@ const server = http.createServer((req, res) => {
   // ページ（ページ移動時の裏側の通信 _rsc にも同じHTMLを返し、通常のページ読み込みにする）
   const r = routes[routeKey(url)] || routes[url.pathname];
   if (!r || !r.file) return send404(res, head);
-  sendFile(res, path.join(ROOT, r.file), r.status, r.contentType, head);
+  sendFile(res, path.join(ROOT, r.file), r.status, r.contentType, head, url);
 });
 
 // ほかのサイト（localhost:3000 など）と混ざらないよう、専用の番号で起動する

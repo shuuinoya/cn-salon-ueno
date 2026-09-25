@@ -1,0 +1,419 @@
+/* 本物の管理システム（Peak Manager）のレイアウトに合わせるための上書きスタイル。
+   保存された AdminSchedule.B6xQvMXS.css は無加工のまま、この後から読み込んで上書きする。 */
+
+/* ---- スタッフ欄：名前の右に 🔓 ★0 を表示（施術分数の代わり） ---- */
+.ledger-row > .ledger-staff-cell {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+.ledger-row > .ledger-staff-cell small { display: none; }
+.ledger-row > .ledger-staff-cell::after {
+  content: attr(data-pmstar);
+  color: #8d8d8d;
+  font-size: 11px;
+  white-space: nowrap;
+  padding-left: 16px;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%23909090" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-.8"/></svg>') left center no-repeat;
+}
+/* 鍵が閉じているスタッフ */
+.ledger-row > .ledger-staff-cell[data-pmlock="1"]::after {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%23555555" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
+}
+/* シフト内は本物と同じく白スロット（保存CSSの標準は青のため上書き） */
+main.ledger-app .ledger-onshift { background: #fff !important; }
+/* 青いスロットの行（契約形態違いの表現）はこの2行だけ */
+main.ledger-app .pm-blue .ledger-onshift { background: #e2eefc !important; }
+
+/* 行の高さを本物に合わせて広げる */
+main.ledger-app .ledger-row { height: 56px; }
+main.ledger-app .ledger-track { min-height: 56px; }
+/* 強調（ピンク）の行 */
+main.ledger-app .pm-pink > .ledger-staff-cell {
+  background: #fdeaea !important;
+  box-shadow: inset 3px 0 0 #e9625b;
+}
+
+/* ---- ツールバー：日付ボックス・天気ボタン・店舗名ボックス ---- */
+.ledger-date-trigger {
+  background: #fff;
+  border: 1px solid #c6b9ad;
+  min-width: 150px;
+  justify-content: space-between;
+}
+.pm-weather {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pm-cloud {
+  display: inline-block;
+  width: 26px;
+  height: 20px;
+  vertical-align: middle;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 20"><path fill="%23808b96" d="M20 18H7a5 5 0 0 1-1-9.9A7 7 0 0 1 19.6 9 4.5 4.5 0 0 1 20 18Z"/><path fill="%23aab4bd" d="M9 12a3.4 3.4 0 0 0-3.3 2.6A3 3 0 0 0 6 20h0-1a4 4 0 0 1-.6-7.9A5 5 0 0 1 9 12Z"/></svg>') center / contain no-repeat;
+}
+
+/* ---- モード選択の見た目を本物に合わせる（全体・シフトを選択状態に） ---- */
+main.ledger-app .ledger-mode-group:first-of-type button:first-child {
+  background: #fff !important;
+  color: #292929 !important;
+}
+main.ledger-app .ledger-mode-group:first-of-type button:nth-child(2) {
+  background: #4d4d4d !important;
+  border-color: #4d4d4d !important;
+  color: #fff !important;
+}
+main.ledger-app .ledger-mode-group:nth-of-type(2) button:first-child {
+  background: #4d4d4d !important;
+  border-color: #4d4d4d !important;
+  color: #fff !important;
+}
+.ledger-store-name {
+  background: #fff;
+  border: 1px solid #c6b9ad;
+  border-radius: 2px;
+  padding: 4px 22px 4px 10px;
+  position: relative;
+  color: #292929;
+}
+.ledger-store-name::after {
+  content: "▾";
+  position: absolute;
+  right: 7px;
+  color: #8d8d8d;
+}
+
+/* ---- ヘッダー右：警告バッジ＋ユーザー表示 ---- */
+.pm-alert {
+  background: #e6b05f;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  border-radius: 3px;
+  padding: 2px 10px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.pm-alert + .ledger-brand { margin-left: 10px; }
+.ledger-brand::before { content: "👤 "; font-size: 12px; }
+.ledger-brand::after { content: " ▾"; font-size: 10px; }
+.ledger-brand { cursor: pointer; user-select: none; }
+
+/* ユーザーメニュー（ログアウト） */
+#pm-usermenu {
+  position: fixed;
+  z-index: 300;
+  background: #fff;
+  border: 1px solid #b58e66;
+  min-width: 190px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+}
+#pm-usermenu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font-size: 15px;
+  padding: 12px 16px;
+  cursor: pointer;
+  color: #292929;
+}
+#pm-usermenu button:hover { background: #f5ede5; }
+
+/* ---- 予約詳細パネル（本物と同じ構成） ---- */
+main.ledger-app .ledger-side.pm-side {
+  width: 480px;
+  border: 2px solid #987050;
+  border-radius: 3px;
+  margin: 6px 0 6px 6px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+.pm-side .ledger-side-search { order: 6; }
+.pm-side:has(#pm-pd) .ledger-side-search { display: none; }
+.pm-side .ledger-side-form { order: 9; }
+.pm-side .ledger-booking-list { order: 7; }
+#pm-pd { order: 3; padding: 0; }
+/* 予約詳細のときはReactのフォームは隠し、「編集」で表示する */
+.ledger-side-form.pm-booking > h2,
+.ledger-side-form.pm-booking > label,
+.ledger-side-form.pm-booking > p,
+.ledger-side-form.pm-booking .ledger-booking-detail,
+.ledger-side-form.pm-booking .ledger-form-actions { display: none; }
+.ledger-side-form.pm-booking.pm-editing > label,
+.ledger-side-form.pm-booking.pm-editing > p:first-of-type,
+.ledger-side-form.pm-booking.pm-editing .ledger-form-actions { display: flex; }
+.ledger-side-form.pm-booking.pm-editing {
+  border-top: 1px dashed #c6b9ad;
+  padding-top: 10px;
+}
+
+.pm-shoprow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #987050;
+  color: #fff;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+.pm-shoprow label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.pm-cust { padding: 10px 12px 6px; border-bottom: 1px solid #e5d9cd; }
+.pm-cust-rank { font-size: 13px; line-height: 1.7; }
+.pm-cust-name {
+  font-size: 19px;
+  font-weight: 700;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pm-gender { color: #e9625b; font-size: 17px; }
+.pm-count { margin-left: auto; font-size: 15px; }
+.pm-icons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 12px;
+}
+.pm-icons button {
+  width: 52px;
+  height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 2px solid #f05b23;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.pm-icons small { font-size: 10px; color: #f05b23; font-weight: 700; white-space: nowrap; letter-spacing: -1px; }
+.pm-icons b { font-size: 19px; color: #f05b23; font-weight: 400; }
+.pm-idbox {
+  margin: 4px 10px 10px;
+  border: 2px solid #987050;
+  border-radius: 3px;
+  padding: 10px;
+}
+.pm-idrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.pm-idbtns { display: flex; gap: 8px; }
+main.ledger-app .pm-red, .pm-red {
+  background: #e9625b !important;
+  color: #fff !important;
+  font-weight: 700;
+  border: none !important;
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+main.ledger-app .pm-red:hover, .pm-red:hover { background: #d45953 !important; }
+main.ledger-app .pm-x, .pm-x {
+  background: #fff !important;
+  border: 1px solid #555 !important;
+  color: #292929 !important;
+  border-radius: 4px;
+  font-weight: 700;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.pm-tabrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 10px 0 8px;
+  border-bottom: 1px solid #c6b9ad;
+  padding-bottom: 0;
+}
+.pm-tab {
+  border: 1px solid #c6b9ad;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: #fff;
+  min-width: 110px;
+  min-height: 24px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.pm-plus {
+  border: 1px solid #c6b9ad;
+  background: #fff;
+  border-radius: 4px;
+  padding: 3px 9px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.pm-btnrow { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.pm-btnrow > span { flex: 1; }
+.pm-btnrow.pm-right { justify-content: flex-end; }
+main.ledger-app .pm-outline, .pm-outline {
+  border: 2px solid #e9625b !important;
+  color: #e9625b !important;
+  background: #fff !important;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.pm-mini { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.pm-mini::before { content: ""; }
+.pm-btnrow input[type="text"] { flex: 1; }
+.pm-dtrow { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; font-size: 14px; }
+.pm-cap {
+  background: #f4eeea;
+  padding: 3px 14px;
+  font-size: 13px;
+}
+.pm-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.pm-chip {
+  border: 1px solid #c6b9ad;
+  border-radius: 4px 4px 0 0;
+  background: #fff;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.pm-table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+.pm-table th {
+  background: #f4eeea;
+  font-weight: 400;
+  font-size: 13px;
+  text-align: left;
+  padding: 5px 10px;
+  width: 8.5em;
+  border-bottom: 4px solid #fff;
+}
+.pm-table td { font-size: 14px; font-weight: 700; padding: 4px 8px; }
+.pm-star { color: #e9625b; }
+
+/* スタッフ名セル左端の色バー（女性=ピンク／男性=ブルー） */
+main.ledger-app .pm-acc-f > .ledger-staff-cell { border-left: 4px solid #f0a1ab; }
+main.ledger-app .pm-acc-m > .ledger-staff-cell { border-left: 4px solid #a6c3de; }
+
+/* 時間別概況の現在時刻の列 */
+main.ledger-app .ledger-overview button.pm-now { background: #e0e0e0; }
+
+/* ---- 下部集計（赤・黒・青の3段） ---- */
+.ledger-summary > b,
+.ledger-summary > span { display: none; }
+#pm-stats { width: 100%; font-size: 14px; line-height: 2; }
+.pm-stat-black { color: #292929; font-weight: 700; }
+.pm-stat-blue { color: #3874cb; font-weight: 700; }
+
+/* 青い「オンライン予約が入りました」トースト */
+#pm-toast {
+  position: fixed;
+  right: 14px;
+  bottom: 84px;
+  z-index: 250;
+  background: #70b5de;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 12px 18px;
+  border-radius: 3px;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+
+/* ---- モード行の案内文：点線の枠エリアに ---- */
+.ledger-modes > span {
+  flex: 1;
+  text-align: center;
+  background: #fff;
+  border: 1.5px dashed #c6b9ad;
+  border-radius: 3px;
+  padding: 7px 10px;
+  color: #8a8178;
+}
+
+/* ---- 台帳イベントの配色（紫＝通常、赤＝指名系、茶＝休憩・業務） ----
+   保存済みCSSがこのファイルより後に読み込まれるため、セレクタの優先度を上げておく */
+main.ledger-app .ledger-event.purple {
+  background: #babafa !important;
+  border-color: #a9a9ea !important;
+  color: #333 !important;
+}
+main.ledger-app .ledger-event.lime {
+  background: #f1756a !important;
+  border-color: #e45949 !important;
+  color: #fff !important;
+}
+main.ledger-app .ledger-event.lime small,
+main.ledger-app .ledger-event.lime span { color: #ffecea !important; }
+main.ledger-app .ledger-event.activity {
+  background: #ae9d97 !important;
+  border-color: #918078 !important;
+  color: #333 !important;
+}
+
+/* 予約ピルのタグチップ（新／指名／未）を本物風に */
+main.ledger-app .ledger-event.purple strong::before {
+  content: "新";
+  display: inline-block;
+  background: #e6a35f;
+  color: #fff;
+  font-weight: 400;
+  font-size: 9px;
+  line-height: 1.3;
+  padding: 0 3px;
+  border-radius: 2px;
+  margin-right: 3px;
+  vertical-align: 1px;
+}
+main.ledger-app .ledger-event.lime strong::before {
+  content: "指名";
+  display: inline-block;
+  background: #d96766;
+  color: #fff;
+  font-weight: 400;
+  font-size: 9px;
+  line-height: 1.3;
+  padding: 0 3px;
+  border-radius: 2px;
+  margin-right: 3px;
+  vertical-align: 1px;
+}
+main.ledger-app .ledger-event.purple::after,
+main.ledger-app .ledger-event.lime::after {
+  content: "未";
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  background: #757575;
+  color: #fff;
+  font-size: 9px;
+  line-height: 1.3;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* ---- 下部：装飾ボタンと目標・総販売額 ---- */
+.pm-deco { color: #292929; }
+.pm-target {
+  color: #c23f38;
+  font-weight: 700;
+  padding: 2px 2px 6px;
+  font-size: 13px;
+}
+
+/* ---- 未定行 ---- */
+.pm-undecided .ledger-track { background: #cbcbcb; }
+
+/* ---- レスポンシブ（スマホ幅） ---- */
+@media (max-width: 700px) {
+  main.ledger-app .ledger-side.pm-side { width: calc(100vw - 76px); }
+  .pm-icons { flex-wrap: wrap; justify-content: flex-start; }
+}
