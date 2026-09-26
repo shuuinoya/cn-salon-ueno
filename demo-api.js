@@ -1131,6 +1131,16 @@ function getAvailability(q) {
   return { staff: nominatableStaff(courseId, gpref), days };
 }
 
+// 同じメールアドレスの予約が既にあれば「リピート」扱いにする
+function isRepeatEmail(email) {
+  if (!email) return false;
+  const e = email.toLowerCase();
+  for (const ev of state.events.values()) {
+    if (ev.bookings.some((b) => (b.email || "").toLowerCase() === e)) return true;
+  }
+  return false;
+}
+
 function createPublicBooking(body) {
   const course = getCourse(body.course);
   const date = body.date;
@@ -1185,6 +1195,14 @@ function createPublicBooking(body) {
     nomination_fee: fee, nominated_staff_id: nominated ? nominated.id : null,
     nominated_staff_name: nominated ? nominated.name : null,
     staff: pref, customer_token: token, language: String(body.language || "ja"),
+    // 管理画面の表示用（作成日時・ブース・お客様性別・新規/リピート判定）
+    created_label: (() => {
+      const n = new Date(Date.now() + 9 * 3600e3);
+      return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " WEB";
+    })(),
+    booth: "新規1(" + ((state.bookingSerial % 9) + 1) + ")",
+    customer_gender: gpref === "female" ? "f" : gpref === "male" ? "m" : "",
+    is_new: isRepeatEmail(String(body.email)) ? 0 : 1,
   });
   // 複数名の予約は、対応可能で空いているスタッフを人数分確保する（空き判定と同じ条件）
   const coAssignees = free.filter((sid) => sid !== assignee).slice(0, people - 1);
@@ -1369,6 +1387,7 @@ function handleDemoApi(req, res, url) {
         const bk = ev2.bookings.find((x) => x.id === b.id);
         if (!bk || !bk.customer_token || bk.customer_token !== token) throw err(404, "notFound");
         if (bk.status !== "confirmed") throw err(409, "alreadyCancelled");
+        if (bk.start_at <= Date.now()) throw err(409, "tooLate"); // 開始後は店舗にお電話で
         bk.status = "cancelled";
         ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
         queueCancelMails(bk);

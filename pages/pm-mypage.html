@@ -203,7 +203,7 @@
       '<span class="when">' + t.date(row.bk.serviceDate, hm(row.bk.start)) + "</span></div>" +
       '<div class="rowline"><span class="k">' + t.menu + "</span><span>" + esc(row.bk.courseName) + "</span></div>" +
       '<div class="rowline"><span class="k">' + t.total + "</span><span>" + t.yen(row.bk.total) + "</span></div>" +
-      (withButtons && !cancelled
+      (withButtons && !cancelled && row.bk.start > Date.now()
         ? '<div class="btnrow"><button type="button" class="cancel" data-cancel="' + esc(row.entry.id) + '">' + t.cancelBtn + "</button></div>"
         : "") +
       "</div>";
