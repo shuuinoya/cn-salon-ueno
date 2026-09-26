@@ -258,14 +258,25 @@
     }
 
     // 3c6) 空き枠はシングルタップでも選択できるようにする（本物と同じ操作感）
+    //      タップした枠は本物と同じく赤いランプで点灯させる（左パネルを閉じると消える）
     if (!window.__pmTrackTap) {
       window.__pmTrackTap = 1;
       document.addEventListener("click", (e) => {
         const track = e.target.closest(".ledger-track");
         if (!track || e.target !== track || e.detail > 1) return;
-        track.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: e.clientX, clientY: e.clientY }));
+        // タップ位置を30分枠に切り下げ（グリッドは10:00〜翌3:00の1020分）、
+        // フォームの開始時間も枠の先頭になるよう、枠先頭の座標でダブルクリックを合成する
+        const r = track.getBoundingClientRect();
+        const frac = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 0.999);
+        const minute = 600 + Math.floor((frac * 1020) / 30) * 30;
+        const snapX = r.left + (((minute - 600) / 1020) * r.width) + 1;
+        track.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: snapX, clientY: e.clientY }));
+        const name = track.closest(".ledger-row")?.querySelector(".ledger-staff-cell b")?.textContent || "";
+        window.__pmTapMark = { name, minute, t: Date.now() };
+        applyTapMark();
       });
     }
+    applyTapMark();
 
     // 3c7-0) リロードが押せる状態のときも、押したら左パネルを閉じる
     if (!window.__pmRefreshClose2) {
@@ -497,6 +508,32 @@
 
   // 予約詳細パネルを本物（PeakManager）と同じ構成に見せる。
   // Reactが管理するフォームは隠しておき、「編集」を押したときだけ表示する。
+  // タップした空き枠の赤いランプ。Reactの再描画で消えても ensure() が点け直し、
+  // 左パネルが閉じられたら消灯する。
+  function applyTapMark() {
+    const mk = window.__pmTapMark;
+    const sideOpen = !!document.querySelector(".ledger-side .ledger-side-form");
+    // パネルが閉じられたら消す（開き終わるまでの猶予1.5秒は残す）
+    if (!mk || (!sideOpen && Date.now() - mk.t > 1500)) {
+      window.__pmTapMark = null;
+      document.querySelectorAll(".pm-tap-mark").forEach((el) => el.remove());
+      return;
+    }
+    const row = [...document.querySelectorAll(".ledger-row")]
+      .find((rw) => rw.querySelector(".ledger-staff-cell b")?.textContent === mk.name);
+    const track = row?.querySelector(".ledger-track");
+    if (!track) return;
+    let el = track.querySelector(":scope > .pm-tap-mark");
+    document.querySelectorAll(".pm-tap-mark").forEach((x) => { if (x !== el) x.remove(); });
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "pm-tap-mark";
+      track.appendChild(el);
+    }
+    el.style.left = (((mk.minute - 600) / 1020) * 100) + "%";
+    el.style.width = ((30 / 1020) * 100) + "%";
+  }
+
   function decoratePanel() {
     const side = document.querySelector(".ledger-side");
     const form = document.querySelector(".ledger-side-form");

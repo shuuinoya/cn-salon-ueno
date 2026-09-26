@@ -27,10 +27,12 @@ const OLD_BRAND = "UENO CN health＆beauty salon";
 const BOOKING_BRAND = "CN Ueno health & beauty";
 const ADMIN_BRAND = "CNsalon@board";
 function brandFor(file, url) {
-  const isAdmin = url
-    ? url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname === "/demo/admin"
-    : /AdminSchedule/.test(file);
-  return isAdmin ? ADMIN_BRAND : BOOKING_BRAND;
+  // 管理画面のページタイトルだけ管理システム名（CNsalon@board）。
+  // JSチャンク内の同名文字列は「店舗名」の定数（店舗セレクト等）なので、
+  // 管理画面でも店舗名（CN Ueno health & beauty）のままにする。
+  const isAdminPage = url &&
+    (url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname === "/demo/admin");
+  return isAdminPage ? ADMIN_BRAND : BOOKING_BRAND;
 }
 
 // 覚えやすい入口URL（どちらも本来のページへ転送する）

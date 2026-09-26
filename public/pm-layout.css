@@ -95,6 +95,16 @@ main.ledger-app .ledger-mode-group:nth-of-type(2) button:first-child {
   color: #8d8d8d;
 }
 
+/* ---- タップした空き枠の赤いランプ ---- */
+main.ledger-app .ledger-track .pm-tap-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  background: #e8514d;
+  pointer-events: none;
+}
+
 /* ---- ヘッダー左：白い花びらロゴ（SVG） ---- */
 main.ledger-app .ledger-logo {
   display: flex;
