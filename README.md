@@ -4,12 +4,14 @@
 | サイト | 名前 | URL |
 |---|---|---|
 | お客様の予約サイト | CN Ueno health & beauty | **http://cn-ueno-health-and-beauty.localhost/** |
-| 店舗用の管理画面 | CNsalon@board | **http://cnsalon-board.localhost/** |
+| 店舗用の管理画面 | CNsalon@board | **http://cnsalon-board.localhost/** ※ログイン必須 |
 
 どちらも**数字のない、サイト名だけのURL**です。開いた後もアドレスバーに名前が残ります（転送されません）。
 Chrome・Edge・Firefoxでそのまま開けます。もし開けないブラウザの場合は、番号つきの
 http://127.0.0.1:5520/cn-ueno-health-and-beauty ／ http://127.0.0.1:5520/CNsalon@board も使えます。
 ※数字なしURL用にポート80でも待ち受けますが、**接続元がこのパソコン以外なら即拒否**するため、外部には公開されません。
+
+管理画面は**ID・パスワードでのログインが必須**です（店舗管理者が設定済み。変更する場合は `demo-api.js` の `ADMIN_ID`／`ADMIN_PASS`）。未ログインで管理ページを開くとログイン画面に戻され、誤入力はエラー表示、ログアウトで再び施錠されます。予約サイト・マイページ・お客様用APIには影響しません。
 
 サイト名は配信時に付け替えています（保存ファイル自体は無加工のまま）。予約サイトの画面・確認メールの件名は「CN Ueno health & beauty」、管理画面のログイン・各ページのタイトルは「CNsalon@board」で表示されます。
 

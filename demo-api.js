@@ -8,6 +8,23 @@ const path = require("path");
 const net = require("net");
 const tls = require("tls");
 
+// ---- 管理画面ログイン -----------------------------------------------------
+const ADMIN_ID = "kudaka1228";
+const ADMIN_PASS = "cnsalon2026";
+const adminSessions = new Set(); // 有効なセッショントークン（メモリ上のみ）
+
+function sessionTokenOf(req) {
+  const m = /(?:^|;\s*)pm_session=([a-f0-9]+)/.exec(req.headers.cookie || "");
+  return m ? m[1] : "";
+}
+function isAdminSession(req) {
+  return adminSessions.has(sessionTokenOf(req));
+}
+function clearSession(req, res) {
+  adminSessions.delete(sessionTokenOf(req));
+  res.setHeader("Set-Cookie", "pm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+}
+
 // ---- 実送信の設定（任意） -------------------------------------------------
 // プロジェクト直下に mail-config.json（mail-config.example.json 参照）を置くと、
 // allowTo に書いた宛先にだけ、SMTP（例：Gmailのアプリパスワード）で実際に送信する。
@@ -1320,6 +1337,34 @@ function reportStats(date) {
 
 // server.js から呼ばれる入口。処理した場合は true を返す。
 function handleDemoApi(req, res, url) {
+  if (url.pathname === "/api/demo/login" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+    req.on("end", () => {
+      let b = {};
+      try { b = JSON.parse(raw || "{}"); } catch {}
+      if (String(b.user || "") === ADMIN_ID && String(b.pass || "") === ADMIN_PASS) {
+        const token = Array.from({ length: 4 }, () => Math.random().toString(16).slice(2)).join("");
+        adminSessions.add(token);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Set-Cookie": `pm_session=${token}; Path=/; HttpOnly; SameSite=Lax`,
+        });
+        res.end(JSON.stringify({ ok: true }));
+      } else {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalidLogin" }));
+      }
+    });
+    return true;
+  }
+  if (url.pathname === "/api/demo/logout") {
+    clearSession(req, res);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
+  }
+
   if (url.pathname === "/api/demo/staff-photo") {
     const dataUrl = state.photos.get(url.searchParams.get("id") || "");
     if (!dataUrl) {
@@ -1666,4 +1711,4 @@ function handleDemoApi(req, res, url) {
   return true;
 }
 
-module.exports = { handleDemoApi };
+module.exports = { handleDemoApi, isAdminSession, clearSession };

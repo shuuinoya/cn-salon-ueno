@@ -5,7 +5,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const { handleDemoApi } = require("./demo-api");
+const { handleDemoApi, isAdminSession, clearSession } = require("./demo-api");
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
@@ -122,11 +122,6 @@ const handler = (req, res) => {
     return res.end("Forbidden");
   }
 
-  // 名前ホスト（数字なしURL）のトップは、それぞれの入口ページを表示する
-  const hostName = (req.headers.host || "").toLowerCase().replace(/:\d+$/, "");
-  if (NAME_HOSTS[hostName] && url.pathname === "/") {
-    url.pathname = NAME_HOSTS[hostName];
-  }
 
   // Hostヘッダ検証：外部ドメイン名経由でローカルサーバーへ到達させる攻撃を遮断
   if (!LOCAL_HOST_RE.test(req.headers.host || "")) {
@@ -143,6 +138,25 @@ const handler = (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
+  // 名前ホスト（数字なしURL）のトップは、それぞれの入口ページを表示する
+  const hostName = (req.headers.host || "").toLowerCase().replace(/:\d+$/, "");
+  if (NAME_HOSTS[hostName] && url.pathname === "/") {
+    url.pathname = NAME_HOSTS[hostName];
+  }
+
+  // 管理画面はログイン必須（ID・パスワードはログイン画面から）
+  const isAdminPage = url.pathname === "/admin" || url.pathname === "/demo/admin" ||
+    url.pathname === "/admin-original" ||
+    (url.pathname.startsWith("/admin/") && url.pathname !== "/admin/login");
+  if (isAdminPage && !isAdminSession(req)) {
+    res.writeHead(302, { Location: "/admin/login" });
+    return res.end();
+  }
+  // ログアウト経由でログイン画面に来たらセッションを破棄する
+  if (url.pathname === "/admin/login" && url.searchParams.get("out") === "1") {
+    clearSession(req, res);
+  }
+
 
   // 管理画面（操作デモ）用のAPIは、メモリ上の架空データで再現しています
   if (handleDemoApi(req, res, url)) return;

@@ -107,7 +107,7 @@
 </style>
 </head>
 <body>
-  <form class="login-card" onsubmit="location.href='/admin'; return false;">
+  <form class="login-card" id="login-form">
     <div class="login-logo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#987050" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/></svg>
       <b>CNsalon@board</b>
@@ -117,6 +117,7 @@
     <label for="pm-pass">パスワード</label>
     <input id="pm-pass" name="password" type="password" autocomplete="current-password"/>
     <p class="logout-msg" id="logout-msg">ログアウトしました。</p>
+    <p class="logout-msg" id="login-error">IDまたはパスワードが違います。</p>
     <button class="login-btn" type="submit">ログイン</button>
   </form>
 
@@ -136,6 +137,22 @@
     if (new URLSearchParams(location.search).get("out") === "1") {
       document.getElementById("logout-msg").classList.add("show");
     }
+    // ログイン（ID・パスワードが一致したときだけ管理画面が開く）
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const user = document.getElementById("pm-user").value.trim();
+      const pass = document.getElementById("pm-pass").value;
+      try {
+        const r = await fetch("/api/demo/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user, pass }),
+        });
+        if (r.ok) { location.href = "/admin"; return; }
+      } catch {}
+      document.getElementById("logout-msg").classList.remove("show");
+      document.getElementById("login-error").classList.add("show");
+    });
   </script>
 </body>
 </html>

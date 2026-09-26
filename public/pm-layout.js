@@ -96,7 +96,9 @@
           const item = document.createElement("button");
           item.type = "button";
           item.textContent = "ログアウト";
-          item.addEventListener("click", () => { location.href = "/admin/login?out=1"; });
+          item.addEventListener("click", () => {
+            fetch("/api/demo/logout", { method: "POST" }).finally(() => { location.href = "/admin/login?out=1"; });
+          });
           menu.appendChild(item);
           document.body.appendChild(menu);
           const r = brand.getBoundingClientRect();
