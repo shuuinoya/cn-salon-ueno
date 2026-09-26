@@ -1,0 +1,11 @@
+{
+  "_説明": "このファイルを『mail-config.json』という名前でコピーして値を入れると、allowToに書いた宛先にだけメールが実際に送信されます。ファイルが無い間は、これまでどおりメール管理画面での確認のみ（外部送信なし）です。",
+  "_Gmailの場合": "Googleアカウント→セキュリティ→2段階認証を有効化→『アプリ パスワード』で16桁を発行し、passに入れてください（通常のログインパスワードは使えません）",
+  "enabled": true,
+  "host": "smtp.gmail.com",
+  "port": 465,
+  "user": "kudaka.1228@gmail.com",
+  "pass": "ここにアプリパスワード16桁",
+  "from": "kudaka.1228@gmail.com",
+  "allowTo": ["kudaka.1228@gmail.com"]
+}

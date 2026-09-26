@@ -3,6 +3,127 @@
 // サーバーを再起動するとデータは初期状態に戻ります。
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
+const net = require("net");
+const tls = require("tls");
+
+// ---- 実送信の設定（任意） -------------------------------------------------
+// プロジェクト直下に mail-config.json（mail-config.example.json 参照）を置くと、
+// allowTo に書いた宛先にだけ、SMTP（例：Gmailのアプリパスワード）で実際に送信する。
+// それ以外の宛先は従来どおりデモ内シミュレーションのみ（外部に出ない）。
+function loadMailConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(__dirname, "mail-config.json"), "utf8"));
+    if (c && c.enabled && c.host && c.user && Array.isArray(c.allowTo)) return c;
+  } catch {}
+  return null;
+}
+const realSendAllowed = (to) => {
+  const c = loadMailConfig();
+  return c && c.allowTo.includes(to) ? c : null;
+};
+
+// 最小限のSMTPクライアント（依存パッケージなし）。
+// port 465=SSL／587=STARTTLS／secure:"none"はローカル検証用の平文。
+function smtpSend(cfg, mail, done) {
+  const CRLF = "\r\n";
+  const b64 = (t) => Buffer.from(t, "utf8").toString("base64");
+  const enc = (t) => "=?UTF-8?B?" + b64(t) + "?=";
+  const wrap = (t) => t.replace(/(.{76})/g, "$1" + CRLF);
+  const from = cfg.from || cfg.user;
+  const boundary = "cnb-" + Math.random().toString(16).slice(2);
+  const data = [
+    `From: ${enc("Ueno spa&massage CN Health & Beauty SALON")} <${from}>`,
+    `To: <${mail.to}>`,
+    `Subject: ${enc(mail.subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${Date.now()}.${Math.random().toString(16).slice(2)}@cn-salon-demo>`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrap(b64(mail.body)),
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrap(b64(mail.html || mail.body)),
+    `--${boundary}--`,
+    "",
+  ].join(CRLF).replace(/\n\./g, "\n..");
+
+  let finished = false;
+  const finish = (err) => { if (!finished) { finished = true; try { sock.destroy(); } catch {} done(err || null); } };
+  const timer = setTimeout(() => finish(new Error("送信がタイムアウトしました")), 20000);
+
+  let sock;
+  let buf = "";
+  let steps;
+  const send = (line) => sock.write(line + CRLF);
+  const onReply = (code, text) => {
+    const step = steps.shift();
+    if (!step) return;
+    if (!step.ok.includes(code)) { clearTimeout(timer); return finish(new Error(`SMTP ${code} ${text.trim().slice(0, 120)}`)); }
+    if (step.run) step.run();
+    if (!steps.length) { clearTimeout(timer); finish(null); }
+  };
+  const feed = (chunk) => {
+    buf += chunk.toString("utf8");
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i + 1);
+      buf = buf.slice(i + 1);
+      // 250-xxx のような継続行は読み飛ばし、最終行（250 xxx）で応答とみなす
+      if (/^\d{3}-/.test(line)) continue;
+      const code = Number(line.slice(0, 3));
+      if (code) onReply(code, line.slice(3));
+    }
+  };
+  const baseSteps = () => [
+    { ok: [250], run: () => send("AUTH LOGIN") },
+    { ok: [334], run: () => send(b64(cfg.user)) },
+    { ok: [334], run: () => send(b64(cfg.pass || "")) },
+    { ok: [235], run: () => send(`MAIL FROM:<${from}>`) },
+    { ok: [250], run: () => send(`RCPT TO:<${mail.to}>`) },
+    { ok: [250, 251], run: () => send("DATA") },
+    { ok: [354], run: () => sock.write(data + "." + CRLF) },
+    { ok: [250], run: () => send("QUIT") },
+    { ok: [221] },
+  ];
+  try {
+    if (Number(cfg.port) === 587) {
+      // STARTTLS：平文で接続してからTLSへ切り替える
+      sock = net.connect(587, cfg.host);
+      steps = [
+        { ok: [220], run: () => send("EHLO cn-salon-demo") },
+        { ok: [250], run: () => send("STARTTLS") },
+        { ok: [220], run: () => {
+          sock.removeAllListeners("data");
+          sock = tls.connect({ socket: sock, servername: cfg.host }, () => send("EHLO cn-salon-demo"));
+          sock.on("data", feed);
+          sock.on("error", (e) => finish(e));
+          steps = baseSteps();
+        } },
+      ];
+    } else if (cfg.secure === "none") {
+      sock = net.connect(Number(cfg.port) || 25, cfg.host);
+      steps = [{ ok: [220], run: () => send("EHLO cn-salon-demo") }, ...baseSteps()];
+    } else {
+      sock = tls.connect({ host: cfg.host, port: Number(cfg.port) || 465, servername: cfg.host });
+      steps = [{ ok: [220], run: () => send("EHLO cn-salon-demo") }, ...baseSteps()];
+    }
+    sock.on("data", feed);
+    sock.on("error", (e) => { clearTimeout(timer); finish(e); });
+  } catch (e) {
+    clearTimeout(timer);
+    finish(e);
+  }
+}
+
 // ---- 架空データの素材 -------------------------------------------------
 
 const COURSE_SEED = {
@@ -68,8 +189,6 @@ const COURSE_PHOTO_SEED = {
   "364331-4822720": "co_590b185f4e5dae65c06a8e30841f58072f96fb5b.jpg.webp",
 };
 try {
-  const fs = require("fs");
-  const path = require("path");
   for (const [cid, name] of Object.entries(COURSE_PHOTO_SEED)) {
     const file = path.join(__dirname, "public", "images", name);
     if (fs.existsSync(file)) {
@@ -686,13 +805,30 @@ function deliverDueMails() {
   for (const m of state.mails) {
     if (m.status !== "pending" || m.scheduledAt > now) continue;
     m.status = "sending";
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
-      m.status = "sent";
-      m.sentAt = now;
-    } else {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
       m.status = "failed";
       m.error = "宛先メールアドレスの形式が不正のため、配信サービスに拒否されました";
+      continue;
     }
+    const cfg = realSendAllowed(m.to);
+    if (cfg) {
+      // 実送信（mail-config.jsonのallowToに載っている宛先だけ）。
+      // 結果が返るまで「送信処理中」。成功応答を確認してから「送信済み」にする
+      smtpSend(cfg, m, (err) => {
+        if (m.status !== "sending") return; // 二重送信防止
+        if (err) {
+          m.status = "failed";
+          m.error = "実送信エラー: " + err.message;
+        } else {
+          m.status = "sent";
+          m.sentAt = Date.now();
+          m.real = true; // 実際に配信された印
+        }
+      });
+      continue;
+    }
+    m.status = "sent";
+    m.sentAt = now;
   }
 }
 
