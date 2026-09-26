@@ -99,12 +99,34 @@ function send404(res, head) {
 //   インターネットからは一切接続できません（予約・顧客・会社情報は外に出ません）
 // ・データはこのパソコンのメモリ上のみ。メールも実際には送信しません
 // ・下の2つの検査で、悪意あるWebサイト経由のアクセス（DNSリバインディング・CSRF）も遮断します
-const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
-const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+// 数字なしのURL用ホスト名（「〜.localhost」はブラウザが自動で自分のPCに解決する）
+const NAME_HOSTS = {
+  "cn-ueno-health-and-beauty.localhost": "/",
+  "cn-ueno.localhost": "/",
+  "cnsalon-board.localhost": "/admin/login",
+  "cnsalonboard.localhost": "/admin/login",
+};
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?$/i;
+const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?$/i;
 
-const server = http.createServer((req, res) => {
+const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const head = req.method === "HEAD";
+
+  // 接続元がこのパソコン（ループバック）以外なら即拒否。
+  // 数字なしURL用のポート80は全インターフェイスで待つ必要があるため、
+  // ここで外部からの接続を確実に遮断する（LAN・インターネットからは使えない）
+  const ra = req.socket.remoteAddress || "";
+  if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(ra)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Forbidden");
+  }
+
+  // 名前ホスト（数字なしURL）のトップは、それぞれの入口ページを表示する
+  const hostName = (req.headers.host || "").toLowerCase().replace(/:\d+$/, "");
+  if (NAME_HOSTS[hostName] && url.pathname === "/") {
+    url.pathname = NAME_HOSTS[hostName];
+  }
 
   // Hostヘッダ検証：外部ドメイン名経由でローカルサーバーへ到達させる攻撃を遮断
   if (!LOCAL_HOST_RE.test(req.headers.host || "")) {
@@ -179,7 +201,8 @@ const server = http.createServer((req, res) => {
     return send404(res, head);
   }
   sendFile(res, path.join(ROOT, r.file), r.status, r.contentType, head, url);
-});
+};
+const server = http.createServer(handler);
 
 // ほかのサイト（localhost:3000 など）と混ざらないよう、専用の番号で起動する
 const HOST = "127.0.0.1";
@@ -194,8 +217,22 @@ server.on("error", (e) => {
 });
 server.on("listening", () => {
   process.env.DEMO_ORIGIN = `http://${HOST}:${port}`; // メール内のリンク生成用
-  console.log(`起動しました。`);
-  console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
-  console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
+  console.log("起動しました。");
+  // 数字なしのURL（ポート80）。使用中などで開けない場合は番号つきURLを案内する
+  const server80 = http.createServer(handler);
+  server80.on("error", () => {
+    console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
+    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
+  });
+  server80.on("listening", () => {
+    console.log(`  予約サイト【${BOOKING_BRAND}】 : http://cn-ueno-health-and-beauty.localhost/`);
+    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://cnsalon-board.localhost/`);
+  });
+  // macOSは 127.0.0.1 指定だと80番を開けないため全体で待ち、上のループバック検査で守る
+  if (port === 5520) server80.listen(80);
+  else {
+    console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
+    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
+  }
 });
 server.listen(port, HOST);
