@@ -690,6 +690,10 @@
     if (!side || !form) { old?.remove(); return; }
     const isNew = [...form.querySelectorAll("button")].some((b) => b.textContent === "新規予約を入力");
     form.classList.toggle("pm-new", isNew);
+    // 休憩・業務・新規予約などの入力フォームも、同じ茶色パネル＋白カードの見た目に統一する
+    const hasPd = !!document.getElementById("pm-pd");
+    form.classList.toggle("pm-form", !isNew && !hasPd);
+    if (!isNew && !hasPd) side.classList.add("pm-side");
     if (!isNew) { old?.remove(); return; }
     side.classList.add("pm-side");
 
