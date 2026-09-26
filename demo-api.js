@@ -422,6 +422,18 @@ function postSchedule(body) {
       }
       return { ok: true };
     }
+    case "checkout": {
+      // お会計（精算）の登録。金額は値引後の額を予約に記録する
+      const ev = ensureEvents(date);
+      const bk = ev.bookings.find((b) => b.reference === String(body.reference) && b.status === "confirmed");
+      if (!bk) throw err(404, "notFound");
+      const amount = Math.floor(Number(body.amount));
+      if (!(Number.isFinite(amount) && amount >= 0)) throw err(400, "invalid");
+      bk.paid_amount = amount;
+      bk.paid_at = Date.now();
+      bump();
+      return { ok: true };
+    }
     case "staffDelete": {
       // スタッフの削除。予約（昨日以降の確定分）が残っている場合は削除しない。
       // シフト・休憩・業務・写真・受付停止設定はスタッフと一緒に削除する。
@@ -1027,6 +1039,30 @@ function handleDemoApi(req, res, url) {
     }
     res.writeHead(405);
     res.end();
+    return true;
+  }
+
+  // 日付ピッカーのカレンダー用：日ごとのシフト・予約状況
+  if (url.pathname === "/api/demo/calendar" && (req.method === "GET" || req.method === "HEAD")) {
+    const from = url.searchParams.get("from") || todayJst();
+    const n = Math.min(62, Math.max(1, Number(url.searchParams.get("days")) || 42));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid" }));
+      return true;
+    }
+    const days = [];
+    for (let i = 0; i < n; i++) {
+      const d = addDays(from, i);
+      days.push({
+        date: d,
+        shifts: ensureShifts(d).length,
+        bookings: ensureEvents(d).bookings.filter((b) => b.status === "confirmed").length,
+        enabled: ensureDay(d).enabled,
+      });
+    }
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ days }));
     return true;
   }
 

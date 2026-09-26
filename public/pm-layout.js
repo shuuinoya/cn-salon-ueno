@@ -360,6 +360,9 @@
     refreshCourses();
     syncCourseSelects();
 
+    // 7b3) 日付ピッカーを本物の予約状況カレンダー（色分け＋凡例）にする
+    decorateCalendar();
+
     // 7c) 月間シフト作成画面を本物の「月間シフト作成/目標設定」構成にする
     decorateMonth();
 
@@ -465,14 +468,14 @@
         '<div class="pm-cust-name"><span class="pm-gender">♀</span> ' + (esc(name) || "&nbsp;") + '<span class="pm-count">回数:5/5</span></div>' +
       "</div>" +
       '<div class="pm-icons">' +
-        [["顧客", "♙"], ["カード", "▦"], ["履歴", "↺"], ["会計", "▤"], ["返客", "↶"]]
-          .map(([t, g]) => '<button type="button" data-act="none"><small>' + t + "</small><b>" + g + "</b></button>").join("") +
+        [["顧客", "♙", "none"], ["カード", "▦", "none"], ["履歴", "↺", "none"], ["会計", "▤", "pay"], ["返客", "↶", "none"]]
+          .map(([t, g, a]) => '<button type="button" data-act="' + a + '"><small>' + t + "</small><b>" + g + "</b></button>").join("") +
       "</div>" +
       '<div class="pm-idbox">' +
         '<div class="pm-idrow"><span>ID:' + esc(bookingId) + "<br/>" + esc(prevDay) + " 23:42　Un</span>" +
         '<span class="pm-idbtns"><button type="button" class="pm-red" data-act="none">完了</button><button type="button" class="pm-x" data-act="close">X</button></span></div>' +
         '<div class="pm-tabrow"><span class="pm-tab">' + (esc(name) || "予約") + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
-        '<div class="pm-btnrow"><button type="button" class="pm-outline" data-act="none">精算</button><span></span><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
+        '<div class="pm-btnrow"><button type="button" class="pm-outline" data-act="pay">精算</button><span></span><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
         '<div class="pm-btnrow"><label class="pm-mini"><input type="checkbox"/> 他店</label><button type="button" class="pm-red" data-act="none">検索</button><button type="button" class="pm-red" data-act="none">＋ 新規</button></div>' +
         '<div class="pm-dtrow"><span class="pm-cap">日時</span><b>' + esc(dateISO) + " " + hh + ":" + mm + "〜</b></div>" +
         '<div class="pm-chips"><span class="pm-chip">' + esc(menu.slice(0, 22)) + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
@@ -496,9 +499,198 @@
         if (act === "close") buttons.find((b) => b.textContent === "戻る")?.click();
         else if (act === "cancel") buttons.find((b) => b.textContent === "予約取消")?.click();
         else if (act === "edit") form.classList.toggle("pm-editing");
+        else if (act === "pay") openCheckout();
       });
     }
     if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+  }
+
+  // 日付ピッカー：本物と同じ「予約状況カレンダー」を既存ピッカーに被せる
+  // （日曜はじまり・シフト/予約の色分け・予約数・凡例。クリックは元のボタンへ転送）
+  const CAL_LABEL = (d) => {
+    const [y, m2, dd] = d.split("-").map(Number);
+    const w = "日月火水木金土"[new Date(d + "T00:00:00Z").getUTCDay()];
+    return `${y}年${m2}月${dd}日（${w}）`;
+  };
+  async function fetchCalData(from) {
+    if (window.__pmCalFrom === from && Date.now() - (window.__pmCalAt || 0) < 8000) return window.__pmCalData;
+    try {
+      const r = await fetch(`/api/demo/calendar?from=${from}&days=42`, { cache: "no-store" });
+      window.__pmCalData = {};
+      for (const d of (await r.json()).days) window.__pmCalData[d.date] = d;
+      window.__pmCalFrom = from;
+      window.__pmCalAt = Date.now();
+    } catch {}
+    return window.__pmCalData;
+  }
+  function decorateCalendar() {
+    const pop = document.querySelector(".ledger-date-popover");
+    if (!pop) return;
+    pop.classList.add("pm-cal");
+    const monthLabel = pop.querySelector(".ledger-date-month b")?.textContent || "";
+    const m = monthLabel.match(/(\d{4})年\s*(\d{1,2})月/);
+    if (!m) return;
+    const ym = `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+    let cal = pop.querySelector("#pm-caldiv");
+    if (cal && cal.dataset.ym === ym && cal.dataset.data === String(window.__pmCalAt || "")) return;
+
+    // 表示範囲：その月の1日を含む週の日曜〜6週分
+    const first = new Date(ym + "-01T00:00:00Z");
+    const start = new Date(first.getTime() - first.getUTCDay() * 86400000);
+    const from = start.toISOString().slice(0, 10);
+    fetchCalData(from).then(() => {
+      const data = window.__pmCalData || {};
+      const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
+      const selected = [...pop.querySelectorAll(".ledger-date-days button")]
+        .find((b) => b.getAttribute("aria-pressed") === "true")?.getAttribute("aria-label") || "";
+      if (!cal) {
+        cal = document.createElement("div");
+        cal.id = "pm-caldiv";
+        pop.appendChild(cal);
+        cal.addEventListener("click", async (e) => {
+          const nav = e.target.closest("[data-nav]")?.dataset.nav;
+          if (nav) { [...pop.querySelectorAll(".ledger-date-month button")][nav === "prev" ? 0 : 1]?.click(); return; }
+          const day = e.target.closest("[data-date]")?.dataset.date;
+          if (!day) return;
+          const find = () => [...pop.querySelectorAll(".ledger-date-days button")]
+            .find((b) => b.getAttribute("aria-label") === CAL_LABEL(day));
+          let btn = find();
+          if (!btn) { // 範囲端の前後月の日付：月を送ってから選ぶ
+            [...pop.querySelectorAll(".ledger-date-month button")][day < ym ? 0 : 1]?.click();
+            await new Promise((r) => setTimeout(r, 300));
+            btn = find();
+          }
+          if (btn && !btn.disabled) btn.click();
+        });
+      }
+      cal.dataset.ym = ym;
+      cal.dataset.data = String(window.__pmCalAt || "");
+      const cells = [];
+      for (let i = 0; i < 42; i++) {
+        const dt = new Date(start.getTime() + i * 86400000);
+        const d = dt.toISOString().slice(0, 10);
+        const info = data[d] || {};
+        const inMonth = d.slice(0, 7) === ym;
+        const cls = ["pm-cal-day"];
+        if (dt.getUTCDay() === 0) cls.push("sun");
+        if (dt.getUTCDay() === 6) cls.push("sat");
+        if (!inMonth) cls.push("outside");
+        else if (d < today) cls.push("past");
+        else if (info.shifts > 0) cls.push("green");
+        if (CAL_LABEL(d) === selected) cls.push("sel");
+        const stripes =
+          (info.enabled ? '<i class="st-y"></i>' : "") +
+          (info.bookings > 0 ? '<i class="st-r"></i>' : "");
+        const count = info.bookings > 0 ? `<small>(${info.bookings})</small>` : "";
+        cells.push(`<div class="${cls.join(" ")}" data-date="${d}"><b>${dt.getUTCDate()}</b>${count}${stripes}</div>`);
+      }
+      cal.innerHTML =
+        '<div class="pm-cal-head"><button type="button" data-nav="prev">◀</button><b>' +
+        `${Number(m[1])}年${Number(m[2])}月` +
+        '</b><button type="button" data-nav="next">▶</button></div>' +
+        '<div class="pm-cal-week">' +
+        ["日", "月", "火", "水", "木", "金", "土"].map((w, i) =>
+          `<span class="${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</span>`).join("") +
+        "</div>" +
+        '<div class="pm-cal-grid">' + cells.join("") + "</div>" +
+        '<div class="pm-cal-legend">' +
+        '<span><i class="sq" style="background:#e8514d"></i> 予約が入っています</span>' +
+        '<span><i class="sq" style="background:#c9f2a5"></i> スタッフ割り当て済みです</span>' +
+        '<span><i class="sq" style="background:#f9e94e"></i> 公開されています</span>' +
+        '<span><i class="sq" style="background:#aee6f8"></i> スタッフ割り当てられていません</span>' +
+        '<span><i class="sq" style="background:#fff;border:1px solid #999"></i> シフト情報がありません</span>' +
+        '<span><b class="pm-cal-cnt">( )</b> 予約数</span>' +
+        "</div>";
+    });
+  }
+
+  // お会計（精算）モーダル：本物のPeakManagerと同じ構成
+  function openCheckout() {
+    const dl = document.querySelector(".ledger-booking-detail");
+    const form = document.querySelector(".ledger-side .ledger-form") || document.querySelector(".ledger-side");
+    if (!dl || !form) return;
+    const val = (label) => {
+      const dts = [...dl.querySelectorAll("dt")];
+      const i = dts.findIndex((d) => d.textContent === label);
+      return i >= 0 ? (dts[i].nextElementSibling?.textContent || "") : "";
+    };
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const name = val("お名前").trim() || "ゲスト";
+    const menu = val("メニュー").trim();
+    const reference = val("予約ID").trim();
+    const total0 = Number(val("現在の合計").replace(/[^\d]/g, "")) || 0;
+    const staffSel = form.querySelector("label select");
+    const staffName = staffSel?.selectedOptions?.[0]?.textContent || "";
+    const dateISO = form.querySelector("p time")?.getAttribute("datetime") || "";
+    const fmt = (n) => Number(n).toLocaleString("ja-JP");
+
+    document.getElementById("pm-checkout")?.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "pm-checkout";
+    const payRows = ["回数券利用", "ポイント利用", "プリペイド利用", "電子マネー利用", "クレジット利用", "商品券利用"];
+    wrap.innerHTML =
+      '<section role="dialog" aria-modal="true">' +
+      '<header class="pm-co-head"><b>' + esc(name) + '</b><button type="button" class="pm-co-x" data-co="close">×</button></header>' +
+      '<div class="pm-co-body">' +
+        '<div class="pm-co-left">' +
+          '<div class="pm-co-cart">' +
+            '<h3><span class="pm-co-carticon">🛒</span> お会計</h3>' +
+            '<table class="pm-co-table"><thead><tr><th>施術内容</th><th>スタッフ</th><th>金額</th><th>値引</th></tr></thead>' +
+            "<tbody><tr><td>" + esc(menu) + "</td><td>" + esc(staffName) + '</td><td class="pm-co-price">' + fmt(total0) + ' 円</td>' +
+            '<td><span class="pm-co-in"><input type="number" id="pm-co-disc" value="0" min="0"> 円</span></td></tr></tbody></table>' +
+            '<div class="pm-co-sumrow"><span class="pm-co-in pm-co-bulk"><label>施術一括値引</label><input type="number" id="pm-co-bulkdisc" value="0" min="0"> 円</span>' +
+            '<span class="pm-co-subtotal">施術合計金額 <b id="pm-co-sub">' + fmt(total0) + ' 円</b></span></div>' +
+          "</div>" +
+          '<div class="pm-co-add"><h3><span class="pm-co-carticon">🛒</span> お会計追加</h3>' +
+          '<div class="pm-co-tab">物販販売</div><div class="pm-co-addspace"></div></div>' +
+        "</div>" +
+        '<div class="pm-co-right">' +
+          '<div class="pm-co-row pm-co-total"><span>合計金額</span><b id="pm-co-total">' + fmt(total0) + ' 円</b></div>' +
+          payRows.map((r) =>
+            '<div class="pm-co-row"><span>' + r + '</span><span><span class="pm-co-in dark"><span>-</span><input type="number" value="0" min="0" class="pm-co-pay"></span><span class="pm-co-yen">円</span></span></div>').join("") +
+          '<div class="pm-co-row"><span>EPARKサービス</span><span><span class="pm-co-in dark ro"><span>-</span><input type="number" value="0" disabled></span><span class="pm-co-yen">円</span></span></div>' +
+          '<div class="pm-co-bottom">' +
+            '<div class="pm-co-row pm-co-cash"><span>現金支払額</span><b id="pm-co-cash">' + fmt(total0) + ' 円</b></div>' +
+            '<div class="pm-co-row"><span>お預かり</span><span><span class="pm-co-in dark"><input type="number" id="pm-co-deposit" value="0" min="0"></span><span class="pm-co-yen">円</span></span></div>' +
+          "</div>" +
+        "</div>" +
+      "</div>" +
+      '<footer class="pm-co-foot"><button type="button" class="pm-co-cancel" data-co="close">キャンセル</button>' +
+      '<button type="button" class="pm-co-ok" data-co="pay">会計</button></footer>' +
+      "</section>";
+    document.body.appendChild(wrap);
+
+    const recalc = () => {
+      const disc = Number(wrap.querySelector("#pm-co-disc").value) || 0;
+      const bulk = Number(wrap.querySelector("#pm-co-bulkdisc").value) || 0;
+      const sub = Math.max(0, total0 - disc - bulk);
+      const used = [...wrap.querySelectorAll(".pm-co-pay")].reduce((s, i) => s + (Number(i.value) || 0), 0);
+      wrap.querySelector("#pm-co-sub").textContent = fmt(sub) + " 円";
+      wrap.querySelector("#pm-co-total").textContent = fmt(sub) + " 円";
+      wrap.querySelector("#pm-co-cash").textContent = fmt(Math.max(0, sub - used)) + " 円";
+      return { sub, cash: Math.max(0, sub - used) };
+    };
+    wrap.addEventListener("input", recalc);
+    wrap.addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-co]")?.dataset.co;
+      if (!act) { if (e.target === wrap) wrap.remove(); return; }
+      if (act === "close") { wrap.remove(); return; }
+      if (act === "pay") {
+        const { sub } = recalc();
+        try {
+          const r = await fetch("/api/demo/schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "checkout", date: dateISO, reference, amount: sub }),
+          });
+          if (!r.ok) throw new Error();
+          wrap.remove();
+          window.alert("会計を登録しました（デモ）：" + fmt(sub) + "円");
+        } catch {
+          window.alert("会計を登録できませんでした。");
+        }
+      }
+    });
   }
 
   // 月間シフト作成画面：本物と同じツールバー（一括作成・シフト作成・変更/削除・出力）を組み込む

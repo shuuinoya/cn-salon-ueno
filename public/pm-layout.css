@@ -778,3 +778,261 @@ main.ledger-app .pm-orange, .pm-orange {
   cursor: pointer;
 }
 #pm-menu-modal .pm-menu-new button.pm-red { border: none; border-radius: 3px; padding: 8px 18px; cursor: pointer; }
+
+/* ---- お会計（精算）モーダル：本物と同じ構成 ---- */
+#pm-checkout {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1100;
+  padding: 16px;
+}
+#pm-checkout section {
+  background: #fff;
+  width: min(1240px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  font-size: 14px;
+  color: #333;
+}
+.pm-co-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid #e5e5e5;
+}
+.pm-co-head b { font-size: 20px; }
+.pm-co-x {
+  font: inherit;
+  font-size: 22px;
+  color: #bbb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+}
+.pm-co-x:hover { color: #888; }
+.pm-co-body { display: flex; flex: 1; min-height: 480px; overflow: auto; }
+.pm-co-left { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.pm-co-cart { background: #e9e9e9; padding: 16px 22px 18px; }
+.pm-co-cart h3, .pm-co-add h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pm-co-carticon { font-size: 22px; filter: grayscale(1); }
+.pm-co-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #ddd;
+}
+.pm-co-table th {
+  text-align: left;
+  font-weight: 400;
+  color: #666;
+  padding: 12px 14px;
+  border-bottom: 1px solid #ddd;
+}
+.pm-co-table td { padding: 14px; }
+.pm-co-table td.pm-co-price { white-space: nowrap; }
+.pm-co-in { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pm-co-in input {
+  font: inherit;
+  width: 90px;
+  text-align: right;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: #fff;
+}
+.pm-co-sumrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pm-co-bulk { background: #fff; border: 1px solid #ddd; padding: 6px 12px; gap: 12px; }
+.pm-co-subtotal { font-size: 15px; }
+.pm-co-subtotal b { font-size: 24px; margin-left: 10px; }
+.pm-co-add { padding: 18px 22px; flex: 1; }
+.pm-co-tab {
+  display: inline-block;
+  border: 1px solid #ddd;
+  border-bottom: 2px solid #fff;
+  padding: 10px 24px;
+  color: #555;
+}
+.pm-co-addspace { border-top: 1px solid #ddd; height: 120px; }
+.pm-co-right {
+  width: 330px;
+  flex: none;
+  background: #3f3f3f;
+  color: #fff;
+  padding: 10px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pm-co-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 0;
+}
+.pm-co-total b { font-size: 26px; }
+.pm-co-in.dark {
+  background: #fff;
+  color: #333;
+  border-radius: 4px;
+  padding-left: 10px;
+}
+.pm-co-in.dark input {
+  background: transparent;
+  border: none;
+  color: #333;
+  width: 84px;
+  padding: 9px 8px 9px 2px;
+}
+.pm-co-in.dark.ro { background: #b5b5b5; }
+.pm-co-in.dark.ro input { background: transparent; }
+.pm-co-right .pm-co-row > .pm-co-in.dark::after { content: none; }
+.pm-co-right .pm-co-row { gap: 8px; }
+.pm-co-right .pm-co-row > span:first-child { flex: none; }
+.pm-co-yen { color: #fff; margin-left: 6px; }
+.pm-co-bottom { margin-top: auto; background: #222; margin-left: -22px; margin-right: -22px; padding: 6px 22px 10px; }
+.pm-co-cash b { font-size: 26px; }
+.pm-co-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 22px;
+  border-top: 1px solid #e5e5e5;
+}
+.pm-co-cancel {
+  font: inherit;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 12px 26px;
+  cursor: pointer;
+}
+.pm-co-ok {
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  background: #e9625b;
+  border: none;
+  border-radius: 5px;
+  padding: 12px 34px;
+  cursor: pointer;
+}
+.pm-co-ok:hover { background: #d45953; }
+
+/* ---- 日付ピッカー：予約状況カレンダー ---- */
+.ledger-date-popover.pm-cal { width: min(680px, calc(100vw - 24px)); }
+.pm-cal .ledger-date-month,
+.pm-cal .ledger-date-days,
+.pm-cal .ledger-date-close { display: none !important; }
+#pm-caldiv { font-size: 15px; color: #333; }
+.pm-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid #e0d6ca;
+}
+.pm-cal-head b { font-size: 19px; }
+.pm-cal-head button {
+  font: inherit;
+  font-size: 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #333;
+  padding: 4px 10px;
+}
+.pm-cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-weight: 700;
+  padding: 8px 0;
+  color: #8a6a3a;
+}
+.pm-cal-week .sun { color: #c0392b; }
+.pm-cal-week .sat { color: #3b5bd6; }
+.pm-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-left: 1px solid #e0d6ca;
+  border-top: 1px solid #e0d6ca;
+}
+.pm-cal-day {
+  position: relative;
+  min-height: 64px;
+  border-right: 1px solid #e0d6ca;
+  border-bottom: 1px solid #e0d6ca;
+  background: #fff;
+  padding: 8px 0 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.pm-cal-day b { font-weight: 700; font-size: 16px; }
+.pm-cal-day small { color: #e8514d; font-weight: 700; margin-left: 2px; }
+.pm-cal-day.sun b { color: #c0392b; }
+.pm-cal-day.sat b { color: #3b5bd6; }
+.pm-cal-day.outside { background: #f7f1e8; }
+.pm-cal-day.outside b { color: #a8917a; }
+.pm-cal-day.past { background: #d6d6d6; }
+.pm-cal-day.green { background: #c9f2a5; }
+.pm-cal-day.sel { outline: 2px solid #e8514d; outline-offset: -2px; }
+.pm-cal-day:hover { filter: brightness(0.96); }
+.pm-cal-day .st-y, .pm-cal-day .st-r {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 5px;
+  display: block;
+}
+.pm-cal-day .st-y { bottom: 5px; background: #f9e94e; }
+.pm-cal-day .st-r { bottom: 0; background: #e8514d; }
+.pm-cal-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 18px;
+  padding: 12px 14px 6px;
+  font-size: 13px;
+}
+.pm-cal-legend .sq {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+.pm-cal-legend .pm-cal-cnt { color: #e8514d; }
+
+/* お会計モーダル：スマホでは縦積みにする */
+@media (max-width: 760px) {
+  .pm-co-body { flex-direction: column; }
+  .pm-co-right { width: auto; }
+  .pm-co-add { display: none; }
+  .pm-co-cart { padding: 12px; }
+  .pm-co-table th, .pm-co-table td { padding: 8px 6px; font-size: 12px; }
+  .pm-co-table td:nth-child(2) { white-space: nowrap; }
+  .pm-co-in input { width: 64px; padding: 6px 4px; }
+  .pm-co-subtotal b { font-size: 19px; }
+}
