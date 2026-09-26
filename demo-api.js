@@ -633,6 +633,34 @@ function fmtTime(date, ms) {
   return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
 
+// 参考画像と同じ見た目のHTMLメールを本文テキストから組み立てる。
+// Gmail・iPhone・Android等で崩れないよう、テーブル＋インラインCSSのみで構成し、
+// 画像に無い要素は足さない（本文・順序・改行はテキスト版と完全に同一）。
+function mailHtml(body) {
+  const escH = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const A = 'style="color:#1a73e8;text-decoration:underline;word-break:break-all;"';
+  const lines = String(body).split("\n").map((line) => {
+    if (line === MAIL_ADDR) {
+      // 店舗住所は参考画像と同じく地図リンク（青文字）にする
+      return '<a href="https://maps.google.com/?q=' + encodeURIComponent(MAIL_ADDR) + '" ' + A + ">" + escH(MAIL_ADDR) + "</a>";
+    }
+    let h = escH(line);
+    h = h.replace(/(https?:\/\/[^\s,]+)/g, (u) => '<a href="' + u + '" ' + A + ">" + u + "</a>");
+    h = h.replace(/([\w.+-]+@[\w-]+\.[\w.]+)/g, (m) => '<a href="mailto:' + m + '" ' + A + ">" + m + "</a>");
+    return h;
+  });
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"/>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1"/></head>' +
+    '<body style="margin:0;padding:0;background:#ffffff;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="left">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">' +
+    '<tr><td style="padding:18px 16px;' +
+    "font-family:'Hiragino Kaku Gothic ProN','Hiragino Sans',Meiryo,-apple-system,Roboto,Arial,sans-serif;" +
+    'font-size:16px;line-height:1.75;color:#202124;text-align:left;word-break:break-word;">' +
+    lines.join("<br/>") +
+    "</td></tr></table></td></tr></table></body></html>";
+}
+
 function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
   state.mailSerial++;
   state.mails.push({
@@ -640,6 +668,7 @@ function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
     kind,                 // "customer" | "store"
     type,                 // "confirm" | "notify" | "remind" | "change" | "cancel"
     to, subject, body,
+    html: mailHtml(body), // 実際に届くHTMLメール（参考画像と同一の見た目）
     scheduledAt,          // この時刻になったら送信処理を行う
     createdAt: Date.now(),
     bookingId: bookingId || null,
@@ -717,6 +746,7 @@ function mailBlockStore(bk) {
   ].join("\n");
 }
 const MAIL_COMMON = [
+  "",
   "",
   "■ご予約内容に関するご質問やご不明な点がございましたら、ご利用の店舗までお問い合わせください。",
   "",
