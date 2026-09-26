@@ -3,8 +3,10 @@
 ## 入口URL（起動後に開く）
 | サイト | 名前 | URL |
 |---|---|---|
-| お客様の予約サイト | CN Ueno health & beauty | http://127.0.0.1:5520/cn-ueno-health-and-beauty （トップページへ転送） |
-| 店舗用の管理画面 | CNsalon@board | http://127.0.0.1:5520/CNsalon@board （ログイン画面へ転送） |
+| お客様の予約サイト | CN Ueno health & beauty | http://127.0.0.1:5520/cn-ueno-health-and-beauty |
+| 店舗用の管理画面 | CNsalon@board | http://127.0.0.1:5520/CNsalon@board |
+
+どちらも**サイト名がそのままURL**になっていて、開いた後もアドレスバーに名前のURLが残ります（転送されません）。
 
 サイト名は配信時に付け替えています（保存ファイル自体は無加工のまま）。予約サイトの画面・確認メールの件名は「CN Ueno health & beauty」、管理画面のログイン・各ページのタイトルは「CNsalon@board」で表示されます。
 

@@ -35,7 +35,8 @@ function brandFor(file, url) {
   return isAdminPage ? ADMIN_BRAND : BOOKING_BRAND;
 }
 
-// 覚えやすい入口URL（どちらも本来のページへ転送する）
+// サイト名そのままの入口URL。転送ではなくその場で表示し、
+// アドレスバーには名前のURLが残る（予約サイト＝店名／管理画面＝CNsalon@board）
 const ENTRY_URLS = {
   "/cn-ueno-health-and-beauty": "/",
   "/cn-ueno": "/",
@@ -142,10 +143,15 @@ const server = http.createServer((req, res) => {
     return send404(res, head);
   }
   // 入口URL：/cn-ueno-health-and-beauty（予約サイト）・/CNsalon@board（管理画面）
+  // アドレスバーに名前を残すため、転送せずその場で本来のページを表示する
   const entry = ENTRY_URLS[pathname.toLowerCase()];
   if (entry) {
-    res.writeHead(302, { Location: entry });
-    return res.end();
+    const er = routes[entry];
+    if (er && er.file) {
+      const eu = new URL(url);
+      eu.pathname = entry; // ページ内部のルーターには本来のパスを渡す
+      return sendFile(res, path.join(ROOT, er.file), er.status, er.contentType, head, eu);
+    }
   }
 
   const file = path.normalize(path.join(PUBLIC, pathname));
