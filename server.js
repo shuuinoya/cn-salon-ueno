@@ -46,12 +46,15 @@ function sendFile(res, file, status, type, head, url) {
         pathname: url.pathname,
         searchParams: [...url.searchParams.entries()],
       });
-      body = Buffer.from(
-        data.toString("utf8").replace(
-          /nav:\{"pathname":"[^"]*","searchParams":\[(?:\[[^\]]*\],?)*\]\}/,
-          "nav:" + nav
-        )
+      let html = data.toString("utf8").replace(
+        /nav:\{"pathname":"[^"]*","searchParams":\[(?:\[[^\]]*\],?)*\]\}/,
+        "nav:" + nav
       );
+      // 予約ページには、管理画面のフリーメッセージ設定を反映するスクリプトを差し込む
+      if (url.pathname.startsWith("/book")) {
+        html = html.replace("</body>", '<script src="/booking-tweaks.js" defer></script></body>');
+      }
+      body = Buffer.from(html);
     }
     res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-cache" });
     res.end(head ? undefined : body);

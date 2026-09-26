@@ -86,6 +86,17 @@ const state = {
   notifications: [{ status: "pending", count: 0 }, { status: "cancelled", count: 0 }],
   mails: [],       // 生成したメール（デモ。実際には送信しない）
   mailSerial: 0,
+  // 予約フォームのフリーメッセージ欄の設定（管理画面から変更できる）
+  settings: {
+    freeMessage: {
+      visible: true,      // 欄を表示するか
+      required: false,    // 入力必須にするか
+      label: "",          // 欄の見出し（空なら元のまま）
+      placeholder: "",    // 入力欄のヒント文
+      description: "",    // 欄の下に出す説明文
+      maxLength: 2000,    // 入力文字数の上限
+    },
+  },
   bookingSerial: 100,
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
@@ -122,19 +133,9 @@ function ensureShifts(date) {
 
 function ensureEvents(date) {
   if (state.events.has(date)) return state.events.get(date);
-  const rand = seededRand("event:" + date);
-  const shifts = ensureShifts(date);
-  const bookings = [], blocks = [], assignments = [];
-  for (const sh of shifts) {
-    const sStart = msToMin(date, sh.start_at), sEnd = msToMin(date, sh.end_at);
-    // 休憩を1件（14時前後または18時前後）
-    const brStart = Math.min(Math.max(sStart + 120, rand() < 0.5 ? 840 : 1080), sEnd - 60);
-    if (brStart > sStart) {
-      blocks.push({ id: "blk-" + date + "-" + sh.staff_id, staff_id: sh.staff_id, date, start_at: minToMs(date, brStart), end_at: minToMs(date, brStart + 60), kind: "break", note: "休憩" });
-    }
-    // 架空のお客様の予約は自動生成しない（実際に入れた予約だけが台帳に載る）
-  }
-  const ev = { bookings, blocks, assignments };
+  // 架空のお客様の予約や休憩は自動生成しない
+  // （実際に予約サイトから入った予約と、管理画面で手入力した予定だけが台帳に載る）
+  const ev = { bookings: [], blocks: [], assignments: [] };
   state.events.set(date, ev);
   return ev;
 }
@@ -280,22 +281,31 @@ function postSchedule(body) {
       if (!bk) throw err(404, "notFound");
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
-      if (mvTarget.locked) throw err(409, "soldOut"); // 鍵中のスタッフには入れられない
+      if (mvTarget.locked) throw err(409, "soldOut");            // 鍵中のスタッフには入れられない
+      if (!staffCanDo(mvTarget, bk.course)) throw err(409, "soldOut"); // 対応可能メニュー外は不可
+      const mvGender = courseGender(bk.course);
+      if (mvGender !== "none" && mvTarget.gender !== mvGender) throw err(409, "soldOut");
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end, id)) throw err(409, "soldOut");
+      // 複数名の予約は残りの担当も、新しい時間帯に対応可能なスタッフから割り当て直す
+      const others = bk.people > 1
+        ? freeStaffIds(date, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId).slice(0, bk.people - 1)
+        : [];
+      if (others.length < bk.people - 1) throw err(409, "soldOut");
+      // 指名予約の担当変更は、変更先の指名料で再計算する（指名を受けない相手には移せない）
+      if (bk.nominated_staff_id && bk.nominated_staff_id !== staffId) {
+        const pr = profileOf(mvTarget);
+        if (!pr.personalNomination) throw err(409, "staffUnavailable");
+        bk.nominated_staff_id = mvTarget.id;
+        bk.nominated_staff_name = pr.nickname || mvTarget.name;
+        bk.nomination_fee = Number(pr.nominationFee) || 0;
+      }
       bk.start_at = minToMs(date, start);
       bk.end_at = minToMs(date, end);
       const late = start >= 1320 ? 2000 * bk.people : 0;
       bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
-      const as = ev.assignments.find((a) => a.booking_id === id);
-      if (as) as.staff_id = staffId; else ev.assignments.push({ booking_id: id, staff_id: staffId });
-      // 担当が変わったら指名情報も引き継ぎ直す（指名予約の担当変更は指名解除扱い）
-      if (bk.nominated_staff_id && bk.nominated_staff_id !== staffId) {
-        bk.nominated_staff_id = null;
-        bk.nominated_staff_name = null;
-        bk.total -= bk.nomination_fee || 0;
-        bk.nomination_fee = 0;
-      }
+      ev.assignments = ev.assignments.filter((a) => a.booking_id !== id);
+      for (const sid of [staffId, ...others]) ev.assignments.push({ booking_id: id, staff_id: sid });
       queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
       bump();
       return { ok: true };
@@ -306,7 +316,10 @@ function postSchedule(body) {
       const c = COURSES[course];
       const cbTarget = state.staff.find((s) => s.id === staffId);
       if (!consent || !c || !cbTarget) throw err(400, "invalid");
-      if (cbTarget.locked) throw err(409, "soldOut"); // 鍵中のスタッフには入れられない
+      if (cbTarget.locked) throw err(409, "soldOut");            // 鍵中のスタッフには入れられない
+      if (!staffCanDo(cbTarget, course)) throw err(409, "soldOut"); // 対応可能メニュー外は不可
+      const cbGender = courseGender(course);
+      if (cbGender !== "none" && cbTarget.gender !== cbGender) throw err(409, "soldOut");
       const end = start + c.minutes;
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end)) throw err(409, "soldOut");
@@ -314,6 +327,11 @@ function postSchedule(body) {
       state.bookingSerial++;
       const id = "bk-new-" + state.bookingSerial;
       const n = Number(people) || 1;
+      // 複数名の予約は、対応可能で空いているスタッフを人数分確保する
+      const cbOthers = n > 1
+        ? freeStaffIds(date, start, end, course, cbGender).filter((sid) => sid !== staffId).slice(0, n - 1)
+        : [];
+      if (cbOthers.length < n - 1) throw err(409, "soldOut");
       ev.bookings.push({
         id, reference: "DM" + String(state.bookingSerial).padStart(6, "0"),
         service_date: date, status: "confirmed",
@@ -326,7 +344,7 @@ function postSchedule(body) {
         staff: "none", customer_token: null,
       });
       state.bookingIndex.set(id, date);
-      ev.assignments.push({ booking_id: id, staff_id: staffId });
+      for (const sid of [staffId, ...cbOthers]) ev.assignments.push({ booking_id: id, staff_id: sid });
       queueBookingMails(ev.bookings.find((b) => b.id === id));
       bump();
       return { ok: true };
@@ -337,8 +355,8 @@ function postSchedule(body) {
       const bk = ev.bookings.find((b) => b.id === body.id && b.status === "confirmed");
       if (!bk) throw err(404, "notFound");
       bk.status = "cancelled";
-      const idx = ev.assignments.findIndex((a) => a.booking_id === bk.id);
-      if (idx >= 0) ev.assignments.splice(idx, 1);
+      // 担当割当をすべて外して枠を空ける（複数名予約は全担当分）
+      ev.assignments = ev.assignments.filter((a) => a.booking_id !== bk.id);
       queueCancelMails(bk); // 取消通知（双方）＋未送信リマインドの破棄
       bump();
       return { ok: true };
@@ -375,6 +393,29 @@ function postSchedule(body) {
       };
       const idx = state.staff.findIndex((s) => s.id === p.id);
       if (idx >= 0) state.staff[idx] = rec; else state.staff.push(rec);
+      // 対応可能メニューから外れたメニューの予約が今後入っている場合は、
+      // 予約はそのまま維持しつつ管理画面に警告を返す（勝手に削除・変更しない）
+      const newCourses = JSON.parse(rec.courses);
+      const affected = [];
+      if (newCourses.length) {
+        const today = todayJst();
+        for (const [d, ev2] of state.events) {
+          if (d < today) continue;
+          for (const b of ev2.bookings) {
+            if (b.status !== "confirmed") continue;
+            if (!ev2.assignments.some((a) => a.booking_id === b.id && a.staff_id === rec.id)) continue;
+            if (!newCourses.includes(b.course)) affected.push(`${fmtDateJa(d)} ${fmtTime(d, b.start_at)} ${b.reference}`);
+          }
+        }
+      }
+      if (affected.length) {
+        return {
+          ok: true,
+          warning: `保存しました。ただし、対応可能メニューから外したメニューの予約が ${affected.length}件 入っています。\n` +
+            affected.slice(0, 5).join("\n") + (affected.length > 5 ? "\nほか" : "") +
+            "\n既存の予約はそのまま維持されます。必要に応じて担当変更または取消をしてください。",
+        };
+      }
       return { ok: true };
     }
     case "lockStaff": {
@@ -384,8 +425,14 @@ function postSchedule(body) {
       bump();
       return { ok: true, locked: st.locked };
     }
-    case "retryMail":
+    case "retryMail": {
+      // 送信失敗したメールを再送信キューへ戻す
+      for (const m of state.mails) {
+        if (m.status === "failed") { m.status = "pending"; m.error = null; m.scheduledAt = Date.now(); }
+      }
+      deliverDueMails();
       return { ok: true };
+    }
     default:
       throw err(400, "invalid");
   }
@@ -414,10 +461,31 @@ function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
     kind,                 // "customer" | "store"
     type,                 // "confirm" | "notify" | "remind" | "change" | "cancel"
     to, subject, body,
-    scheduledAt,          // この時刻を過ぎたら「送信済み（デモ）」扱い
+    scheduledAt,          // この時刻になったら送信処理を行う
     createdAt: Date.now(),
     bookingId: bookingId || null,
+    status: "pending",    // pending（送信予定）→ sending（処理中）→ sent／failed
+    sentAt: null,
+    error: null,
   });
+}
+
+// 送信時刻を過ぎたメールを送信処理する（デモの配信サービスは即時に応答する）。
+// 「送信済み」への遷移は配信サービスの成功応答を確認してから行い、
+// 一度 sent／failed になったメールは二度と再送しない（二重送信防止）。
+function deliverDueMails() {
+  const now = Date.now();
+  for (const m of state.mails) {
+    if (m.status !== "pending" || m.scheduledAt > now) continue;
+    m.status = "sending";
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
+      m.status = "sent";
+      m.sentAt = now;
+    } else {
+      m.status = "failed";
+      m.error = "宛先メールアドレスの形式が不正のため、配信サービスに拒否されました";
+    }
+  }
 }
 
 function bookingLines(bk) {
@@ -467,13 +535,14 @@ function queueBookingMails(bk) {
     `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
     `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}\n\n■お客様情報\nお名前：${bk.name || "（未入力）"}\n電話：${bk.phone || "（未入力）"}`,
     Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+  deliverDueMails();
 }
 
-// 変更・取消時：未送信のリマインドを整理し、双方へ通知する
+// 変更・取消時：まだ送信していないリマインドを破棄する（送信済みのものは記録として残す）
 function dropPendingReminders(bookingId) {
-  const now = Date.now();
+  deliverDueMails();
   state.mails = state.mails.filter((m) =>
-    !(m.bookingId === bookingId && m.type === "remind" && m.scheduledAt > now));
+    !(m.bookingId === bookingId && m.type === "remind" && (m.status === "pending" || m.status === "sending")));
 }
 
 function queueChangeMails(bk) {
@@ -497,6 +566,7 @@ function queueChangeMails(bk) {
     `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
     `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}`,
     Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+  deliverDueMails();
 }
 
 function queueCancelMails(bk) {
@@ -512,19 +582,17 @@ function queueCancelMails(bk) {
     `【予約取消】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
     `予約が取消されました。\n\n■取消した予約\n${bookingLines(bk)}`,
     now, bk.id);
-}
-
-function mailStatus(m) {
-  return m.scheduledAt <= Date.now() ? "accepted" : "pending";
+  deliverDueMails();
 }
 
 function mailSummary() {
-  let pending = 0, accepted = 0;
-  for (const m of state.mails) (mailStatus(m) === "accepted" ? accepted++ : pending++);
-  return [
-    { status: "pending", count: pending },
-    { status: "accepted", count: accepted },
-  ];
+  deliverDueMails();
+  const counts = { pending: 0, sending: 0, accepted: 0, failed: 0 };
+  for (const m of state.mails) {
+    if (m.status === "sent") counts.accepted++;
+    else counts[m.status] = (counts[m.status] || 0) + 1;
+  }
+  return Object.entries(counts).map(([status, count]) => ({ status, count }));
 }
 
 // ---- 予約サイト用の公開API（管理画面と同じデータを参照） -----------------
@@ -565,12 +633,13 @@ function nominatableStaff(courseId, genderPref) {
 }
 
 // 指定時間帯に施術できるスタッフID一覧
-function freeStaffIds(date, startMin, endMin, courseId, genderPref) {
+// 対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
+function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId) {
   const shifts = ensureShifts(date);
   const ev = ensureEvents(date);
   const busy = (staffId) => {
     const items = [
-      ...ev.bookings.filter((b) => b.status === "confirmed" && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId)),
+      ...ev.bookings.filter((b) => b.status === "confirmed" && b.id !== ignoreBookingId && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId)),
       ...ev.blocks.filter((b) => b.staff_id === staffId),
     ];
     return items.some((it) => msToMin(date, it.start_at) < endMin && msToMin(date, it.end_at) > startMin);
@@ -631,6 +700,10 @@ function createPublicBooking(body) {
   if (!course || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !(people >= 1 && people <= 3) ||
       body.consent !== true || !String(body.name || "").trim() || !String(body.email || "").trim() ||
       !String(body.phone || "").trim()) throw err(400, "invalid");
+  // フリーメッセージ欄の設定（表示・必須・文字数）はサーバー側でも強制する
+  const fm = state.settings.freeMessage;
+  let comment = fm.visible ? String(body.comment || "").slice(0, fm.maxLength || 2000) : "";
+  if (fm.visible && fm.required && !comment.trim()) throw err(400, "invalid");
   const today = todayJst();
   if (date < today || date > addDays(today, 84)) throw err(400, "invalid");
   if (!ensureDay(date).enabled) throw err(409, "soldOut");
@@ -665,13 +738,15 @@ function createPublicBooking(body) {
     start_at: minToMs(date, m), end_at: minToMs(date, m + dur),
     people, course: body.course, course_name: course.name,
     name: String(body.name).slice(0, 120), email: String(body.email).slice(0, 254),
-    phone: String(body.phone).slice(0, 40), comment: String(body.comment || "").slice(0, 2000),
+    phone: String(body.phone).slice(0, 40), comment,
     total: course.price * people + late + fee, base_price: course.price,
     nomination_fee: fee, nominated_staff_id: nominated ? nominated.id : null,
     nominated_staff_name: nominated ? nominated.name : null,
     staff: pref, customer_token: token, language: String(body.language || "ja"),
   });
-  ev.assignments.push({ booking_id: id, staff_id: assignee });
+  // 複数名の予約は、対応可能で空いているスタッフを人数分確保する（空き判定と同じ条件）
+  const coAssignees = free.filter((sid) => sid !== assignee).slice(0, people - 1);
+  for (const sid of [assignee, ...coAssignees]) ev.assignments.push({ booking_id: id, staff_id: sid });
   state.bookingIndex.set(id, date);
   queueBookingMails(ev.bookings.find((b) => b.id === id)); // 完了メール＋通知＋双方のリマインド
   ensureDay(date).version++;
@@ -693,9 +768,9 @@ function getPublicBooking(id, token) {
       nominatedStaffName: bk.nominated_staff_name, nominationFee: bk.nomination_fee,
       total: bk.total,
     },
-    notifications: state.mails
+    notifications: (deliverDueMails(), state.mails)
       .filter((m) => m.bookingId === bk.id && (m.type === "confirm" || m.type === "notify"))
-      .map((m) => ({ kind: m.kind, status: mailStatus(m) })),
+      .map((m) => ({ kind: m.kind, status: m.status === "sent" ? "accepted" : m.status === "failed" ? "failed" : "pending" })),
   };
 }
 
@@ -788,6 +863,41 @@ function handleDemoApi(req, res, url) {
     return true;
   }
 
+  // フリーメッセージ欄などの設定（管理画面から変更し、予約サイトに即時反映）
+  if (url.pathname === "/api/demo/settings") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(state.settings));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}").freeMessage || {};
+          const fm = state.settings.freeMessage;
+          fm.visible = b.visible !== false;
+          fm.required = b.required === true;
+          fm.label = String(b.label || "").slice(0, 60);
+          fm.placeholder = String(b.placeholder || "").slice(0, 200);
+          fm.description = String(b.description || "").slice(0, 300);
+          const len = Number(b.maxLength);
+          fm.maxLength = Number.isFinite(len) && len >= 1 && len <= 2000 ? Math.floor(len) : 2000;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(state.settings));
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405);
+    res.end();
+    return true;
+  }
+
   if (url.pathname === "/api/demo/locks" && (req.method === "GET" || req.method === "HEAD")) {
     const locks = state.staff.map((st) => ({ id: st.id, name: st.name, locked: st.locked ? 1 : 0 }));
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -795,9 +905,8 @@ function handleDemoApi(req, res, url) {
     return true;
   }
   if (url.pathname === "/api/demo/mails" && (req.method === "GET" || req.method === "HEAD")) {
-    const mails = [...state.mails]
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((m) => ({ ...m, status: mailStatus(m) }));
+    deliverDueMails();
+    const mails = [...state.mails].sort((a, b) => b.createdAt - a.createdAt);
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ mails }));
     return true;

@@ -95,7 +95,10 @@
   .subject { font-weight: 700; flex: 1; min-width: 240px; }
   .meta { color: #8d8d8d; font-size: 12px; white-space: nowrap; }
   .status-pending { color: #b06a00; font-weight: 700; }
+  .status-sending { color: #2a6fb0; font-weight: 700; }
   .status-accepted { color: #3f9b45; font-weight: 700; }
+  .status-failed { color: #c0392b; font-weight: 700; }
+  .mail-error { color: #c0392b; margin: 6px 0 0; }
   .mailbody {
     border-top: 1px dashed #c6b9ad;
     margin: 0 12px;
@@ -118,7 +121,7 @@
     <a href="/admin">← 予約台帳へ戻る</a>
     <a href="/" target="_blank">予約サイトを開く</a>
   </header>
-  <p class="note">操作デモ・架空データのみ／メールは実際には送信されず、ここで内容を確認できます。リマインドは「お客様＝来店24時間前」「店舗＝当日朝9時」に送信済み扱いになります。</p>
+  <p class="note">操作デモ・架空データのみ／メールは実際には送信されず、ここで内容と送信状態（送信予定→送信処理中→送信済み／送信失敗）を確認できます。リマインドは「お客様＝来店24時間前」「店舗＝当日朝9時」に送信されます。</p>
   <div class="tabs">
     <button data-f="all" class="on">すべて</button>
     <button data-f="customer">お客様宛</button>
@@ -152,8 +155,12 @@
     }
     list.innerHTML = rows.map((m) => {
       const [label, cls] = TYPE[m.type] || [m.type, "b-notify"];
-      const stat = m.status === "accepted"
-        ? '<span class="status-accepted">送信済み（デモ）</span> ' + fmt(m.scheduledAt)
+      const stat = m.status === "sent"
+        ? '<span class="status-accepted">送信済み（デモ）</span> ' + fmt(m.sentAt || m.scheduledAt)
+        : m.status === "failed"
+        ? '<span class="status-failed">送信失敗</span> ' + fmt(m.scheduledAt)
+        : m.status === "sending"
+        ? '<span class="status-sending">送信処理中</span> ' + fmt(m.scheduledAt)
         : '<span class="status-pending">送信予定</span> ' + fmt(m.scheduledAt);
       return `<details class="mail" data-id="${m.id}" ${opened.has(m.id) ? "open" : ""}>
         <summary>
@@ -164,6 +171,7 @@
         </summary>
         <div class="mailbody">
           <p class="to">宛先：${esc(m.to)}</p>
+          ${m.error ? '<p class="mail-error">エラー：' + esc(m.error) + "</p>" : ""}
           <pre>${esc(m.body)}</pre>
         </div>
       </details>`;

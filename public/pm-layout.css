@@ -601,3 +601,62 @@ main.ledger-app .pm-orange, .pm-orange {
   padding: 10px 18px;
   border-radius: 5px;
 }
+
+/* ---- 店舗情報：予約用ホームページ設定モーダル ---- */
+#pm-shop-modal {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+#pm-shop-modal section {
+  background: #fff;
+  border-radius: 6px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 60px);
+  overflow: auto;
+  padding: 22px 24px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+  font-size: 13px;
+  color: #292929;
+}
+#pm-shop-modal h2 { margin: 0 0 6px; font-size: 20px; }
+#pm-shop-modal .pm-shop-sub {
+  color: #6b5b4b;
+  border-bottom: 1px solid #e5d9cd;
+  padding-bottom: 10px;
+  margin: 0 0 14px;
+}
+#pm-shop-modal label { display: block; margin-bottom: 12px; font-weight: 700; }
+#pm-shop-modal label input[type="text"],
+#pm-shop-modal label input[type="number"] {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-weight: 400;
+  border: 1px solid #c6b9ad;
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  background: #fff;
+}
+#pm-shop-modal .pm-shop-check { display: flex; align-items: center; gap: 8px; }
+#pm-shop-modal .pm-shop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+#pm-shop-modal .pm-shop-actions button {
+  font: inherit;
+  padding: 9px 18px;
+  border-radius: 4px;
+  border: 1px solid #c6b9ad;
+  background: #fff;
+  cursor: pointer;
+}
+#pm-shop-modal .pm-shop-actions .pm-red { border: none; }

@@ -4,6 +4,21 @@
   "use strict";
   const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
 
+  // 保存APIの応答に warning が含まれていたら管理者に知らせる
+  // （例：対応可能メニューから外したメニューの予約が残っている場合）
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const res = await origFetch(input, init);
+    try {
+      const u = typeof input === "string" ? input : input?.url || "";
+      if (u.includes("/api/demo/schedule") && init && init.method === "POST" && res.ok) {
+        const j = await res.clone().json().catch(() => null);
+        if (j && j.warning) setTimeout(() => window.alert(j.warning), 100);
+      }
+    } catch {}
+    return res;
+  };
+
   function ensure() {
     const app = document.querySelector(".ledger-app");
     if (!app) return;
@@ -194,6 +209,35 @@
         if (fn) b.addEventListener("click", fn);
         else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
         navMenu.appendChild(b);
+      }
+    }
+
+    // 3c3) 「店舗情報」メニューも本物と同じ項目構成にする
+    //      （店舗情報＝フリーメッセージなど予約ページ設定、スタッフ情報＝本来の画面）
+    const shopMenuRoot = [...document.querySelectorAll(".ledger-nav-menu")]
+      .find((d) => d.querySelector("summary")?.textContent.includes("店舗情報"));
+    const shopMenu = shopMenuRoot?.querySelector(":scope > div");
+    if (shopMenu && !shopMenu.dataset.pmMenu) {
+      shopMenu.dataset.pmMenu = "1";
+      const staffBtn = [...shopMenu.querySelectorAll("button")].find((b) => b.textContent === "スタッフ情報");
+      [...shopMenu.children].forEach((el) => { el.style.display = "none"; });
+      const shopItems = [
+        ["店舗情報", openShopSettings],
+        ["スタッフ情報", () => staffBtn?.click()],
+        ["ブース情報", null],
+        ["経費マスタ", null],
+        ["クレジットカード会社情報", null],
+        ["電子マネー情報", null],
+        ["TORICOM設定", null],
+        ["ユーザ情報", null],
+      ];
+      for (const [label, fn] of shopItems) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        if (fn) b.addEventListener("click", fn);
+        else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
+        shopMenu.appendChild(b);
       }
     }
 
@@ -558,6 +602,65 @@
         actions.insertBefore(del, actions.lastElementChild);
       }
     }
+  }
+
+  // 店舗情報：予約フォームのフリーメッセージ欄の設定（保存すると予約サイトへ即時反映）
+  async function openShopSettings() {
+    document.getElementById("pm-shop-modal")?.remove();
+    let s = { visible: true, required: false, label: "", placeholder: "", description: "", maxLength: 2000 };
+    try {
+      const r = await fetch("/api/demo/settings", { cache: "no-store" });
+      s = (await r.json()).freeMessage || s;
+    } catch {}
+    const wrap = document.createElement("div");
+    wrap.id = "pm-shop-modal";
+    wrap.innerHTML =
+      '<section role="dialog" aria-modal="true">' +
+      "<h2>店舗マスタ｜予約用ホームページ</h2>" +
+      '<p class="pm-shop-sub">予約フォームの「フリーメッセージ（ご要望・ご相談）」欄の設定です。保存すると予約サイトに即時反映されます。</p>' +
+      '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-visible"> 入力欄を表示する</label>' +
+      '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-required"> 入力を必須にする</label>' +
+      '<label>見出し（空欄なら標準の文言）<input type="text" id="pm-fm-label" maxlength="60"></label>' +
+      '<label>入力欄のヒント（placeholder）<input type="text" id="pm-fm-placeholder" maxlength="200"></label>' +
+      '<label>説明文（欄の下に表示）<input type="text" id="pm-fm-description" maxlength="300"></label>' +
+      '<label>文字数制限（1〜2000）<input type="number" id="pm-fm-maxlength" min="1" max="2000"></label>' +
+      '<div class="pm-shop-actions"><button type="button" class="pm-red" id="pm-fm-save">保存</button>' +
+      '<button type="button" id="pm-fm-close">閉じる</button></div>' +
+      "</section>";
+    document.body.appendChild(wrap);
+    const g = (id) => wrap.querySelector("#" + id);
+    g("pm-fm-visible").checked = s.visible !== false;
+    g("pm-fm-required").checked = s.required === true;
+    g("pm-fm-label").value = s.label || "";
+    g("pm-fm-placeholder").value = s.placeholder || "";
+    g("pm-fm-description").value = s.description || "";
+    g("pm-fm-maxlength").value = s.maxLength || 2000;
+    const close = () => wrap.remove();
+    g("pm-fm-close").addEventListener("click", close);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+    g("pm-fm-save").addEventListener("click", async () => {
+      try {
+        const r = await fetch("/api/demo/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            freeMessage: {
+              visible: g("pm-fm-visible").checked,
+              required: g("pm-fm-required").checked,
+              label: g("pm-fm-label").value,
+              placeholder: g("pm-fm-placeholder").value,
+              description: g("pm-fm-description").value,
+              maxLength: Number(g("pm-fm-maxlength").value) || 2000,
+            },
+          }),
+        });
+        if (!r.ok) throw new Error();
+        close();
+        window.alert("保存しました。予約サイトのフリーメッセージ欄に反映されます。");
+      } catch {
+        window.alert("保存できませんでした。接続を確認して再度お試しください。");
+      }
+    });
   }
 
   // 表示中の月のシフトをCSVでダウンロードする
