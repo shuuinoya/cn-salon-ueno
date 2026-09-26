@@ -21,6 +21,25 @@ const TYPES = {
   ".json": "application/json",
 };
 
+// サイト名の付け替え（配信時にのみ置き換える。保存ファイル自体は無加工のまま）
+// 予約サイト＝CN Ueno health & beauty ／ 管理画面＝CNsalon@board
+const OLD_BRAND = "UENO CN health＆beauty salon";
+const BOOKING_BRAND = "CN Ueno health & beauty";
+const ADMIN_BRAND = "CNsalon@board";
+function brandFor(file, url) {
+  const isAdmin = url
+    ? url.pathname === "/admin" || url.pathname.startsWith("/admin/") || url.pathname === "/demo/admin"
+    : /AdminSchedule/.test(file);
+  return isAdmin ? ADMIN_BRAND : BOOKING_BRAND;
+}
+
+// 覚えやすい入口URL（どちらも本来のページへ転送する）
+const ENTRY_URLS = {
+  "/cn-ueno-health-and-beauty": "/",
+  "/cn-ueno": "/",
+  "/cnsalon@board": "/admin/login",
+};
+
 // URLの ?course= / ?courses= でページの中身が変わるので、保存したページを選び分ける
 function routeKey(url) {
   if (url.pathname === "/menus/menu") {
@@ -38,23 +57,29 @@ function sendFile(res, file, status, type, head, url) {
   fs.readFile(file, (err, data) => {
     if (err) return send404(res, head);
     let body = data;
-    // 保存HTMLにはルーターの初期URL（searchParams）が保存時の値のまま埋め込まれている。
-    // 実際のリクエストのクエリパラメータを注入しないと、確認・完了ページなどが
-    // 「メニューを選択してください」表示になってしまうため、配信時に置き換える。
-    if (url && type.startsWith("text/html")) {
-      const nav = JSON.stringify({
-        pathname: url.pathname,
-        searchParams: [...url.searchParams.entries()],
-      });
-      let html = data.toString("utf8").replace(
-        /nav:\{"pathname":"[^"]*","searchParams":\[(?:\[[^\]]*\],?)*\]\}/,
-        "nav:" + nav
-      );
-      // 予約ページには、管理画面のフリーメッセージ設定を反映するスクリプトを差し込む
-      if (url.pathname.startsWith("/book")) {
-        html = html.replace("</body>", '<script src="/booking-tweaks.js" defer></script></body>');
+    const isHtml = type.startsWith("text/html");
+    if (isHtml || type.startsWith("text/javascript")) {
+      let text = data.toString("utf8");
+      // 保存HTMLにはルーターの初期URL（searchParams）が保存時の値のまま埋め込まれている。
+      // 実際のリクエストのクエリパラメータを注入しないと、確認・完了ページなどが
+      // 「メニューを選択してください」表示になってしまうため、配信時に置き換える。
+      if (url && isHtml) {
+        const nav = JSON.stringify({
+          pathname: url.pathname,
+          searchParams: [...url.searchParams.entries()],
+        });
+        text = text.replace(
+          /nav:\{"pathname":"[^"]*","searchParams":\[(?:\[[^\]]*\],?)*\]\}/,
+          "nav:" + nav
+        );
+        // 予約ページには、管理画面のフリーメッセージ設定を反映するスクリプトを差し込む
+        if (url.pathname.startsWith("/book")) {
+          text = text.replace("</body>", '<script src="/booking-tweaks.js" defer></script></body>');
+        }
       }
-      body = Buffer.from(html);
+      // サイト名の付け替え（HTML本文・RSCペイロード・JSチャンクをまとめて揃える）
+      if (text.includes(OLD_BRAND)) text = text.split(OLD_BRAND).join(brandFor(file, url));
+      body = Buffer.from(text);
     }
     res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-cache" });
     res.end(head ? undefined : body);
@@ -66,9 +91,33 @@ function send404(res, head) {
   sendFile(res, path.join(ROOT, r.file), 404, r.contentType, head);
 }
 
+// ---- セキュリティ ----
+// ・サーバーは 127.0.0.1 のみで待ち受けるため、同じネットワークの他の端末や
+//   インターネットからは一切接続できません（予約・顧客・会社情報は外に出ません）
+// ・データはこのパソコンのメモリ上のみ。メールも実際には送信しません
+// ・下の2つの検査で、悪意あるWebサイト経由のアクセス（DNSリバインディング・CSRF）も遮断します
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
+const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   const head = req.method === "HEAD";
+
+  // Hostヘッダ検証：外部ドメイン名経由でローカルサーバーへ到達させる攻撃を遮断
+  if (!LOCAL_HOST_RE.test(req.headers.host || "")) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Forbidden");
+  }
+  // 別サイトのページからの書き込み（予約作成・設定変更など）を遮断（CSRF対策）
+  const origin = req.headers.origin;
+  if (req.method !== "GET" && req.method !== "HEAD" && origin && !LOCAL_ORIGIN_RE.test(origin)) {
+    res.writeHead(403, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "forbidden" }));
+  }
+  // 基本のセキュリティヘッダ（内容の型偽装・他サイトへの埋め込み・参照元の漏えいを防ぐ）
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
 
   // 管理画面（操作デモ）用のAPIは、メモリ上の架空データで再現しています
   if (handleDemoApi(req, res, url)) return;
@@ -90,6 +139,13 @@ const server = http.createServer((req, res) => {
   } catch {
     return send404(res, head);
   }
+  // 入口URL：/cn-ueno-health-and-beauty（予約サイト）・/CNsalon@board（管理画面）
+  const entry = ENTRY_URLS[pathname.toLowerCase()];
+  if (entry) {
+    res.writeHead(302, { Location: entry });
+    return res.end();
+  }
+
   const file = path.normalize(path.join(PUBLIC, pathname));
   if (file.startsWith(PUBLIC + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
     return sendFile(res, file, 200, TYPES[path.extname(file).toLowerCase()] || "application/octet-stream", head);
@@ -129,6 +185,8 @@ server.on("error", (e) => {
   }
 });
 server.on("listening", () => {
-  console.log(`UENO CN health＆beauty salon（保存版）を起動しました: http://${HOST}:${port}`);
+  console.log(`起動しました。`);
+  console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
+  console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
 });
 server.listen(port, HOST);

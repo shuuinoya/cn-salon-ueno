@@ -1,4 +1,20 @@
-# UENO CN health＆beauty salon（元サイトの保存版）
+# CN Ueno health & beauty（元サイトの保存版）
+
+## 入口URL（起動後に開く）
+| サイト | 名前 | URL |
+|---|---|---|
+| お客様の予約サイト | CN Ueno health & beauty | http://127.0.0.1:5520/cn-ueno-health-and-beauty （トップページへ転送） |
+| 店舗用の管理画面 | CNsalon@board | http://127.0.0.1:5520/CNsalon@board （ログイン画面へ転送） |
+
+サイト名は配信時に付け替えています（保存ファイル自体は無加工のまま）。予約サイトの画面・確認メールの件名は「CN Ueno health & beauty」、管理画面のログイン・各ページのタイトルは「CNsalon@board」で表示されます。
+
+## セキュリティ（個人情報・予約情報・会社情報の保護）
+- サーバーは **127.0.0.1（このパソコンの中）だけで待ち受け**ます。同じWi-Fiの他の端末やインターネットからは一切接続できません
+- 予約・顧客・シフトなどのデータは**メモリ上のみ**で、ファイルにも外部にも保存・送信されません（サーバー再起動で消えます）。メールも実際には送信しません
+- **Hostヘッダ検証**（DNSリバインディング対策）：偽のドメイン名経由でローカルサーバーへ到達させる攻撃を403で遮断します
+- **Origin検査**（CSRF対策）：悪意ある別サイトのページからの予約作成・設定変更などの書き込みを403で遮断します
+- **セキュリティヘッダ**：`X-Content-Type-Options: nosniff`／`X-Frame-Options: DENY`（他サイトへの埋め込み禁止）／`Referrer-Policy: no-referrer`（参照元を外部へ送らない）
+- 外部のCDN・解析タグ等への通信はありません（画像・JS・CSS・フォントはすべてローカル配信。元サイトのCloudflareボット判定コードも除去済み）
 
 元サイト https://cn-salon-ueno.cnsalon2021.chatgpt.site を、2026年9月24日時点のまま保存したものです。
 `pages/` と `public/` の中身は基本的に元サイトのままです。例外は、追加したページ（demo-admin.html・pm-login.html・not-found.html）と、予約確認・完了ページのラベル折り返しバグを直すために最小修正した3ファイル（BookingText-*.js・page-WafCof8Y.js・page-ChO0-Npx.js）です。

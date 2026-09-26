@@ -483,7 +483,7 @@ function postSchedule(body) {
 
 // ---- リマインド・通知メール（デモ：実送信はせず、内容を生成して保存する） ----
 
-const STORE_NAME = "UENO CN health＆beauty salon";
+const STORE_NAME = "CN Ueno health & beauty";
 const STORE_MAIL = "info@cn-salon-ueno.example.jp";
 
 function fmtDateJa(date) {
