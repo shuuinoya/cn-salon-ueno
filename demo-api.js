@@ -418,6 +418,28 @@ function postSchedule(body) {
       }
       return { ok: true };
     }
+    case "staffDelete": {
+      // スタッフの削除。予約（昨日以降の確定分）が残っている場合は削除しない。
+      // シフト・休憩・業務・写真・受付停止設定はスタッフと一緒に削除する。
+      const st = state.staff.find((x) => x.id === body.staffId);
+      if (!st) throw err(404, "notFound");
+      const today = todayJst();
+      for (const [d, ev2] of state.events) {
+        if (d < addDays(today, -1)) continue;
+        const has = ev2.bookings.some((b) => b.status === "confirmed" &&
+          ev2.assignments.some((a) => a.booking_id === b.id && a.staff_id === st.id));
+        if (has) throw err(409, "hasBookings");
+      }
+      state.staff = state.staff.filter((x) => x.id !== st.id);
+      for (const [d, list] of state.shifts) state.shifts.set(d, list.filter((x) => x.staff_id !== st.id));
+      for (const ev2 of state.events.values()) {
+        ev2.blocks = ev2.blocks.filter((b) => b.staff_id !== st.id);
+        ev2.assignments = ev2.assignments.filter((a) => a.staff_id !== st.id);
+      }
+      state.photos.delete(st.id);
+      bump();
+      return { ok: true };
+    }
     case "lockStaff": {
       const st = state.staff.find((x) => x.id === body.staffId);
       if (!st) throw err(400, "invalid");

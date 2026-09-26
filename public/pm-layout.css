@@ -660,3 +660,16 @@ main.ledger-app .pm-orange, .pm-orange {
   cursor: pointer;
 }
 #pm-shop-modal .pm-shop-actions .pm-red { border: none; }
+
+/* スタッフ編集フォームの削除ボタン */
+.staff-form-actions { display: flex; gap: 10px; align-items: center; }
+.staff-form-actions .pm-staff-del {
+  font: inherit;
+  background: #e9625b;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 9px 22px;
+  cursor: pointer;
+}
+.staff-form-actions .pm-staff-del:hover { background: #d45953; }

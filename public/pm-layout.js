@@ -241,6 +241,56 @@
       }
     }
 
+    // 3c4) スタッフ編集フォームに「削除」ボタンを追加（登録済みスタッフのみ表示）
+    const staffActions = document.querySelector(".staff-form-actions");
+    if (staffActions) {
+      if (!staffActions.querySelector(".pm-staff-del")) {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "pm-staff-del";
+        del.textContent = "削除";
+        del.addEventListener("click", async () => {
+          const form = del.closest("form") || document;
+          const idVal = [...form.querySelectorAll("input")].map((i) => i.value)
+            .find((v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v));
+          if (!idVal || del.dataset.busy) return;
+          const known = Object.values(window.__pmLocks || {}).find((l) => l.id === idVal);
+          const name = known?.name || "このスタッフ";
+          if (!window.confirm("スタッフ「" + name + "」を削除しますか？\nシフト・休憩・業務も一緒に削除されます。\n（予約が残っている場合は削除できません）")) return;
+          del.dataset.busy = "1";
+          try {
+            const r = await fetch("/api/demo/schedule", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "staffDelete",
+                date: new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10),
+                staffId: idVal,
+              }),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+              window.alert(j.error === "hasBookings"
+                ? "このスタッフには予約が入っているため削除できません。\n先に予約の担当変更または取消をしてください。"
+                : "削除できませんでした。");
+              return;
+            }
+            await refreshLocks(true);
+            window.alert("スタッフ「" + name + "」を削除しました。");
+            [...form.querySelectorAll("button")].find((b) => b.textContent === "戻る")?.click();
+          } finally { delete del.dataset.busy; }
+        });
+        staffActions.appendChild(del);
+      }
+      // 新規作成（未保存）のフォームでは削除ボタンを隠す
+      const btn = staffActions.querySelector(".pm-staff-del");
+      const form2 = btn.closest("form") || document;
+      const curId = [...form2.querySelectorAll("input")].map((i) => i.value)
+        .find((v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v));
+      const saved = !!curId && Object.values(window.__pmLocks || {}).some((l) => l.id === curId);
+      btn.style.display = saved ? "" : "none";
+    }
+
     // 3d) 現在時刻の列を時間別概況でハイライト
     const nowJst = new Date(Date.now() + 9 * 3600e3);
     const hourIdx = (nowJst.getUTCHours() - 10 + 24) % 24;
