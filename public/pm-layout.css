@@ -145,6 +145,10 @@ main.ledger-app .ledger-side.pm-side {
 }
 .pm-side .ledger-side-search { order: 6; }
 .pm-side:has(#pm-pd) .ledger-side-search { display: none; }
+/* 空き枠タップ時：本物と同じ茶色パネル。React側の検索欄は隠す（×は閉じる用に残す） */
+main.ledger-app .ledger-side.pm-side:has(.pm-new) { background: #987050; border-color: #7c5a3f; }
+main.ledger-app .pm-side:has(.pm-new) .ledger-side-search { display: none !important; }
+.ledger-side-form.pm-new { background: transparent; box-shadow: none; }
 .pm-side .ledger-side-form { order: 9; }
 .pm-side .ledger-booking-list { order: 7; }
 #pm-pd { order: 3; padding: 0; }
@@ -1035,4 +1039,87 @@ main.ledger-app .pm-orange, .pm-orange {
   .pm-co-table td:nth-child(2) { white-space: nowrap; }
   .pm-co-in input { width: 64px; padding: 6px 4px; }
   .pm-co-subtotal b { font-size: 19px; }
+}
+
+/* ---- 空き枠タップ時の左パネル（予約の登録／性別選択／休憩・業務） ---- */
+.ledger-side-form.pm-new > *:not(#pm-np) { display: none !important; }
+#pm-np { display: block; }
+.pm-np-search input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  border: 1px solid #c6b9ad;
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #fff;
+  margin-bottom: 8px;
+}
+.pm-np-searchrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.pm-np-searchrow label { display: flex; align-items: center; gap: 6px; }
+.pm-np-searchrow .pm-red { padding: 7px 18px !important; }
+.pm-np-card {
+  position: relative;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 14px 20px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+}
+.pm-np-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.pm-np-time {
+  text-align: center;
+  font-weight: 700;
+  margin: 14px 0 14px;
+  color: #333;
+}
+.pm-np-time b { color: #e9625b; margin-left: 6px; }
+.pm-np-bar {
+  background: #f4eeea;
+  color: #333;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 12px -14px;
+  padding: 10px 0;
+}
+.pm-np-sub { text-align: center; font-weight: 700; margin: 14px 0; }
+.pm-np-gender {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 6px;
+}
+.pm-np-gender button {
+  font: inherit;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+.pm-np-gender button:hover { background: #f7f1e8; }
+.pm-np-kind {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+.pm-np-kind .pm-red {
+  font-weight: 700;
+  border-radius: 6px !important;
+  padding: 12px 22px !important;
 }

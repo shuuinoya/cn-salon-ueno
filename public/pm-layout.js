@@ -242,6 +242,51 @@
       }
     }
 
+    // 3c6) 空き枠はシングルタップでも選択できるようにする（本物と同じ操作感）
+    if (!window.__pmTrackTap) {
+      window.__pmTrackTap = 1;
+      document.addEventListener("click", (e) => {
+        const track = e.target.closest(".ledger-track");
+        if (!track || e.target !== track || e.detail > 1) return;
+        track.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: e.clientX, clientY: e.clientY }));
+      });
+    }
+
+    // 3c7) 再読込ボタンを押したら左の編集パネルを閉じて再読込する
+    //（パネルが開いている間は本来のボタンがdisabledでクリックが発生しないため、
+    //  透明のオーバーレイを重ねて「閉じる→再読込」を行う）
+    {
+      const rb = document.querySelector(".ledger-refresh");
+      let ov = document.getElementById("pm-refresh-ov");
+      if (rb && rb.disabled && document.querySelector(".ledger-side")) {
+        if (!ov) {
+          ov = document.createElement("span");
+          ov.id = "pm-refresh-ov";
+          ov.title = "編集を閉じて再読込";
+          ov.style.cssText = "position:fixed;z-index:900;cursor:pointer;";
+          ov.addEventListener("click", () => {
+            [...document.querySelectorAll(".ledger-side button")]
+              .find((b) => b.textContent === "×" && !b.closest("#pm-np"))?.click();
+            setTimeout(() => {
+              const r2 = document.querySelector(".ledger-refresh");
+              if (r2 && !r2.disabled) r2.click();
+            }, 350);
+          });
+          document.body.appendChild(ov);
+        }
+        const r = rb.getBoundingClientRect();
+        ov.style.left = r.left + "px";
+        ov.style.top = r.top + "px";
+        ov.style.width = r.width + "px";
+        ov.style.height = r.height + "px";
+      } else {
+        ov?.remove();
+      }
+    }
+
+    // 3c8) 空き枠パネルを本物の「予約の登録／性別選択／予約以外の登録」構成にする
+    decorateNewPanel();
+
     // 3c5) 「日次管理」メニュー：営業実績（日報）ページを開けるようにする
     const dailyBtn = [...document.querySelectorAll(".ledger-nav > nav > button")]
       .find((b) => b.textContent.trim().startsWith("日次管理"));
@@ -451,8 +496,12 @@
     const prevDay = dateISOMinus1(form.querySelector("p time")?.getAttribute("datetime") || "");
     const name = (val("お名前")?.textContent || "").trim();
     const menu = (val("メニュー")?.textContent || "").trim();
-    const telLines = (val("連絡先")?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
-    const tel = telLines.find((s) => /^[-\d+ ]+$/.test(s)) || "08091951969";
+    // 連絡先はメール<br>電話の構造。非表示中はinnerTextの改行が失われるためノード単位で読む
+    const contactParts = val("連絡先")
+      ? [...val("連絡先").childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).filter(Boolean)
+      : [];
+    const cEmail = contactParts.find((s2) => s2.includes("@")) || "";
+    const tel = contactParts.find((s2) => /^[-\d+ ]{6,}$/.test(s2)) || "08091951969";
     const dateISO = form.querySelector("p time")?.getAttribute("datetime") || "";
     const tsel = form.querySelectorAll(".ledger-time-input select");
     const hh = String(tsel[0]?.value ?? "").padStart(2, "0");
@@ -468,7 +517,7 @@
         '<div class="pm-cust-name"><span class="pm-gender">♀</span> ' + (esc(name) || "&nbsp;") + '<span class="pm-count">回数:5/5</span></div>' +
       "</div>" +
       '<div class="pm-icons">' +
-        [["顧客", "♙", "none"], ["カード", "▦", "none"], ["履歴", "↺", "none"], ["会計", "▤", "pay"], ["返客", "↶", "none"]]
+        [["顧客", "♙", "customer"], ["カード", "▦", "none"], ["履歴", "↺", "none"], ["会計", "▤", "pay"], ["返客", "↶", "none"]]
           .map(([t, g, a]) => '<button type="button" data-act="' + a + '"><small>' + t + "</small><b>" + g + "</b></button>").join("") +
       "</div>" +
       '<div class="pm-idbox">' +
@@ -500,9 +549,27 @@
         else if (act === "cancel") buttons.find((b) => b.textContent === "予約取消")?.click();
         else if (act === "edit") form.classList.toggle("pm-editing");
         else if (act === "pay") openCheckout();
+        else if (act === "customer") {
+          const q = new URLSearchParams({
+            ref: pd.dataset.cref || "",
+            name: pd.dataset.cname || "",
+            tel: pd.dataset.ctel || "",
+            email: pd.dataset.cemail || "",
+            gender: pd.dataset.cgender || "",
+            comment: pd.dataset.ccomment || "",
+          });
+          location.href = "/admin/customer?" + q.toString();
+        }
       });
     }
     if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+    // 顧客マスタ画面へ引き継ぐ情報
+    pd.dataset.cname = name;
+    pd.dataset.ctel = tel;
+    pd.dataset.cemail = cEmail;
+    pd.dataset.cref = bookingId;
+    pd.dataset.ccomment = ((val("コメント")?.textContent || "").trim() === "なし" ? "" : (val("コメント")?.textContent || "").trim());
+    pd.dataset.cgender = menu.includes("女性") ? "f" : menu.includes("男性") ? "m" : "f";
   }
 
   // 日付ピッカー：本物と同じ「予約状況カレンダー」を既存ピッカーに被せる
@@ -602,6 +669,63 @@
         '<span><b class="pm-cal-cnt">( )</b> 予約数</span>' +
         "</div>";
     });
+  }
+
+  // 空き枠タップ時の左パネル：本物と同じ「開始時間／予約の登録（性別）／予約以外の登録（休憩・業務）」
+  function decorateNewPanel() {
+    const side = document.querySelector(".ledger-side");
+    const form = side?.querySelector(".ledger-side-form");
+    const old = document.getElementById("pm-np");
+    if (!side || !form) { old?.remove(); return; }
+    const isNew = [...form.querySelectorAll("button")].some((b) => b.textContent === "新規予約を入力");
+    form.classList.toggle("pm-new", isNew);
+    if (!isNew) { old?.remove(); return; }
+    side.classList.add("pm-side");
+
+    const dateISO = form.querySelector("p time")?.getAttribute("datetime") || "";
+    const tsel = form.querySelectorAll(".ledger-time-input select");
+    const hh = String(tsel[0]?.value ?? "").padStart(2, "0");
+    const mm = String(tsel[1]?.value ?? "").padStart(2, "0");
+    const timeText = dateISO + " " + hh + ":" + mm;
+
+    let np = old;
+    if (!np) {
+      np = document.createElement("div");
+      np.id = "pm-np";
+      const person = (color) =>
+        '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="' + color + '" d="M12 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-6 20v-6a6 6 0 0 1 12 0v6h-3v-6a3 3 0 0 0-6 0v6H6Z"/></svg>';
+      np.innerHTML =
+        '<div class="pm-np-search"><input type="text" placeholder="顧客を検索" aria-label="顧客を検索">' +
+        '<div class="pm-np-searchrow"><label><input type="checkbox" checked> 自店のみ</label>' +
+        '<button type="button" class="pm-red" data-np="none">検索</button></div></div>' +
+        '<div class="pm-np-card">' +
+        '<button type="button" class="pm-x pm-np-x" data-np="close">X</button>' +
+        '<p class="pm-np-time">開始時間 <b id="pm-np-time"></b></p>' +
+        '<h4 class="pm-np-bar">予約の登録</h4>' +
+        '<p class="pm-np-sub">性別を選択してください</p>' +
+        '<div class="pm-np-gender">' +
+        '<button type="button" data-np="book">' + person("#333") + "男性</button>" +
+        '<button type="button" data-np="book">' + person("#c0392b") + "女性</button>" +
+        "</div>" +
+        '<h4 class="pm-np-bar">予約以外の登録</h4>' +
+        '<div class="pm-np-kind">' +
+        '<button type="button" class="pm-red" data-np="break">休憩</button>' +
+        '<button type="button" class="pm-red" data-np="work">業務</button>' +
+        "</div></div>";
+      form.appendChild(np);
+      np.addEventListener("click", (e) => {
+        const act = e.target.closest("[data-np]")?.dataset.np;
+        if (!act || act === "none") return;
+        const btn = (label) => [...form.querySelectorAll("button")]
+          .find((b) => b.textContent === label && !b.closest("#pm-np"));
+        if (act === "close") btn("×")?.click();
+        else if (act === "book") btn("新規予約を入力")?.click();
+        else if (act === "break") btn("休憩")?.click();
+        else if (act === "work") btn("業務")?.click();
+      });
+    }
+    const t = np.querySelector("#pm-np-time");
+    if (t && t.textContent !== timeText) t.textContent = timeText;
   }
 
   // お会計（精算）モーダル：本物のPeakManagerと同じ構成

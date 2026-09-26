@@ -338,5 +338,10 @@
   "file": "pages/pm-report.html",
   "status": 200,
   "contentType": "text/html; charset=utf-8"
+ },
+ "/admin/customer": {
+  "status": 200,
+  "contentType": "text/html; charset=utf-8",
+  "file": "pages/pm-customer.html"
  }
 }
