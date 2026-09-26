@@ -1014,6 +1014,10 @@ function queueCancelMails(bk) {
   deliverDueMails();
 }
 
+// 送信予定時刻を過ぎたメール（リマインド等）を、アクセスが無くても毎分自動送信する
+const mailTimer = setInterval(deliverDueMails, 60000);
+if (mailTimer.unref) mailTimer.unref();
+
 function mailSummary() {
   deliverDueMails();
   const counts = { pending: 0, sending: 0, accepted: 0, failed: 0 };
