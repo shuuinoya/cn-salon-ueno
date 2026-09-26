@@ -95,6 +95,14 @@ main.ledger-app .ledger-mode-group:nth-of-type(2) button:first-child {
   color: #8d8d8d;
 }
 
+/* ---- ヘッダー左：白い花びらロゴ（SVG） ---- */
+main.ledger-app .ledger-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+main.ledger-app .ledger-logo svg { display: block; }
+
 /* ---- ヘッダー右：警告バッジ＋ユーザー表示 ---- */
 .pm-alert {
   background: #e6b05f;
@@ -772,6 +780,42 @@ main.ledger-app .pm-orange, .pm-orange {
   margin-right: 6px;
 }
 #pm-menu-modal td.ops button.pm-red { border: none; }
+
+/* ---- メニュー写真（登録・差し替え・削除） ---- */
+#pm-menu-modal td.pm-menu-photo { width: 78px; text-align: center; vertical-align: middle; }
+#pm-menu-modal td.pm-menu-photo img {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  display: block;
+  margin: 0 auto;
+  border: 1px solid #dcd0c4;
+  border-radius: 3px;
+  background: #f4eeea;
+}
+#pm-menu-modal .pm-photo-none { color: #b3a698; font-size: 11px; white-space: nowrap; }
+#pm-menu-modal .pm-photo-pick {
+  display: inline-block;
+  border: 1px solid #c6b9ad;
+  border-radius: 3px;
+  background: #f4eeea;
+  color: #6b5b4b;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#pm-menu-modal .pm-photo-pick:hover { background: #ece2d8; }
+#pm-menu-modal .pm-photo-pick input[type="file"] { display: none; }
+#pm-menu-modal td.ops .pm-photo-pick { margin-right: 6px; }
+#pm-menu-modal .pm-photo-name {
+  align-self: center;
+  color: #6b5b4b;
+  font-size: 11px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #pm-menu-modal .pm-shop-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
 #pm-menu-modal .pm-shop-actions button {
   font: inherit;

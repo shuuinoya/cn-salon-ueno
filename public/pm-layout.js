@@ -105,8 +105,23 @@
       }, 4000);
     }
 
-    // 3a2) 左上のロゴは押しても何も起きないようにする（予約サイトへ飛ばない）
+    // 3a1) 左上のロゴを本物と同じ「白い花びらマーク」にする
+    //      （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
     const logo = document.querySelector(".ledger-logo");
+    if (logo && !logo.dataset.pmFlower) {
+      logo.dataset.pmFlower = "1";
+      logo.textContent = "";
+      logo.innerHTML =
+        '<svg viewBox="0 0 44 44" width="30" height="30" aria-hidden="true" focusable="false">' +
+        '<g fill="#fff" transform="translate(23.5 20.5)">' +
+        ["0", "45", "90", "135", "180", "270", "315"].map((a) =>
+          '<path transform="rotate(' + a + ')" d="M0 -4.2 C-3.3 -8.6 -3.5 -15.4 0 -20.4 C3.5 -15.4 3.3 -8.6 0 -4.2 Z"/>'
+        ).join("") +
+        '<path transform="translate(-10.5 12.5) rotate(228)" d="M0 -1 C-2.3 -4 -2.4 -8.3 0 -11.6 C2.4 -8.3 2.3 -4 0 -1 Z"/>' +
+        "</g></svg>";
+    }
+
+    // 3a2) 左上のロゴは押しても何も起きないようにする（予約サイトへ飛ばない）
     if (logo && !logo.dataset.pmNoNav) {
       logo.dataset.pmNoNav = "1";
       logo.addEventListener("click", (e) => {
@@ -1095,12 +1110,14 @@
     wrap.innerHTML =
       '<section role="dialog" aria-modal="true">' +
       "<h2>店舗マスタ｜メニュー一覧</h2>" +
-      '<p class="pm-shop-sub">メニューの追加・変更・削除ができます。空き状況・予約金額に即時反映されます。' +
+      '<p class="pm-shop-sub">メニューの追加・変更・削除・写真の登録ができます。空き状況・予約金額に即時反映されます。' +
       "（保存版のため、お客様画面のメニュー紹介ページには追加メニューは表示されません。追加メニューの予約受付・変更後の料金はサーバー側で正しく扱われます）</p>" +
       '<div class="pm-menu-new">' +
       '<input type="text" id="pm-mn-name" placeholder="新しいメニュー名" maxlength="120">' +
       '<input type="number" id="pm-mn-price" placeholder="料金(円)" min="0" step="100">' +
       '<input type="number" id="pm-mn-min" placeholder="時間(分)" min="10" max="600" step="5">' +
+      '<label class="pm-photo-pick" title="メニュー写真（任意）">写真<input type="file" id="pm-mn-photo" accept="image/*"></label>' +
+      '<span id="pm-mn-photoname" class="pm-photo-name"></span>' +
       '<button type="button" class="pm-red" id="pm-mn-add">追加</button>' +
       "</div>" +
       '<div class="pm-menu-list">読み込み中…</div>' +
@@ -1128,13 +1145,46 @@
       window.__pmCoursesAt = 0; // キャッシュを無効化して選択肢へ即反映
       return j;
     };
+    // 写真ファイルを読み込み、長辺640pxに縮小したJPEGのdataURLへ変換する
+    const readPhoto = (file) => new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type)) { reject(new Error("notImage")); return; }
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error("read"));
+      fr.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const sc = Math.min(1, 640 / Math.max(img.width, img.height, 1));
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(img.width * sc));
+          cv.height = Math.max(1, Math.round(img.height * sc));
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = () => reject(new Error("decode"));
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
     const render = (courses) => {
       listEl.innerHTML = "";
       const table = document.createElement("table");
-      table.innerHTML = "<thead><tr><th>メニュー名</th><th>料金(円)</th><th>時間(分)</th><th></th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>写真</th><th>メニュー名</th><th>料金(円)</th><th>時間(分)</th><th></th></tr></thead>";
       const tb = document.createElement("tbody");
       for (const c of courses) {
         const tr = document.createElement("tr");
+        const tdPhoto = document.createElement("td");
+        tdPhoto.className = "pm-menu-photo";
+        if (c.hasPhoto) {
+          const im = document.createElement("img");
+          im.src = "/api/demo/course-photo?id=" + encodeURIComponent(c.id) + "&t=" + Date.now();
+          im.alt = c.name;
+          tdPhoto.appendChild(im);
+        } else {
+          const ph = document.createElement("span");
+          ph.className = "pm-photo-none";
+          ph.textContent = "写真なし";
+          tdPhoto.appendChild(ph);
+        }
         const tdName = document.createElement("td");
         const inName = document.createElement("input");
         inName.type = "text"; inName.value = c.name; inName.maxLength = 120;
@@ -1162,24 +1212,71 @@
           const j = await post({ action: "delete", id: c.id });
           if (j) render(j.courses);
         });
-        tdOps.append(bSave, bDel);
-        tr.append(tdName, tdPrice, tdMin, tdOps);
+        // 写真の登録／差し替え（選ぶとその場で保存される）
+        const pick = document.createElement("label");
+        pick.className = "pm-photo-pick";
+        pick.textContent = c.hasPhoto ? "写真変更" : "写真登録";
+        const file = document.createElement("input");
+        file.type = "file"; file.accept = "image/*";
+        file.addEventListener("change", async () => {
+          const f = file.files && file.files[0];
+          file.value = "";
+          if (!f) return;
+          let dataUrl;
+          try { dataUrl = await readPhoto(f); }
+          catch { window.alert("画像ファイルを読み込めませんでした。JPEG・PNGなどの画像を選んでください。"); return; }
+          const j = await post({ action: "update", id: c.id, name: inName.value, price: inPrice.value, minutes: inMin.value, photo: dataUrl });
+          if (j) render(j.courses);
+        });
+        pick.appendChild(file);
+        tdOps.append(bSave, bDel, pick);
+        if (c.hasPhoto) {
+          const bPhotoDel = document.createElement("button");
+          bPhotoDel.type = "button"; bPhotoDel.className = "pm-photo-del"; bPhotoDel.textContent = "写真削除";
+          bPhotoDel.addEventListener("click", async () => {
+            if (!window.confirm("メニュー「" + c.name.slice(0, 30) + "」の写真を削除しますか？")) return;
+            const j = await post({ action: "update", id: c.id, name: inName.value, price: inPrice.value, minutes: inMin.value, photo: "" });
+            if (j) render(j.courses);
+          });
+          tdOps.append(bPhotoDel);
+        }
+        tr.append(tdPhoto, tdName, tdPrice, tdMin, tdOps);
         tb.appendChild(tr);
       }
       table.appendChild(tb);
       listEl.appendChild(table);
     };
+    // 新規メニュー用の写真（追加を押すまで保留しておく）
+    let newPhoto = "";
+    const newPhotoName = wrap.querySelector("#pm-mn-photoname");
+    wrap.querySelector("#pm-mn-photo").addEventListener("change", async (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      try {
+        newPhoto = await readPhoto(f);
+        newPhotoName.textContent = f.name.slice(0, 24);
+      } catch {
+        newPhoto = "";
+        newPhotoName.textContent = "";
+        window.alert("画像ファイルを読み込めませんでした。JPEG・PNGなどの画像を選んでください。");
+      }
+    });
     wrap.querySelector("#pm-mn-add").addEventListener("click", async () => {
-      const j = await post({
+      const body = {
         action: "create",
         name: wrap.querySelector("#pm-mn-name").value,
         price: wrap.querySelector("#pm-mn-price").value,
         minutes: wrap.querySelector("#pm-mn-min").value,
-      });
+      };
+      if (newPhoto) body.photo = newPhoto;
+      const j = await post(body);
       if (j) {
         wrap.querySelector("#pm-mn-name").value = "";
         wrap.querySelector("#pm-mn-price").value = "";
         wrap.querySelector("#pm-mn-min").value = "";
+        newPhoto = "";
+        newPhotoName.textContent = "";
         render(j.courses);
       }
     });

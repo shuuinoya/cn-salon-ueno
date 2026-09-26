@@ -36,6 +36,10 @@ const COURSE_SEED = {
 const courseStore = new Map(Object.entries(COURSE_SEED).map(([id, c]) => [id, { id, ...c }]));
 let courseSerial = 0;
 const getCourse = (id) => courseStore.get(id);
+// メニューごとの写真（courseId -> dataURL）。一覧のJSONを重くしないため本体とは別持ち
+const coursePhotos = new Map();
+const courseListJson = () =>
+  [...courseStore.values()].map((c) => ({ ...c, hasPhoto: coursePhotos.has(c.id) }));
 
 const STAFF_SEED = [
   { id: "aaaaaa01-0000-4000-8000-000000000001", name: "豊", gender: "male", message: "はじめまして。\n小顔矯正とオイルマッサージを得意としており、講師レベルの技術とお客様から評価をいただくこともあります。\n\n小顔矯正では、お顔のバランスや筋肉の状態を見ながら丁寧に調整し、施術前後の変化をすぐに実感していただける即効性を大切にしています。フェイスラインの引き締まりや左右バランスの改善を感じていただくお客様が多いです。\n\nオイルマッサージでは、筋肉の深い部分までしっかりアプローチしながら、リラックスと疲労回復の両方を感じていただける施術を心がけています。\n\n技術・接客ともに常に高いレベルを目指し、どのお客様にもご満足いただける施術を大切にしています。\nお身体やお顔のお悩みは、ぜひ安心してお任せください。心を込めて施術いたします。" },
@@ -993,16 +997,30 @@ function handleDemoApi(req, res, url) {
     return true;
   }
 
-  // メニュー一覧（管理画面から追加・変更・削除できる）
+  // メニューの写真（メニュー一覧で登録した画像を配信する）
+  if (url.pathname === "/api/demo/course-photo") {
+    const dataUrl = coursePhotos.get(url.searchParams.get("id") || "");
+    const mc = dataUrl && /^data:(image\/[a-z+]+);base64,(.*)$/.exec(dataUrl);
+    if (!mc) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "notFound" }));
+      return true;
+    }
+    res.writeHead(200, { "Content-Type": mc[1], "Cache-Control": "no-store" });
+    res.end(Buffer.from(mc[2], "base64"));
+    return true;
+  }
+
+  // メニュー一覧（管理画面から追加・変更・削除・写真登録ができる）
   if (url.pathname === "/api/demo/courses") {
     if (req.method === "GET" || req.method === "HEAD") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ courses: [...courseStore.values()] }));
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ courses: courseListJson() }));
       return true;
     }
     if (req.method === "POST") {
       let raw = "";
-      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("data", (c) => { raw += c; if (raw.length > 4e6) req.destroy(); });
       req.on("end", () => {
         try {
           const b = JSON.parse(raw || "{}");
@@ -1014,14 +1032,25 @@ function handleDemoApi(req, res, url) {
             if (!(Number.isFinite(price) && price >= 0 && price <= 1000000)) throw err(400, "invalid");
             if (!(Number.isFinite(minutes) && minutes >= 10 && minutes <= 600)) throw err(400, "invalid");
           };
+          // photo: dataURL文字列=登録／空文字=削除／未指定=変更なし
+          const applyPhoto = (cid) => {
+            if (typeof b.photo !== "string") return;
+            if (b.photo === "") { coursePhotos.delete(cid); return; }
+            if (!/^data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+$/.test(b.photo) || b.photo.length > 3e6) {
+              throw err(400, "invalidPhoto");
+            }
+            coursePhotos.set(cid, b.photo);
+          };
           if (b.action === "create") {
             validVals();
             const id = "900000-" + String(++courseSerial).padStart(7, "0");
             courseStore.set(id, { id, name, price, minutes });
+            applyPhoto(id);
           } else if (b.action === "update") {
             const c = courseStore.get(String(b.id || ""));
             if (!c) throw err(404, "notFound");
             validVals();
+            applyPhoto(c.id);
             c.name = name; c.price = price; c.minutes = minutes;
           } else if (b.action === "delete") {
             const cid = String(b.id || "");
@@ -1033,12 +1062,13 @@ function handleDemoApi(req, res, url) {
               if (ev2.bookings.some((x) => x.status === "confirmed" && x.course === cid)) throw err(409, "hasBookings");
             }
             courseStore.delete(cid);
+            coursePhotos.delete(cid);
           } else {
             throw err(400, "invalid");
           }
           ensureDay(todayJst()).version++;
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, courses: [...courseStore.values()] }));
+          res.end(JSON.stringify({ ok: true, courses: courseListJson() }));
         } catch (e) {
           res.writeHead(e.status || 400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: e.status ? e.message : "invalid" }));
