@@ -95,6 +95,32 @@ main.ledger-app .ledger-mode-group:nth-of-type(2) button:first-child {
   color: #8d8d8d;
 }
 
+/* ---- 時間（分）の自由入力欄 ---- */
+main.ledger-app .ledger-side-form .pm-durfree { margin: -6px 0 12px; }
+main.ledger-app .ledger-side-form .pm-durfree label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+main.ledger-app .ledger-side-form .pm-durfree input {
+  width: 120px;
+  padding: 5px;
+  border: 1px solid #c7c5c3;
+  background: #fff;
+}
+main.ledger-app .ledger-side-form .pm-durfree small {
+  display: block;
+  color: #8a7a6a;
+  font-size: 10px;
+  margin-top: 3px;
+}
+/* 自由入力中はボタンの選択色を消して、どちらが有効か分かるようにする */
+main.ledger-app .ledger-duration.pm-durfree-on button.selected {
+  background: #fff;
+  color: inherit;
+}
+
 /* ---- タップした空き枠の赤いランプ ---- */
 main.ledger-app .ledger-track .pm-tap-mark {
   position: absolute;

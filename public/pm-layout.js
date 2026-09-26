@@ -8,6 +8,21 @@
   // （例：対応可能メニューから外したメニューの予約が残っている場合）
   const origFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
+    // 休憩・業務の登録：時間（分）の自由入力欄に値があれば、その分数を優先する
+    try {
+      const u0 = typeof input === "string" ? input : input?.url || "";
+      if (u0.includes("/api/demo/schedule") && init && init.method === "POST" && typeof init.body === "string") {
+        const b = JSON.parse(init.body);
+        if (b && b.action === "block" && !b.remove && typeof b.start === "number") {
+          const inp = document.querySelector(".ledger-side-form .pm-durfree input");
+          const v = inp && inp.value !== "" ? Math.floor(Number(inp.value)) : NaN;
+          if (Number.isFinite(v) && v >= 5 && v <= 1020) {
+            b.end = b.start + v;
+            init = { ...init, body: JSON.stringify(b) };
+          }
+        }
+      }
+    } catch {}
     const res = await origFetch(input, init);
     try {
       const u = typeof input === "string" ? input : input?.url || "";
@@ -264,11 +279,11 @@
       document.addEventListener("click", (e) => {
         const track = e.target.closest(".ledger-track");
         if (!track || e.target !== track || e.detail > 1) return;
-        // タップ位置を30分枠に切り下げ（グリッドは10:00〜翌3:00の1020分）、
+        // タップ位置を最小の10分枠（グリッドの細線1マス）に切り下げ、
         // フォームの開始時間も枠の先頭になるよう、枠先頭の座標でダブルクリックを合成する
         const r = track.getBoundingClientRect();
         const frac = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 0.999);
-        const minute = 600 + Math.floor((frac * 1020) / 30) * 30;
+        const minute = 600 + Math.floor((frac * 1020) / 10) * 10;
         const snapX = r.left + (((minute - 600) / 1020) * r.width) + 1;
         track.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: snapX, clientY: e.clientY }));
         const name = track.closest(".ledger-row")?.querySelector(".ledger-staff-cell b")?.textContent || "";
@@ -277,6 +292,29 @@
       });
     }
     applyTapMark();
+
+    // 3c6b) 「時間（分）」の下に、任意の分数を自由入力できる欄を追加
+    //       （入力があればボタン選択より優先。ボタンを押すと入力はクリア）
+    document.querySelectorAll(".ledger-side-form .ledger-duration").forEach((grid) => {
+      if (grid.nextElementSibling?.classList?.contains("pm-durfree")) return;
+      const box = document.createElement("div");
+      box.className = "pm-durfree";
+      box.innerHTML =
+        '<label>その他の時間（分）を自由入力</label>' +
+        '<input type="number" min="5" max="1020" step="5" placeholder="例: 75" inputmode="numeric">' +
+        "<small>5〜1020分まで1分単位で入力できます。入力中はボタンより優先されます。</small>";
+      grid.insertAdjacentElement("afterend", box);
+      const inp = box.querySelector("input");
+      inp.addEventListener("input", () => {
+        grid.classList.toggle("pm-durfree-on", inp.value !== "");
+      });
+      grid.addEventListener("click", (e) => {
+        if (e.target.closest("button")) {
+          inp.value = "";
+          grid.classList.remove("pm-durfree-on");
+        }
+      });
+    });
 
     // 3c7-0) リロードが押せる状態のときも、押したら左パネルを閉じる
     if (!window.__pmRefreshClose2) {
@@ -531,7 +569,7 @@
       track.appendChild(el);
     }
     el.style.left = (((mk.minute - 600) / 1020) * 100) + "%";
-    el.style.width = ((30 / 1020) * 100) + "%";
+    el.style.width = ((10 / 1020) * 100) + "%";
   }
 
   function decoratePanel() {

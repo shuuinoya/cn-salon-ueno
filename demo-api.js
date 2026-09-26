@@ -38,6 +38,45 @@ let courseSerial = 0;
 const getCourse = (id) => courseStore.get(id);
 // メニューごとの写真（courseId -> dataURL）。一覧のJSONを重くしないため本体とは別持ち
 const coursePhotos = new Map();
+// 予約サイトのメニュー紹介ページで使われている写真を、最初から各メニューに登録しておく
+// （管理画面のメニュー一覧で差し替え・削除も可能。再起動でこの初期状態に戻る）
+const COURSE_PHOTO_SEED = {
+  "364321-4822671": "co_06e67b46d3ce954a4d8dc36207c61a7d1a1fb35d.JPG.webp",
+  "364321-4822710": "co_a74d2bc36297e5cb9eb15180da28345378207251.JPG.webp",
+  "364321-4822711": "co_06217b76974b6bdded5a8fe44b63f8c3ab646c96.jpg.webp",
+  "364323-4822664": "co_3a14adae2ff37f6ab6a14bfddc89c9311ee6e605.JPG.webp",
+  "364323-4822701": "co_51cc59c3c915986a78795844621d746e1f329666.jpg.webp",
+  "364323-4822706": "co_ceebf960b190ec533515cec27fd2f7a8247f4b37.JPG.webp",
+  "364324-4822705": "co_cf9cd7918cd6fb4ee30dc91e08013e9821d006d5.jpg.webp",
+  "364325-4822707": "co_d6ab84884dadb8f162a6b5f572f1c17b796e0eef.jpg.webp",
+  "364326-4822708": "co_e642a1c14377c793df787ea8830b68c4214d4531.jpeg.webp",
+  "364326-4822709": "co_bbc653114e6da85d2313e833f3a7830202e77538.jpeg.webp",
+  "364326-4822715": "co_eba185c1a22b41c51c9d21c9c223da5b20a095cf.jpg.webp",
+  "364326-4823102": "co_0ffde62977e033fd0f9feebd8f30a37d443b2c51.jpeg.webp",
+  "364326-4823112": "co_8206f0066a0a719e77fc63ae0d23e907e5b9c104.jpg.webp",
+  "364326-4823113": "co_0c89587fa824181955a2da25f17050624e275129.jpg.webp",
+  "364326-4823114": "co_e08179d3135ec19c1f080bb293595f4dbffdb6fe.jpg.webp",
+  "364326-4827938": "co_9e2d7b09e6aa77b221c33003599660814646022c.jpg.webp",
+  "364326-4827940": "co_0fa9b6dff6bf3535eb38fbde0d64474b0748dcaf.jpg.webp",
+  "364326-4893798": "co_d42336c850d6fd24fe2813c85d2b7177e7a29dbf.jpg.webp",
+  "364326-4893799": "co_7b32647f0e1e58b16538443f2d793f33cf9165be.jpeg.webp",
+  "364326-4921051": "co_8291d710e6f05d625221368ca3bacceb40c82347.jpeg.webp",
+  "364327-4822712": "co_0e3942217b433036def69b4f61decec77f6176e1.jpg.webp",
+  "364328-4822716": "co_c1f2a8962aec3e0d579594af06c63c4c4d5042d1.jpg.webp",
+  "364329-4822717": "co_1a373c99b2752a99c6a55d8f822aea23bc7656f1.jpg.webp",
+  "364331-4822719": "co_02e92026b759f1d520ce2fc6470bc62d167594e0.JPG.webp",
+  "364331-4822720": "co_590b185f4e5dae65c06a8e30841f58072f96fb5b.jpg.webp",
+};
+try {
+  const fs = require("fs");
+  const path = require("path");
+  for (const [cid, name] of Object.entries(COURSE_PHOTO_SEED)) {
+    const file = path.join(__dirname, "public", "images", name);
+    if (fs.existsSync(file)) {
+      coursePhotos.set(cid, "data:image/webp;base64," + fs.readFileSync(file).toString("base64"));
+    }
+  }
+} catch { /* 写真が読めなくてもメニュー自体の動作には影響させない */ }
 const courseListJson = () =>
   [...courseStore.values()].map((c) => ({ ...c, hasPhoto: coursePhotos.has(c.id) }));
 
