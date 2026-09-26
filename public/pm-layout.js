@@ -224,6 +224,7 @@
       const shopItems = [
         ["店舗情報", openShopSettings],
         ["スタッフ情報", () => staffBtn?.click()],
+        ["メニュー一覧", openMenuList],
         ["ブース情報", null],
         ["経費マスタ", null],
         ["クレジットカード会社情報", null],
@@ -239,6 +240,42 @@
         else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
         shopMenu.appendChild(b);
       }
+    }
+
+    // 3c5) 「日次管理」メニュー：営業実績（日報）ページを開けるようにする
+    const dailyBtn = [...document.querySelectorAll(".ledger-nav > nav > button")]
+      .find((b) => b.textContent.trim().startsWith("日次管理"));
+    if (dailyBtn && !dailyBtn.dataset.pmDaily) {
+      dailyBtn.dataset.pmDaily = "1";
+      dailyBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        let menu = document.getElementById("pm-dailymenu");
+        if (menu) { menu.remove(); return; }
+        menu = document.createElement("div");
+        menu.id = "pm-dailymenu";
+        const items = [
+          ["営業実績", () => { location.href = "/admin/report"; }],
+          ["日報一覧", null],
+          ["営業実績一覧", null],
+        ];
+        for (const [label, fn] of items) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = label;
+          if (fn) b.addEventListener("click", fn);
+          else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
+          menu.appendChild(b);
+        }
+        document.body.appendChild(menu);
+        const r = dailyBtn.getBoundingClientRect();
+        menu.style.top = r.bottom + "px";
+        menu.style.left = r.left + "px";
+        const close = (ev) => {
+          if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", close); }
+        };
+        setTimeout(() => document.addEventListener("click", close), 0);
+      }, true);
     }
 
     // 3c4) スタッフ編集フォームに「削除」ボタンを追加（登録済みスタッフのみ表示）
@@ -318,6 +355,10 @@
       a.style.cssText = "display:inline-block;text-decoration:none;margin-left:8px;";
       mailSec.querySelector("button")?.insertAdjacentElement("afterend", a);
     }
+
+    // 7b2) メニュー一覧の内容をコース選択肢に反映
+    refreshCourses();
+    syncCourseSelects();
 
     // 7c) 月間シフト作成画面を本物の「月間シフト作成/目標設定」構成にする
     decorateMonth();
@@ -711,6 +752,150 @@
         window.alert("保存できませんでした。接続を確認して再度お試しください。");
       }
     });
+  }
+
+  // 店舗情報：メニュー一覧（追加・変更・削除。予約の空き状況・料金に即時反映）
+  async function openMenuList() {
+    document.getElementById("pm-menu-modal")?.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "pm-menu-modal";
+    wrap.innerHTML =
+      '<section role="dialog" aria-modal="true">' +
+      "<h2>店舗マスタ｜メニュー一覧</h2>" +
+      '<p class="pm-shop-sub">メニューの追加・変更・削除ができます。空き状況・予約金額に即時反映されます。' +
+      "（保存版のため、お客様画面のメニュー紹介ページには追加メニューは表示されません。追加メニューの予約受付・変更後の料金はサーバー側で正しく扱われます）</p>" +
+      '<div class="pm-menu-new">' +
+      '<input type="text" id="pm-mn-name" placeholder="新しいメニュー名" maxlength="120">' +
+      '<input type="number" id="pm-mn-price" placeholder="料金(円)" min="0" step="100">' +
+      '<input type="number" id="pm-mn-min" placeholder="時間(分)" min="10" max="600" step="5">' +
+      '<button type="button" class="pm-red" id="pm-mn-add">追加</button>' +
+      "</div>" +
+      '<div class="pm-menu-list">読み込み中…</div>' +
+      '<div class="pm-shop-actions"><button type="button" id="pm-mn-close">閉じる</button></div>' +
+      "</section>";
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.querySelector("#pm-mn-close").addEventListener("click", close);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+
+    const listEl = wrap.querySelector(".pm-menu-list");
+    const post = async (body) => {
+      const r = await fetch("/api/demo/courses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.alert(j.error === "hasBookings"
+          ? "このメニューには予約が入っているため削除できません。\n先に予約の取消または変更をしてください。"
+          : "保存できませんでした。名前・料金（0円以上）・時間（10〜600分）を確認してください。");
+        return null;
+      }
+      window.__pmCoursesAt = 0; // キャッシュを無効化して選択肢へ即反映
+      return j;
+    };
+    const render = (courses) => {
+      listEl.innerHTML = "";
+      const table = document.createElement("table");
+      table.innerHTML = "<thead><tr><th>メニュー名</th><th>料金(円)</th><th>時間(分)</th><th></th></tr></thead>";
+      const tb = document.createElement("tbody");
+      for (const c of courses) {
+        const tr = document.createElement("tr");
+        const tdName = document.createElement("td");
+        const inName = document.createElement("input");
+        inName.type = "text"; inName.value = c.name; inName.maxLength = 120;
+        tdName.appendChild(inName);
+        const tdPrice = document.createElement("td");
+        const inPrice = document.createElement("input");
+        inPrice.type = "number"; inPrice.value = c.price; inPrice.min = "0";
+        tdPrice.appendChild(inPrice);
+        const tdMin = document.createElement("td");
+        const inMin = document.createElement("input");
+        inMin.type = "number"; inMin.value = c.minutes; inMin.min = "10"; inMin.max = "600";
+        tdMin.appendChild(inMin);
+        const tdOps = document.createElement("td");
+        tdOps.className = "ops";
+        const bSave = document.createElement("button");
+        bSave.type = "button"; bSave.textContent = "保存";
+        bSave.addEventListener("click", async () => {
+          const j = await post({ action: "update", id: c.id, name: inName.value, price: inPrice.value, minutes: inMin.value });
+          if (j) render(j.courses);
+        });
+        const bDel = document.createElement("button");
+        bDel.type = "button"; bDel.className = "pm-red"; bDel.textContent = "削除";
+        bDel.addEventListener("click", async () => {
+          if (!window.confirm("メニュー「" + c.name.slice(0, 30) + "…」を削除しますか？\n（予約が入っている場合は削除できません）")) return;
+          const j = await post({ action: "delete", id: c.id });
+          if (j) render(j.courses);
+        });
+        tdOps.append(bSave, bDel);
+        tr.append(tdName, tdPrice, tdMin, tdOps);
+        tb.appendChild(tr);
+      }
+      table.appendChild(tb);
+      listEl.appendChild(table);
+    };
+    wrap.querySelector("#pm-mn-add").addEventListener("click", async () => {
+      const j = await post({
+        action: "create",
+        name: wrap.querySelector("#pm-mn-name").value,
+        price: wrap.querySelector("#pm-mn-price").value,
+        minutes: wrap.querySelector("#pm-mn-min").value,
+      });
+      if (j) {
+        wrap.querySelector("#pm-mn-name").value = "";
+        wrap.querySelector("#pm-mn-price").value = "";
+        wrap.querySelector("#pm-mn-min").value = "";
+        render(j.courses);
+      }
+    });
+    try {
+      const r = await fetch("/api/demo/courses", { cache: "no-store" });
+      render((await r.json()).courses);
+    } catch { listEl.textContent = "読み込めませんでした。"; }
+  }
+
+  // メニュー一覧の変更を、管理画面の予約フォームのコース選択にも反映する
+  // （追加メニューを選択肢に足し、削除済みメニューを選べなくする）
+  async function refreshCourses() {
+    const now = Date.now();
+    if (window.__pmCoursesAt && now - window.__pmCoursesAt < 5000) return;
+    window.__pmCoursesAt = now;
+    try {
+      const r = await fetch("/api/demo/courses", { cache: "no-store" });
+      const map = {};
+      for (const c of (await r.json()).courses) map[c.id] = c;
+      window.__pmCourses = map;
+    } catch {}
+  }
+
+  function syncCourseSelects() {
+    const map = window.__pmCourses;
+    if (!map) return;
+    for (const sel of document.querySelectorAll("main.ledger-app select")) {
+      const opts = [...sel.options];
+      if (!opts.some((o) => /^\d{6}-\d{7}$/.test(o.value))) continue;
+      for (const o of opts) {
+        if (!/^\d{6}-\d{7}$/.test(o.value)) continue;
+        const known = map[o.value];
+        o.hidden = !known;
+        o.disabled = !known;
+        if (known && !o.dataset.pmCustom && o.textContent !== known.name && o.value.startsWith("900000-")) {
+          o.textContent = known.name;
+        }
+      }
+      for (const id of Object.keys(map)) {
+        if (!id.startsWith("900000-")) continue;
+        if (!opts.some((o) => o.value === id)) {
+          const o = document.createElement("option");
+          o.value = id;
+          o.textContent = map[id].name;
+          o.dataset.pmCustom = "1";
+          sel.appendChild(o);
+        }
+      }
+    }
   }
 
   // 表示中の月のシフトをCSVでダウンロードする

@@ -673,3 +673,108 @@ main.ledger-app .pm-orange, .pm-orange {
   cursor: pointer;
 }
 .staff-form-actions .pm-staff-del:hover { background: #d45953; }
+
+/* 日次管理メニュー（営業実績） */
+#pm-dailymenu {
+  position: fixed;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid #c6b9ad;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  min-width: 200px;
+  padding: 4px 0;
+}
+#pm-dailymenu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  background: none;
+  border: none;
+  padding: 9px 18px;
+  cursor: pointer;
+  color: #292929;
+}
+#pm-dailymenu button:hover { background: #f7dfa0; }
+
+/* 店舗情報：メニュー一覧モーダル */
+#pm-menu-modal {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+#pm-menu-modal section {
+  background: #fff;
+  border-radius: 6px;
+  width: min(860px, calc(100vw - 32px));
+  max-height: calc(100vh - 60px);
+  overflow: auto;
+  padding: 22px 24px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+  font-size: 13px;
+  color: #292929;
+}
+#pm-menu-modal h2 { margin: 0 0 6px; font-size: 20px; }
+#pm-menu-modal .pm-shop-sub {
+  color: #6b5b4b;
+  border-bottom: 1px solid #e5d9cd;
+  padding-bottom: 10px;
+  margin: 0 0 14px;
+}
+#pm-menu-modal .pm-menu-new {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+#pm-menu-modal .pm-menu-new input {
+  font: inherit;
+  border: 1px solid #c6b9ad;
+  border-radius: 3px;
+  padding: 8px 10px;
+}
+#pm-menu-modal .pm-menu-new input[type="text"] { flex: 1; }
+#pm-menu-modal .pm-menu-new input[type="number"] { width: 110px; }
+#pm-menu-modal table { width: 100%; border-collapse: collapse; }
+#pm-menu-modal th {
+  text-align: left;
+  background: #f4eeea;
+  color: #6b5b4b;
+  border: 1px solid #dcd0c4;
+  padding: 8px 10px;
+  font-weight: 700;
+}
+#pm-menu-modal td { border: 1px solid #dcd0c4; padding: 6px 8px; }
+#pm-menu-modal td input {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c6b9ad;
+  border-radius: 3px;
+  padding: 7px 8px;
+}
+#pm-menu-modal td.ops { white-space: nowrap; width: 1%; }
+#pm-menu-modal td.ops button {
+  font: inherit;
+  border: 1px solid #c6b9ad;
+  border-radius: 3px;
+  background: #fff;
+  padding: 7px 14px;
+  cursor: pointer;
+  margin-right: 6px;
+}
+#pm-menu-modal td.ops button.pm-red { border: none; }
+#pm-menu-modal .pm-shop-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
+#pm-menu-modal .pm-shop-actions button {
+  font: inherit;
+  padding: 9px 18px;
+  border-radius: 4px;
+  border: 1px solid #c6b9ad;
+  background: #fff;
+  cursor: pointer;
+}
+#pm-menu-modal .pm-menu-new button.pm-red { border: none; border-radius: 3px; padding: 8px 18px; cursor: pointer; }

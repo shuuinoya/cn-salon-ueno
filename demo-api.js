@@ -5,7 +5,7 @@
 
 // ---- 架空データの素材 -------------------------------------------------
 
-const COURSES = {
+const COURSE_SEED = {
   "364321-4822671": { name: "【本日限定】全身整体60分＋足裏マッサージ 60分 通常料金13200円→12000円", price: 12000, minutes: 120 },
   "364321-4822710": { name: "今月限定キャンペーン：男性スタッフオイルマッサージ 120分20500円→18500円", price: 18500, minutes: 120 },
   "364321-4822711": { name: "今月限定キャンペーン：女性スタッフオイルマッサージ 120分20500円→18500円", price: 18500, minutes: 120 },
@@ -32,7 +32,10 @@ const COURSES = {
   "364331-4822719": { name: "シャワールーム 30分", price: 1000, minutes: 30 },
   "364331-4822720": { name: "レンタルルーム 60分　2500円", price: 2500, minutes: 60 },
 };
-const COURSE_IDS = Object.keys(COURSES);
+// メニューは管理画面（メニュー一覧）から追加・変更・削除できる可変データにする
+const courseStore = new Map(Object.entries(COURSE_SEED).map(([id, c]) => [id, { id, ...c }]));
+let courseSerial = 0;
+const getCourse = (id) => courseStore.get(id);
 
 const STAFF_SEED = [
   { id: "aaaaaa01-0000-4000-8000-000000000001", name: "豊", gender: "male", message: "はじめまして。\n小顔矯正とオイルマッサージを得意としており、講師レベルの技術とお客様から評価をいただくこともあります。\n\n小顔矯正では、お顔のバランスや筋肉の状態を見ながら丁寧に調整し、施術前後の変化をすぐに実感していただける即効性を大切にしています。フェイスラインの引き締まりや左右バランスの改善を感じていただくお客様が多いです。\n\nオイルマッサージでは、筋肉の深い部分までしっかりアプローチしながら、リラックスと疲労回復の両方を感じていただける施術を心がけています。\n\n技術・接客ともに常に高いレベルを目指し、どのお客様にもご満足いただける施術を大切にしています。\nお身体やお顔のお悩みは、ぜひ安心してお任せください。心を込めて施術いたします。" },
@@ -100,6 +103,7 @@ const state = {
   bookingSerial: 100,
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
+  reports: new Map(),      // 営業実績（日報）の入力内容 date -> {weather, ...}
 };
 
 function ensureDay(date) {
@@ -313,7 +317,7 @@ function postSchedule(body) {
     case "createBooking": {
       checkRevision();
       const { staffId, start, course, people, consent } = body;
-      const c = COURSES[course];
+      const c = getCourse(course);
       const cbTarget = state.staff.find((s) => s.id === staffId);
       if (!consent || !c || !cbTarget) throw err(400, "invalid");
       if (cbTarget.locked) throw err(409, "soldOut");            // 鍵中のスタッフには入れられない
@@ -621,7 +625,7 @@ function mailSummary() {
 
 // コース名からの性別指定（予約サイト側と同じ判定）
 function courseGender(courseId) {
-  const name = COURSES[courseId]?.name || "";
+  const name = getCourse(courseId)?.name || "";
   return name.includes("女性") ? "female" : name.includes("男性") ? "male" : "none";
 }
 
@@ -688,7 +692,7 @@ function getAvailability(q) {
   const people = Number(q.get("people"));
   const pref = q.get("staff") || "none";
   const staffId = q.get("staffId") || "";
-  const course = COURSES[courseId];
+  const course = getCourse(courseId);
   const today = todayJst();
   if (!course || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !(people >= 1 && people <= 3) ||
       !["none", "male", "female"].includes(pref)) throw err(400, "invalid");
@@ -713,7 +717,7 @@ function getAvailability(q) {
 }
 
 function createPublicBooking(body) {
-  const course = COURSES[body.course];
+  const course = getCourse(body.course);
   const date = body.date;
   const people = Number(body.people);
   const pref = ["none", "male", "female"].includes(body.staff) ? body.staff : "none";
@@ -796,6 +800,89 @@ function getPublicBooking(id, token) {
   };
 }
 
+// ---- 営業実績（日次管理）：予約・シフトの実データから集計する ----------
+
+function confirmedBookings(date) {
+  return ensureEvents(date).bookings.filter((b) => b.status === "confirmed");
+}
+
+// それ以前の日付に同じメールアドレスの予約があれば「リピータ」とみなす
+function isRepeat(date, email) {
+  if (!email) return false;
+  for (const [d, ev] of state.events) {
+    if (d >= date) continue;
+    if (ev.bookings.some((b) => b.email === email)) return true;
+  }
+  return false;
+}
+
+function dayCounts(date) {
+  const list = confirmedBookings(date);
+  let visitors = 0, newCount = 0, repeatCount = 0, nominated = 0, online = 0;
+  for (const b of list) {
+    visitors += b.people;
+    if (isRepeat(date, b.email)) repeatCount += b.people; else newCount += b.people;
+    if (b.nominated_staff_id) nominated += b.people;
+    if (String(b.id).startsWith("web-")) online++;
+  }
+  return { visitors, newCount, repeatCount, nominated, online, bookings: list.length };
+}
+
+function reportStats(date) {
+  const list = confirmedBookings(date);
+  const gross = list.reduce((s, b) => s + b.total, 0);
+  const net = Math.round(gross / 1.1);
+  const counts = dayCounts(date);
+  // 当月累計（データがある日だけ集計。架空データは生成しない）
+  const monthStart = date.slice(0, 8) + "01";
+  let cumGross = 0, cumNet = 0;
+  for (const [d, ev] of state.events) {
+    if (d >= monthStart && d <= date) {
+      const g = ev.bookings.filter((b) => b.status === "confirmed").reduce((s, b) => s + b.total, 0);
+      cumGross += g;
+    }
+  }
+  cumNet = Math.round(cumGross / 1.1);
+  const dayN = Number(date.slice(8));
+  const daysInMonth = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
+  const forecast = dayN ? Math.round(cumNet / dayN * daysInMonth) : 0;
+  // シフト状況
+  const shifts = ensureShifts(date);
+  const shiftMin = shifts.reduce((s, x) => s + (x.end_at - x.start_at) / 60000, 0);
+  const ev = ensureEvents(date);
+  let treatMin = 0;
+  for (const b of list) {
+    const n = ev.assignments.filter((a) => a.booking_id === b.id).length || 1;
+    treatMin += (b.end_at - b.start_at) / 60000 * n;
+  }
+  const tomorrow = addDays(date, 1);
+  const names = {};
+  for (const st of state.staff) names[st.id] = st.name;
+  const tomorrowShifts = ensureShifts(tomorrow)
+    .map((x) => ({
+      name: names[x.staff_id] || "",
+      label: `${Number(tomorrow.slice(8))}日${fmtTime(tomorrow, x.start_at)}〜` +
+        (msToMin(tomorrow, x.end_at) >= 1440
+          ? `${Number(addDays(tomorrow, 1).slice(8))}日${fmtTime(addDays(tomorrow, 1), x.end_at)}`
+          : `${Number(tomorrow.slice(8))}日${fmtTime(tomorrow, x.end_at)}`),
+    }))
+    .filter((x) => x.name);
+  return {
+    date,
+    today: {
+      salesNet: net, salesGross: gross, profit: net,
+      ...counts,
+      avgSpend: counts.visitors ? Math.round(gross / counts.visitors) : 0,
+      cumNet, cumGross, forecast,
+      shiftStaff: shifts.length, shiftMin, treatMin,
+      utilization: shiftMin ? Math.round(treatMin / shiftMin * 1000) / 10 : 0,
+    },
+    tomorrow: { ...dayCounts(tomorrow), shifts: tomorrowShifts },
+    staffNames: state.staff.map((s) => s.name),
+    saved: state.reports.get(date) || null,
+  };
+}
+
 // server.js から呼ばれる入口。処理した場合は true を返す。
 function handleDemoApi(req, res, url) {
   if (url.pathname === "/api/demo/staff-photo") {
@@ -831,7 +918,7 @@ function handleDemoApi(req, res, url) {
   if (url.pathname === "/api/staff" && (req.method === "GET" || req.method === "HEAD")) {
     const courseId = url.searchParams.get("course");
     const pref = url.searchParams.get("staff") || "none";
-    if (!COURSES[courseId] || !["none", "male", "female"].includes(pref)) {
+    if (!getCourse(courseId) || !["none", "male", "female"].includes(pref)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "invalid" }));
       return true;
@@ -876,6 +963,104 @@ function handleDemoApi(req, res, url) {
         } catch (e) {
           res.writeHead(e.status || 500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405);
+    res.end();
+    return true;
+  }
+
+  // メニュー一覧（管理画面から追加・変更・削除できる）
+  if (url.pathname === "/api/demo/courses") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ courses: [...courseStore.values()] }));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}");
+          const name = String(b.name || "").trim().slice(0, 120);
+          const price = Math.floor(Number(b.price));
+          const minutes = Math.floor(Number(b.minutes));
+          const validVals = () => {
+            if (!name) throw err(400, "invalid");
+            if (!(Number.isFinite(price) && price >= 0 && price <= 1000000)) throw err(400, "invalid");
+            if (!(Number.isFinite(minutes) && minutes >= 10 && minutes <= 600)) throw err(400, "invalid");
+          };
+          if (b.action === "create") {
+            validVals();
+            const id = "900000-" + String(++courseSerial).padStart(7, "0");
+            courseStore.set(id, { id, name, price, minutes });
+          } else if (b.action === "update") {
+            const c = courseStore.get(String(b.id || ""));
+            if (!c) throw err(404, "notFound");
+            validVals();
+            c.name = name; c.price = price; c.minutes = minutes;
+          } else if (b.action === "delete") {
+            const cid = String(b.id || "");
+            if (!courseStore.has(cid)) throw err(404, "notFound");
+            // 昨日以降の確定予約が残っているメニューは削除できない
+            const today = todayJst();
+            for (const [d, ev2] of state.events) {
+              if (d < addDays(today, -1)) continue;
+              if (ev2.bookings.some((x) => x.status === "confirmed" && x.course === cid)) throw err(409, "hasBookings");
+            }
+            courseStore.delete(cid);
+          } else {
+            throw err(400, "invalid");
+          }
+          ensureDay(todayJst()).version++;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, courses: [...courseStore.values()] }));
+        } catch (e) {
+          res.writeHead(e.status || 400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.status ? e.message : "invalid" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405);
+    res.end();
+    return true;
+  }
+
+  // 営業実績（日次管理）の集計と日報の保存
+  if (url.pathname === "/api/demo/report") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      const date = url.searchParams.get("date") || todayJst();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid" }));
+        return true;
+      }
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(reportStats(date)));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}");
+          const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? b.date : todayJst();
+          const rec = state.reports.get(date) || {};
+          for (const k of ["weather", "todayPlan", "review", "tomorrowPlan", "manager"]) {
+            if (k in b) rec[k] = String(b[k] || "").slice(0, 2000);
+          }
+          if (b.send) rec.sentAt = Date.now();
+          state.reports.set(date, rec);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, saved: rec }));
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid" }));
         }
       });
       return true;
