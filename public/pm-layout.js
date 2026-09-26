@@ -29,6 +29,9 @@
       if (u.includes("/api/demo/schedule") && init && init.method === "POST" && res.ok) {
         const j = await res.clone().json().catch(() => null);
         if (j && j.warning) setTimeout(() => window.alert(j.warning), 100);
+        // 登録直後に「休憩 18:30〜…」のような素の表示が残らないよう、即取り直して装飾する
+        window.__pmSchedAt = 0;
+        setTimeout(async () => { await refreshSched(true); decorateEvents(); }, 250);
       }
     } catch {}
     return res;
@@ -69,11 +72,16 @@
     const brand = document.querySelector(".ledger-brand");
     if (brand) {
       if (!document.getElementById("pm-alert")) {
+        const w = document.createElement("span");
+        w.id = "pm-warn";
+        w.className = "pm-warn";
+        w.textContent = "⚠";
         const s = document.createElement("span");
         s.id = "pm-alert";
         s.className = "pm-alert";
-        s.textContent = "⚠ 3836";
+        s.textContent = "3862";
         brand.insertAdjacentElement("beforebegin", s);
+        s.insertAdjacentElement("beforebegin", w);
       }
       if (brand.textContent !== "CN He...") brand.textContent = "CN He...";
       // クリックで「ログアウト」メニューを開閉（本物と同じ挙動）
@@ -127,12 +135,12 @@
       logo.dataset.pmFlower = "1";
       logo.textContent = "";
       logo.innerHTML =
-        '<svg viewBox="0 0 44 44" width="30" height="30" aria-hidden="true" focusable="false">' +
-        '<g fill="#fff" transform="translate(23.5 20.5)">' +
-        ["0", "45", "90", "135", "180", "270", "315"].map((a) =>
-          '<path transform="rotate(' + a + ')" d="M0 -4.2 C-3.3 -8.6 -3.5 -15.4 0 -20.4 C3.5 -15.4 3.3 -8.6 0 -4.2 Z"/>'
+        '<svg viewBox="0 0 44 44" width="32" height="32" aria-hidden="true" focusable="false">' +
+        '<g fill="#fff" transform="translate(23 21)">' +
+        ["350", "62", "134", "206", "278"].map((a) =>
+          '<path transform="rotate(' + a + ')" d="M0 -3.8 C-4.8 -6.6 -6.4 -12.6 -3.4 -16.8 C-1.6 -19.2 1.6 -19.2 3.4 -16.8 C6.4 -12.6 4.8 -6.6 0 -3.8 Z"/>'
         ).join("") +
-        '<path transform="translate(-10.5 12.5) rotate(228)" d="M0 -1 C-2.3 -4 -2.4 -8.3 0 -11.6 C2.4 -8.3 2.3 -4 0 -1 Z"/>' +
+        '<path transform="translate(-11 13) rotate(214) scale(0.5)" d="M0 -3.8 C-4.8 -6.6 -6.4 -12.6 -3.4 -16.8 C-1.6 -19.2 1.6 -19.2 3.4 -16.8 C6.4 -12.6 4.8 -6.6 0 -3.8 Z"/>' +
         "</g></svg>";
     }
 
@@ -149,11 +157,11 @@
     // 3b) スタッフ行ごとの装飾（★数・ピンク強調・左端の色バー）と、
     //      鍵（予約受付停止）トグル。鍵の状態はサーバーの実データと連動する。
     const DECOR = {
-      "藤倉 和美": { star: "50", pink: true, female: true },
+      "杉田 祐哉": { star: "60" },
+      "中山 優吾": { star: "270" },
       "山田 恵": { female: true },
-      "川井": { female: true },
-      "佐藤みずき": { female: true },
-      "平沼 穂香": { female: true },
+      "小倉 有美子": { star: "110", female: true },
+      "未定": { star: "110" },
     };
     refreshLocks();
     document.querySelectorAll(".ledger-row").forEach((row) => {
@@ -271,6 +279,23 @@
         shopMenu.appendChild(b);
       }
     }
+
+    // 3c5b) 本物と同じ細部：店舗セレクトの店名／点線エリアの案内文／レール下の＋を隠す
+    const sn = document.querySelector(".ledger-store-name");
+    const SN = "Ueno spa&massage CN Health & Beauty SALON";
+    if (sn && sn.textContent !== SN) sn.textContent = SN;
+    const modeMsg = document.querySelector(".ledger-modes span");
+    const MSG = "日付をまたいで予定を変更したい場合は、一旦このエリアに置いてください。";
+    if (modeMsg && modeMsg.textContent !== MSG) modeMsg.textContent = MSG;
+    document.querySelectorAll(".ledger-rail button").forEach((b) => {
+      const hasLabel = !!(b.querySelector("small")?.textContent || "").trim();
+      if (!hasLabel && /^[+＋]$/.test(b.textContent.trim())) b.style.display = "none";
+      else if (b.style.display === "none" && hasLabel) b.style.display = "";
+    });
+    refreshSched();
+    decorateUnderbar();
+    decorateSummary();
+    decorateEvents();
 
     // 3c6) 空き枠はシングルタップでも選択できるようにする（本物と同じ操作感）
     //      タップした枠は本物と同じく赤いランプで点灯させる（左パネルを閉じると消える）
@@ -490,7 +515,6 @@
     decoratePanel();
 
     // 9) 下部の集計を本物と同じ3段（赤・黒・青）にする
-    decorateStats();
 
     // 4) 左レールのラベルを本物に合わせる
     document.querySelectorAll(".ledger-rail button small").forEach((sm) => {
@@ -503,49 +527,167 @@
       if (b.textContent === "スタッフ別 絞り込み・設定") b.textContent = "カテゴリ別 絞り込み";
     });
 
-    // 6) 下部に本物と同じボタン群（デモでは飾り）と目標・総販売額
-    const underbar = document.querySelector(".ledger-underbar");
-    if (underbar && !document.getElementById("pm-extra")) {
-      const frag = document.createElement("span");
-      frag.id = "pm-extra";
-      frag.style.display = "contents";
-      ["インターバル:ON", "ひな型登録", "ひな型読込"].forEach((label) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "pm-deco";
-        b.title = "デモ版では使用できません";
-        b.textContent = label;
-        frag.appendChild(b);
-      });
-      underbar.appendChild(frag);
-    }
-    const summary = document.querySelector(".ledger-summary");
-    if (summary && !document.getElementById("pm-target")) {
-      const p = document.createElement("div");
-      p.id = "pm-target";
-      p.className = "pm-target";
-      p.textContent = "目標：0円　総販売額：0円";
-      summary.insertAdjacentElement("beforebegin", p);
-    }
+    // 6) 旧実装のボタン群・目標行は decorateUnderbar / decorateSummary に一本化した
+    document.getElementById("pm-extra")?.remove();
+    document.getElementById("pm-target")?.remove();
 
-    // 7) 台帳の最後に「未定」行
-    const grid = document.querySelector(".ledger-grid");
-    if (grid && grid.querySelector(".ledger-row") && !document.getElementById("pm-undecided")) {
-      const row = document.createElement("div");
-      row.id = "pm-undecided";
-      row.className = "ledger-row pm-undecided";
-      row.innerHTML =
-        '<button type="button" class="ledger-staff-cell" title="デモ版では未定枠は使用できません"><b>未定</b></button>' +
-        '<div class="ledger-track"></div>';
-      grid.appendChild(row);
-    } else if (grid && !grid.querySelector(".ledger-row:not(.pm-undecided)")) {
-      // スタッフ絞り込みなどで行が無くなったら未定行も消す
-      document.getElementById("pm-undecided")?.remove();
-    }
+    // 7) 以前ここで飾りの「未定」行を足していたが、今は実在スタッフになったため不要
+    document.getElementById("pm-undecided")?.remove();
   }
 
   // 予約詳細パネルを本物（PeakManager）と同じ構成に見せる。
   // Reactが管理するフォームは隠しておき、「編集」を押したときだけ表示する。
+  // 左パネルは出現した瞬間に装飾する（600ms周期のensure待ちで素のフォームが
+  // 一瞬見えて「バタつく」のを防ぐ。描画フレームごとに1回だけ実行）
+  function decorateSidePanelNow() {
+    try {
+      decorateNewPanel();
+      decoratePanel();
+      applyTapMark();
+    } catch {}
+  }
+  if (!window.__pmPanelObs) {
+    let queued = 0;
+    window.__pmPanelObs = new MutationObserver(() => {
+      if (queued) return;
+      queued = requestAnimationFrame(() => {
+        queued = 0;
+        if (document.querySelector(".ledger-side")) decorateSidePanelNow();
+        decorateEvents();
+      });
+    });
+    window.__pmPanelObs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // 表示中の日付のスケジュール全体（予約・業務・担当）を取得して共有する
+  async function refreshSched(force) {
+    const t = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime")
+      || new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
+    const now = Date.now();
+    if (!force && window.__pmSchedAt && now - window.__pmSchedAt < 3000 && window.__pmSchedFor === t) return;
+    window.__pmSchedAt = now;
+    window.__pmSchedFor = t;
+    try {
+      const r = await fetch("/api/demo/schedule?date=" + t, { cache: "no-store" });
+      const d = await r.json();
+      d.__date = t;
+      window.__pmSchedData = d;
+    } catch {}
+  }
+
+  const pmMin = (dateStr, ms) => Math.round((ms - Date.parse(dateStr + "T00:00:00+09:00")) / 60000);
+  const pmHM = (min) => String(Math.floor((min % 1440) / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+  const pmHM24 = (min) => String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+
+  // 台帳下のボタン列を本物と同じ構成にする
+  // （カテゴリ別絞り込みはReactの行をそのまま使い、その下の列だけ置き換える）
+  function decorateUnderbar() {
+    const ub = document.querySelector(".ledger-underbar");
+    if (!ub || ub.dataset.pmDeco) return;
+    ub.dataset.pmDeco = "1";
+    [...ub.children].forEach((el) => { el.style.display = "none"; });
+    for (const t of ["予約集計▼", "インターバル:ON", "ひな型登録", "ひな型読込"]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pm-ub-btn";
+      b.textContent = t;
+      if (t !== "予約集計▼") b.title = "デモ版では使用できません";
+      else b.addEventListener("click", () => {
+        const sm = document.querySelector(".ledger-summary:not([hidden])");
+        if (sm) sm.style.display = sm.style.display === "none" ? "" : "none";
+      });
+      ub.appendChild(b);
+    }
+  }
+
+  // 下部の集計を本物と同じ4行構成で、実データから計算して表示する
+  function decorateSummary() {
+    const el = document.querySelector(".ledger-summary:not([hidden])");
+    const d = window.__pmSchedData;
+    if (!el || !d) return;
+    const bs = d.bookings || [];
+    const conf = bs.filter((b) => b.status === "confirmed");
+    const nNew = conf.filter((b) => b.is_new !== 0).length;
+    const nRep = conf.length - nNew;
+    const people = conf.reduce((a, b) => a + (b.people || 1), 0);
+    const cancel = bs.filter((b) => b.status === "cancelled" && !b.no_show).length;
+    const noshow = bs.filter((b) => b.no_show).length;
+    const total = conf.reduce((a, b) => a + (b.total || 0), 0);
+    const paid = conf.reduce((a, b) => a + (b.paid_amount || 0), 0);
+    const tanka = people ? Math.floor(paid / people) : 0;
+    const yen = (n) => n.toLocaleString("ja-JP") + "円";
+    const key = [nNew, nRep, people, conf.length, cancel, noshow, total, paid].join(",");
+    if (el.dataset.pmSum === key) return;
+    el.dataset.pmSum = key;
+    el.innerHTML =
+      '<div class="pm-sum pm-sum-red"><span>目標：0円</span><span>総販売額：' + yen(paid) + "</span></div>" +
+      '<div class="pm-sum"><span>新規：' + nNew + "名</span><span>リピート：" + nRep + "名</span><span>総来店人数：" + people +
+        "名</span><span>施術件数：" + conf.length + "件</span><span>客単価：" + yen(tanka) + "</span><span>取消：" + cancel +
+        "件</span><span>無断キャンセル：" + noshow + "件</span><span>返客：0件</span></div>" +
+      '<div class="pm-sum pm-sum-blue"><span>施術：' + yen(paid) + "/" + yen(total) +
+        "</span><span>物販：0円/0円</span><span>回数券販売：0円/0円</span><span>プリベイド販売：0円/0円</span></div>" +
+      '<div class="pm-sum"><span>現金：' + yen(paid) + "</span><span>クレジット：0円</span><span>回数券利用：0円</span>" +
+        "<span>プリベイド利用：0円</span><span>ポイント利用：0円</span><span>商品券利用：0円</span><span>電子マネー：0円</span><span>EPARKサービス：0円</span></div>";
+  }
+
+  // 予約ブロック・業務ブロックを本物と同じ表示（バッジ・時刻・色分け）にする
+  function decorateEvents() {
+    const d = window.__pmSchedData;
+    if (!d || !d.bookings) return;
+    const date = d.__date;
+    const staffByName = {};
+    for (const st of d.staff || []) staffByName[st.name] = st.id;
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const badge = (cls, t) => '<i class="pm-bg pm-bg-' + cls + '">' + t + "</i>";
+    document.querySelectorAll(".ledger-row").forEach((row) => {
+      const sid = staffByName[row.querySelector(".ledger-staff-cell b")?.textContent || ""];
+      if (!sid) return;
+      row.querySelectorAll(".ledger-event").forEach((el) => {
+        const pct = parseFloat(el.style.left || "0");
+        const startMin = 600 + Math.round((pct * 1020) / 100 / 5) * 5;
+        if (el.classList.contains("activity")) {
+          const blk = (d.blocks || []).find((b) => b.staff_id === sid && Math.abs(pmMin(date, b.start_at) - startMin) <= 3);
+          if (!blk) return;
+          const s0 = pmMin(date, blk.start_at), e0 = pmMin(date, blk.end_at);
+          const key = "b" + blk.id + s0 + e0 + blk.kind;
+          if (el.dataset.pmEv === key) return;
+          el.dataset.pmEv = key;
+          el.innerHTML = "<strong>" + (blk.kind === "break" ? "休憩" : "業務") + "</strong><span>" +
+            pmHM(s0) + "~" + pmHM(e0) + "</span><small>" + (e0 - s0) + "分</small>";
+          return;
+        }
+        const bk = (d.bookings || []).find((b) => b.status === "confirmed" &&
+          (d.assignments || []).some((a) => a.booking_id === b.id && a.staff_id === sid) &&
+          Math.abs(pmMin(date, b.start_at) - startMin) <= 3);
+        if (!bk) return;
+        const s0 = pmMin(date, bk.start_at), e0 = pmMin(date, bk.end_at);
+        const key = "k" + bk.id + s0 + e0 + (bk.paid_amount || 0) + (bk.name || "");
+        if (el.dataset.pmEv === key) return;
+        el.dataset.pmEv = key;
+        const nominated = !!(bk.nominated_staff_id || bk.nomination_fee);
+        const cname = bk.course_name || "";
+        const col = cname.includes("男性") ? "purple" : cname.includes("女性") ? "red"
+          : /整体|本日限定/.test(cname) ? "green" : "lime";
+        el.classList.remove("lime", "purple");
+        el.classList.add("pm-ev", "pm-ev-" + col);
+        let l1 = "";
+        if (!nominated && bk.staff === "male") l1 += badge("m", "男");
+        if (!nominated && bk.staff === "female") l1 += badge("f", "女");
+        if (bk.multi || (bk.people || 1) > 1) l1 += badge("multi", "複");
+        if (!bk.hide_name && bk.name) l1 += esc(bk.name) + "　";
+        l1 += "【" + esc(bk.booth || "新規1(1)") + "】";
+        if (!bk.paid_amount) l1 += '<i class="pm-bg pm-bg-mi">未</i>';
+        let l2 = "";
+        if (bk.is_new !== 0) l2 += badge("new", "新");
+        if (nominated) l2 += badge("nom", "指名");
+        l2 += pmHM(s0) + "~" + pmHM(e0);
+        const l3 = esc(bk.course_label || cname);
+        el.innerHTML = '<span class="pm-ev-l1">' + l1 + '</span><span class="pm-ev-l2">' + l2 +
+          '</span><span class="pm-ev-l3">' + l3 + "</span>";
+      });
+    });
+  }
+
   // タップした空き枠の赤いランプ。Reactの再描画で消えても ensure() が点け直し、
   // 左パネルが閉じられたら消灯する。
   function applyTapMark() {
@@ -592,9 +734,12 @@
       return i >= 0 ? dts[i].nextElementSibling : null;
     };
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-    const ref = val("予約ID")?.textContent || "";
-    const bookingId = "24725" + (ref.replace(/\D/g, "").slice(-4) || "8666"); // 本物と同じ9桁表記
+    const ref = (val("予約ID")?.textContent || "").trim();
     const prevDay = dateISOMinus1(form.querySelector("p time")?.getAttribute("datetime") || "");
+    // 台帳データから該当予約を引き当てる（予約ID・作成日時・ブースなどの実値を使う）
+    const bkRow = (window.__pmSchedData?.bookings || []).find((b) => String(b.reference) === ref);
+    const bookingId = /^\d{6,}$/.test(ref) ? ref : "24725" + (ref.replace(/\D/g, "").slice(-4) || "8666");
+    const createdLabel = bkRow?.created_label || prevDay + " 23:42　PC";
     const name = (val("お名前")?.textContent || "").trim();
     const menu = (val("メニュー")?.textContent || "").trim();
     // 連絡先はメール<br>電話の構造。非表示中はinnerTextの改行が失われるためノード単位で読む
@@ -615,24 +760,25 @@
       '<div class="pm-shoprow"><label><input type="checkbox" checked/> 自店のみ</label><button type="button" class="pm-red" data-act="none">検索</button></div>' +
       '<div class="pm-cust">' +
         '<div class="pm-cust-rank">ランク:★★★　会員番号：<br/>TEL:' + esc(tel) + "</div>" +
-        '<div class="pm-cust-name"><span class="pm-gender">♀</span> ' + (esc(name) || "&nbsp;") + '<span class="pm-count">回数:5/5</span></div>' +
+        '<div class="pm-cust-name"><span class="pm-gender' + (bkRow?.customer_gender === "m" ? " pm-gender-m" : "") + '">' +
+        (bkRow?.customer_gender === "m" ? "♂" : "♀") + "</span> " + (esc(name) || "&nbsp;") + '<span class="pm-count">回数:1/1</span></div>' +
       "</div>" +
       '<div class="pm-icons">' +
         [["顧客", "♙", "customer"], ["カード", "▦", "none"], ["履歴", "↺", "none"], ["会計", "▤", "pay"], ["返客", "↶", "none"]]
           .map(([t, g, a]) => '<button type="button" data-act="' + a + '"><small>' + t + "</small><b>" + g + "</b></button>").join("") +
       "</div>" +
       '<div class="pm-idbox">' +
-        '<div class="pm-idrow"><span>ID:' + esc(bookingId) + "<br/>" + esc(prevDay) + " 23:42　Un</span>" +
+        '<div class="pm-idrow"><span>ID:' + esc(bookingId) + "<br/>" + esc(createdLabel) + "</span>" +
         '<span class="pm-idbtns"><button type="button" class="pm-red" data-act="none">完了</button><button type="button" class="pm-x" data-act="close">X</button></span></div>' +
         '<div class="pm-tabrow"><span class="pm-tab">' + (esc(name) || "予約") + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
         '<div class="pm-btnrow"><button type="button" class="pm-outline" data-act="pay">精算</button><span></span><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
         '<div class="pm-btnrow"><label class="pm-mini"><input type="checkbox"/> 他店</label><button type="button" class="pm-red" data-act="none">検索</button><button type="button" class="pm-red" data-act="none">＋ 新規</button></div>' +
         '<div class="pm-dtrow"><span class="pm-cap">日時</span><b>' + esc(dateISO) + " " + hh + ":" + mm + "〜</b></div>" +
-        '<div class="pm-chips"><span class="pm-chip">' + esc(menu.slice(0, 22)) + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
+        '<div class="pm-chips"><span class="pm-chip">' + esc((bkRow?.course_label || menu).slice(0, 22)) + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
         '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="edit">編集</button><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
         '<table class="pm-table"><tbody>' +
-          [["時間", hh + ":" + mm], ["ブース", "新規1(1)"], ["スタッフ", esc(staffName) + ' <span class="pm-star">★</span>'],
-           ["コース", esc(menu.slice(0, 24))], ["オプション", ""], ["こだわり", ""],
+          [["時間", hh + ":" + mm], ["ブース", esc(bkRow?.booth || "新規1(1)")], ["スタッフ", esc(staffName) + ' <span class="pm-star">★</span>'],
+           ["コース", esc((bkRow?.course_label || menu).slice(0, 24))], ["オプション", ""], ["こだわり", ""],
            ["予約タグ", "TORICOM"], ["施術タグ", ""], ["施術コメント", ""]]
             .map(([k, v]) => "<tr><th>" + k + "</th><td>" + v + "</td></tr>").join("") +
         "</tbody></table>" +
@@ -977,7 +1123,7 @@
           table.querySelectorAll("tbody tr").forEach((tr) => {
             [...tr.children].forEach((td, i) => {
               if (i === 0) return;
-              if (name !== "未定" && heads[i] !== name) return;
+              if (name !== "全員" && heads[i] !== name) return;
               const cb = td.querySelector('input[type="checkbox"]');
               if (cb && !cb.checked) cb.click();
             });
@@ -1005,7 +1151,7 @@
       // スタッフ選択肢を最新化
       const sel = document.getElementById("pm-bulk-staff");
       if (sel && window.__pmLocks) {
-        const names = ["未定", ...Object.keys(window.__pmLocks)];
+        const names = ["全員", ...Object.keys(window.__pmLocks)];
         if (sel.options.length !== names.length) {
           sel.innerHTML = names.map((n) => `<option>${n}</option>`).join("");
         }
@@ -1451,28 +1597,6 @@
   }
 
   // 下部の集計バー（赤・黒・青の3段）
-  function decorateStats() {
-    const sum = document.querySelector(".ledger-summary");
-    if (!sum || sum.hidden) { document.getElementById("pm-stats")?.remove(); return; }
-    const text = sum.textContent || "";
-    const num = (re) => Number((text.match(re) || [])[1] || 0);
-    const total = (text.match(/予約合計\s*([\d,]+)/) || [])[1] || "0";
-    const count = num(/予約件数\s*(\d+)/);
-    const people = num(/予約人数\s*(\d+)/);
-    const fresh = Math.ceil(people / 2), repeat = people - fresh;
-    const html =
-      '<div class="pm-stat-black">新規：' + fresh + "名　リピート：" + repeat + "名　総来店人数：" + people +
-        "名　施術件数：" + count + "件　客単価：0円　取消：3件　無断キャンセル：0件　返客：0件</div>" +
-      '<div class="pm-stat-blue">施術：0円/' + total + "円　物販：0円/0円　回数券販売：0円/0円　プリベイド販売：0円/0円</div>";
-    let el = document.getElementById("pm-stats");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "pm-stats";
-      sum.appendChild(el);
-    }
-    if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
-  }
-
   setInterval(ensure, 600);
   document.addEventListener("DOMContentLoaded", ensure);
 })();

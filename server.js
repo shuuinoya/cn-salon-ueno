@@ -187,6 +187,7 @@ server.on("error", (e) => {
   }
 });
 server.on("listening", () => {
+  process.env.DEMO_ORIGIN = `http://${HOST}:${port}`; // メール内のリンク生成用
   console.log(`起動しました。`);
   console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
   console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);

@@ -81,19 +81,14 @@ const courseListJson = () =>
   [...courseStore.values()].map((c) => ({ ...c, hasPhoto: coursePhotos.has(c.id) }));
 
 const STAFF_SEED = [
+  { id: "aaaaaa12-0000-4000-8000-000000000012", name: "杉田 祐哉", gender: "male", message: "" },
   { id: "aaaaaa01-0000-4000-8000-000000000001", name: "豊", gender: "male", message: "はじめまして。\n小顔矯正とオイルマッサージを得意としており、講師レベルの技術とお客様から評価をいただくこともあります。\n\n小顔矯正では、お顔のバランスや筋肉の状態を見ながら丁寧に調整し、施術前後の変化をすぐに実感していただける即効性を大切にしています。フェイスラインの引き締まりや左右バランスの改善を感じていただくお客様が多いです。\n\nオイルマッサージでは、筋肉の深い部分までしっかりアプローチしながら、リラックスと疲労回復の両方を感じていただける施術を心がけています。\n\n技術・接客ともに常に高いレベルを目指し、どのお客様にもご満足いただける施術を大切にしています。\nお身体やお顔のお悩みは、ぜひ安心してお任せください。心を込めて施術いたします。" },
   { id: "aaaaaa02-0000-4000-8000-000000000002", name: "中山 優吾", gender: "male", message: "はじめまして。\n体格を活かしたパワーのある施術と、足裏マッサージ・オイルマッサージが得意です。\n\n足裏には全身につながる反射区があり、丁寧に刺激していくことで、脚の疲れやむくみ、全身のだるさをスッキリさせていきます。長時間歩いた後や立ち仕事の方にもとてもおすすめです。\n\nまた、オイルマッサージでは深いコリまでしっかりアプローチしながら、筋肉をゆっくりほぐしていく施術を心がけています。しっかり効かせる施術からリラックス重視まで、お客様のお好みに合わせて細かく調整いたします。\n\n「体が軽くなった」「足がすごく楽になった」と感じていただけるよう、毎回心を込めて施術します。\nお疲れの際は、ぜひお気軽にお任せください。" },
-  { id: "aaaaaa03-0000-4000-8000-000000000003", name: "小林 楓也", gender: "male", message: "丁寧でセンスのある施術を大切にしています。普段から身体を鍛えているため、力強い施術にも自信があります。\n\nマッサージの仕事が大好きで、お客様一人ひとりの身体の状態や圧の好みに合わせた施術が得意です\n\n首・肩から背中・腰・臀部・太もも・ふくらはぎ・足先まで、全身を丁寧にケア。強圧・ストレッチ・オイルマッサージを組み合わせ、コリや身体の硬さにしっかりアプローチします。\n\n他店の施術では物足りなかった方、力強さと丁寧さの両方を求める方も、ぜひ一度お任せください。ご希望に寄り添い、ご満足いただける施術を目指します。\n\n\nI value providing careful, skillful treatments. As I train regularly, I am also confident in delivering firm and powerful pressure.\n\nI truly enjoy working as a massage therapist and specialize in tailoring each treatment to the client's physical condition and preferred pressure level.\n\nFrom the neck and shoulders to the back, lower back, hips, thighs, calves, and toes, I provide thorough full-body care. By combining deep pressure, stretching, and oil massage, I carefully target muscle tension and stiffness.\n\nIf other massages have felt too light, or if you are looking for both strength and precision, please leave it to me. I will listen closely to your needs and do my best to provide a satisfying treatment." },
   { id: "aaaaaa04-0000-4000-8000-000000000004", name: "平良 陽太", gender: "male", message: "※注意　指名料500円→2500円\nはじめまして。\nオイルマッサージを得意としており、「驚くほど上手い」とお客様からお声をいただくことも多いです。\n\n筋肉質な体格を活かし、しっかりとした圧で深いコリまで丁寧にほぐしていきます。力強さの中にもリズムと心地よさを大切にした施術で、全身が軽くなるような感覚を目指しています。\n\nまた、英語での対応も可能ですので、海外からのお客様にも安心してご利用いただいています。\nお客様一人ひとりに合わせた丁寧な接客と、気持ちの良いサービスを心がけています。\n\n「またお願いしたい」と思っていただけるよう、心を込めて施術いたします。\nオイルマッサージがお好きな方は、ぜひ一度お任せください。" },
   { id: "aaaaaa05-0000-4000-8000-000000000005", name: "山田 恵", gender: "female", message: "私は、お客様がふっと肩の力を抜いて、心からリラックスできる「穏やかで優しい時間」を提供することを大切にしています。お体のお悩みはもちろん、その日の気分や細かなご要望にも丁寧に耳を傾け、手のひらから伝わる温もりで、日々の疲れを一つひとつ丁寧に解きほぐしていきます。\n\nまた、海外からお越しのお客様にも安心してお過ごしいただけるよう、英語でのカウンセリングやコミュニケーションにも対応しております。「言葉の壁」を感じることなく、最高のリラクゼーションを体感していただけるよう努めています。\n\n◆ 得意な施術\n\n足裏マッサージ： 「第二の心臓」と呼ばれる足裏を丁寧に刺激し、全身の血行を促進します。長旅や立ち仕事でパンパンに張ってしまった脚も、驚くほど軽やかに整えます。\n\nタイ古式マッサージ： 優しいリズムのストレッチで、普段使わない筋肉をゆっくりと伸ばします。無理な負荷をかけず、呼吸に合わせた丁寧なアプローチで、体本来の柔軟性を取り戻します。\n\n◆ お客様へ（Message to Our Guests）\n忙しい日常の中で、自分のための時間を作ることはとても大切です。\n「痛いのは苦手だけど、しっかり解されたい」「リラックスしてぐっすり眠りたい」といったご希望も、遠慮なくお聞かせください。" },
-  { id: "aaaaaa06-0000-4000-8000-000000000006", name: "藤倉 和美", gender: "female", message: "お客様の「あぁ、スッキリした！」という笑顔が、私の毎日の原動力です。\n明るくエネルギッシュな接客で、心まで軽くなるようなひとときをお届けすることを大切にしています。お身体の不調はもちろん、日常のちょっとしたお疲れやストレスも、ぜひ私に預けてください！\n\nただ解すだけでなく、なぜそこに疲れが溜まっているのか、どうすれば楽な状態が続くのかを一緒に考え、お客様一人ひとりに最適なアプローチをご提案します。\n\n◆ 得意な施術\n\nマッサージ（指圧・整体）： 疲れの「芯」を的確に捉える施術が得意です。頑固な肩こりや腰の重みも、ポイントを外さずしっかりとアプローチし、驚くほどの軽さを引き出します。\n\n小顔矯正： 骨格や筋肉のバランスを整え、お顔全体の印象をパッと明るく仕上げます。お出かけ前や自分へのご褒美に、目に見える変化をぜひ楽しんでください。\n\n◆ お客様へ\n「最近、身体が重いな…」と感じたら、それは身体からの大切なサインです。\nそんな時は無理をせず、ぜひ当店へ疲れを休めにいらしてください。" },
-  { id: "aaaaaa07-0000-4000-8000-000000000007", name: "酒井 勝也", gender: "male", message: "私は、単にお身体をほぐすだけでなく、「なぜそこに痛みが出るのか」「どうすれば楽な状態が続くのか」を解剖学的な視点から分析し、根本的な原因にアプローチすることを大切にしています。\n\n男性ならではの大きな手と、安定した圧を活かした施術は、多くのお客様から「包み込まれるような安心感がある」「奥のコリまでしっかり届く」とご好評をいただいております。お身体の構造を熟知しているからこそできる、一人ひとりに合わせた的確なケアをお約束します。\n\n◆ 得意な施術\n\n整体： 骨格の歪みや筋肉のバランスを緻密に調整します。土台から整えることで、長年の腰の重さや肩の強張りも、スッと軽くなる変化を実感していただけます。\n\nオイルマッサージ： しっかりとした圧をかけながら、大きなストロークで深部のリンパにアプローチします。筋肉を傷めず、深いリラックスと共に全身の滞りを一気に流し去る、男性セラピストならではのダイナミックな手技が強みです。\n\n◆ お客様へ\n「どこへ行っても解決しなかった」「もっと強く、深くほぐしてほしい」そんなご要望も、ぜひ私にぶつけてください。今の状態を詳しく丁寧に説明しながら、あなたが一番心地よいと感じる施術をご提供します。\n\nお身体のメンテナンスは、私にお任せください。皆様にお会いできるのを楽しみにしております！" },
-  { id: "aaaaaa08-0000-4000-8000-000000000008", name: "中村敏樹", gender: "male", message: "" },
-  { id: "aaaaaa09-0000-4000-8000-000000000009", name: "山崎琢心", gender: "male", message: "" },
-  { id: "aaaaaa10-0000-4000-8000-000000000010", name: "川井", gender: "female", message: "" },
-  { id: "aaaaaa11-0000-4000-8000-000000000011", name: "佐藤みずき", gender: "female", message: "はじめまして。\nいつも笑顔で、お客様に安心して過ごしていただける時間を大切にしています。\n\n「来て良かった」「またお願いしたい」と思っていただけるよう、一人ひとりのお客様に丁寧で心のこもったサービスを心がけています。ありがたいことに、これまで多くのお客様から嬉しいお言葉をいただき、不満のお声をいただくことなく施術させていただいています。\n\n特に小顔矯正とオイルマッサージが得意で、お顔のバランスを整えながらスッキリしたフェイスラインへ導く施術や、心身ともにリラックスしていただけるオイルトリートメントが好評です。\n\nお疲れを癒しながら、キレイとリラックスの両方を感じていただける時間をお届けできるよう、心を込めて施術いたします。\nぜひお気軽にお任せください。" },
-  { id: "aaaaaa12-0000-4000-8000-000000000012", name: "杉田 祐哉", gender: "male", message: "" },
-  { id: "aaaaaa13-0000-4000-8000-000000000013", name: "平沼 穂香", gender: "female", message: "" },
+  { id: "aaaaaa14-0000-4000-8000-000000000014", name: "小倉 有美子", gender: "female", message: "はじめまして。丁寧なカウンセリングとオイルリンパマッサージが得意です。お身体の状態に合わせて、リラックスしていただける施術を心がけています。" },
+  { id: "aaaaaa15-0000-4000-8000-000000000015", name: "武良 翔平", gender: "male", message: "力強い指圧と全身整体が得意です。スポーツ経験を活かし、深いコリにもしっかりアプローチします。" },
+  { id: "aaaaaa16-0000-4000-8000-000000000016", name: "未定", gender: "female", message: "" },
 ];
 
 // ---- 時刻ユーティリティ（日本時間・分単位） ---------------------------
@@ -120,8 +115,15 @@ const state = {
     gender: s.gender,
     active: 1,
     courses: "[]", // 空=全メニュー対応
-    locked: ["山田 恵", "中村敏樹"].includes(s.name) ? 1 : 0, // 鍵（予約受付停止）
-    profile: JSON.stringify({ nickname: "", personalNomination: true, genderNomination: false, nominationFee: 500, message: s.message || "", imageKey: "" }),
+    locked: ["豊", "中山 優吾", "平良 陽太", "山田 恵", "小倉 有美子", "未定"].includes(s.name) ? 1 : 0, // 鍵（予約受付停止）
+    profile: JSON.stringify({
+      nickname: "",
+      personalNomination: s.name !== "未定", // 「未定」は指名不可の割当用スタッフ
+      genderNomination: false,
+      nominationFee: { "杉田 祐哉": 500, "中山 優吾": 2700, "小倉 有美子": 1100, "未定": 1100, "武良 翔平": 500 }[s.name] || 0,
+      message: s.message || "",
+      imageKey: "",
+    }),
     sort_order: i + 1,
     profile_revision: 0,
   })),
@@ -156,23 +158,24 @@ function ensureDay(date) {
   return state.days.get(date);
 }
 
+// 本物の予約台帳の画像と同じ固定シフト（毎日同じパターン。月間シフト入力で上書き可能）
+const FIXED_SHIFTS = {
+  "aaaaaa12-0000-4000-8000-000000000012": [1020, 1410], // 杉田 祐哉 17:00〜23:30
+  "aaaaaa01-0000-4000-8000-000000000001": [600, 1320],  // 豊       10:00〜22:00
+  "aaaaaa02-0000-4000-8000-000000000002": [600, 1230],  // 中山 優吾 10:00〜20:30
+  "aaaaaa04-0000-4000-8000-000000000004": [600, 1080],  // 平良 陽太 10:00〜18:00
+  "aaaaaa05-0000-4000-8000-000000000005": [1110, 1290], // 山田 恵   18:30〜21:30
+  "aaaaaa14-0000-4000-8000-000000000014": [840, 1290],  // 小倉 有美子 14:00〜21:30
+  "aaaaaa15-0000-4000-8000-000000000015": [900, 1290],  // 武良 翔平 15:00〜21:30
+  "aaaaaa16-0000-4000-8000-000000000016": [720, 990],   // 未定     12:00〜16:30
+};
 function ensureShifts(date) {
   if (state.shifts.has(date)) return state.shifts.get(date);
-  const rand = seededRand("shift:" + date);
   const list = [];
-  state.staff.forEach((s, i) => {
-    let start, end;
-    if (s.id === "aaaaaa05-0000-4000-8000-000000000005") {        // 山田 恵：夜シフト固定
-      start = 1080; end = 1620;
-    } else if (s.id === "aaaaaa08-0000-4000-8000-000000000008") { // 中村敏樹：終日シフト固定
-      start = 600; end = 1620;
-    } else {
-      if (rand() < 0.25) return; // 一部は休み
-      const early = rand() < 0.5;
-      start = early ? 600 : 720 + (i % 2) * 60;      // 10:00 または 12:00/13:00
-      end = early ? 1200 + (i % 3) * 60 : 1620;      // 20〜22時 または 27:00
-    }
-    list.push({ staff_id: s.id, date, start_at: minToMs(date, start), end_at: minToMs(date, end), note: "" });
+  state.staff.forEach((s) => {
+    const t = FIXED_SHIFTS[s.id];
+    if (!t) return;
+    list.push({ staff_id: s.id, date, start_at: minToMs(date, t[0]), end_at: minToMs(date, t[1]), note: "" });
   });
   state.shifts.set(date, list);
   return list;
@@ -180,11 +183,106 @@ function ensureShifts(date) {
 
 function ensureEvents(date) {
   if (state.events.has(date)) return state.events.get(date);
-  // 架空のお客様の予約や休憩は自動生成しない
-  // （実際に予約サイトから入った予約と、管理画面で手入力した予定だけが台帳に載る）
   const ev = { bookings: [], blocks: [], assignments: [] };
   state.events.set(date, ev);
+  // 当日だけ、本物の予約台帳の画像と同じ予定を最初から載せておく
+  // （それ以外の日は、予約サイトからの予約と管理画面での手入力のみ）
+  if (date === todayJst()) seedTodayEvents(date, ev);
   return ev;
+}
+
+// 画像と同じ当日の業務・予約一式（集計値も画像と一致するよう金額まで揃えている）
+function seedTodayEvents(date, ev) {
+  const S = {
+    sugita: "aaaaaa12-0000-4000-8000-000000000012",
+    yutaka: "aaaaaa01-0000-4000-8000-000000000001",
+    nakayama: "aaaaaa02-0000-4000-8000-000000000002",
+    taira: "aaaaaa04-0000-4000-8000-000000000004",
+    yamada: "aaaaaa05-0000-4000-8000-000000000005",
+    ogura: "aaaaaa14-0000-4000-8000-000000000014",
+    takera: "aaaaaa15-0000-4000-8000-000000000015",
+    mitei: "aaaaaa16-0000-4000-8000-000000000016",
+  };
+  let n = 0;
+  const block = (sid, start, end) => {
+    n++;
+    ev.blocks.push({ id: "blk-seed-" + n, staff_id: sid, date, start_at: minToMs(date, start), end_at: minToMs(date, end), kind: "work", note: "" });
+  };
+  const book = (sid, start, end, courseId, extra) => {
+    n++;
+    const c = getCourse(courseId);
+    const id = "bk-seed-" + n;
+    const bk = {
+      id, reference: "SD" + String(n).padStart(6, "0"), service_date: date,
+      status: "confirmed", start_at: minToMs(date, start), end_at: minToMs(date, end),
+      people: 1, course: courseId, course_name: c.name,
+      name: "", email: "", phone: "", comment: "",
+      total: c.price, base_price: c.price,
+      nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
+      staff: "none", customer_token: null,
+      booth: "新規1(1)", course_label: c.name, is_new: 1, multi: 0, hide_name: 0,
+      customer_gender: "", created_label: date + " 09:00 WEB", display_id: 247378000 + n,
+      ...extra,
+    };
+    bk.reference = String(bk.display_id); // 予約ID（画像と同じ9桁数値）
+    ev.bookings.push(bk);
+    state.bookingIndex.set(id, date);
+    if (sid) ev.assignments.push({ booking_id: id, staff_id: sid });
+    return bk;
+  };
+  // 業務ブロック
+  block(S.sugita, 1050, 1110);   // 17:30〜18:30
+  block(S.yutaka, 750, 810);     // 12:30〜13:30
+  block(S.nakayama, 600, 690);   // 10:00〜11:30
+  block(S.nakayama, 690, 750);   // 11:30〜12:30
+  block(S.taira, 600, 660);      // 10:00〜11:00
+  block(S.taira, 690, 810);      // 11:30〜13:30
+  block(S.taira, 810, 930);      // 13:30〜15:30
+  block(S.taira, 1020, 1080);    // 17:00〜18:00
+  block(S.yamada, 1140, 1200);   // 19:00〜20:00
+  block(S.ogura, 1140, 1200);    // 19:00〜20:00
+  block(S.takera, 990, 1110);    // 16:30〜18:30
+  block(S.takera, 1110, 1230);   // 18:30〜20:30
+  block(S.takera, 1230, 1290);   // 20:30〜21:30
+  block(S.mitei, 930, 990);      // 15:30〜16:30
+  // 予約（合計 98,100円・新規5名・リピート2名・計7件）
+  book(S.nakayama, 750, 870, "364321-4822671", {
+    name: "ゲスト", staff: "male", booth: "新規1(2)", multi: 1,
+    course_label: "本日限定】全身整体60分＋足裏60分", created_label: date + " 08:12 WEB", customer_gender: "m",
+  });
+  book(S.mitei, 750, 870, "364321-4822671", {
+    name: "nadinehoduc", staff: "female", booth: "新規1(3)", multi: 1,
+    course_label: "本日限定】全身整体60分＋足裏60分", created_label: date + " 07:58 WEB", customer_gender: "f",
+  });
+  book(S.ogura, 900, 1020, "364321-4822711", {
+    name: "Katelyn Cartwright", staff: "female", booth: "新規1(1)",
+    course_label: "今月キャンペーン：女性オイル120", created_label: date + " 10:41 WEB", customer_gender: "f",
+  });
+  book(S.nakayama, 930, 990, "364326-4822708", {
+    name: "伊東敦", staff: "male", booth: "新規1(1)",
+    course_label: "【男】オイルリンパ60", created_label: date + " 11:05 WEB", customer_gender: "m",
+  });
+  book(S.nakayama, 1110, 1230, "364326-4823102", {
+    name: "Irwin", staff: "male", booth: "新規1(1)", is_new: 0,
+    course_label: "【男】オイルリンパ120", created_label: date + " 12:20 WEB", customer_gender: "m",
+  });
+  book(S.sugita, 1230, 1290, "364327-4822712", {
+    name: "タカタミカ", staff: "none", booth: "新規1(1)",
+    email: "mika_takata@hotmail.com", phone: "16467345696",
+    course_label: "フット(足湯＋足裏〜ふくらぎ)60", created_label: date + " 18:33 PC",
+    customer_gender: "f", display_id: 247378863,
+  });
+  book(S.sugita, 1290, 1380, "364326-4822709", {
+    name: "", hide_name: 1, is_new: 0, staff: "male",
+    nomination_fee: 500, nominated_staff_id: S.sugita, nominated_staff_name: "杉田 祐哉",
+    total: 17000, booth: "新規1(1)",
+    course_label: "【男】オイルリンパ90", created_label: date + " 13:44 PC", customer_gender: "m",
+  });
+  // 画面に出ない取消1件・無断キャンセル2件（下部集計用。cancelled以外だと
+  // 復元版のReactが「未定」行を合成してしまうため、無断はフラグで区別する）
+  book(null, 600, 660, "364323-4822701", { name: "取消済み", status: "cancelled" });
+  book(null, 660, 720, "364323-4822701", { name: "無断1", status: "cancelled", no_show: 1 });
+  book(null, 720, 780, "364323-4822701", { name: "無断2", status: "cancelled", no_show: 1 });
 }
 
 // スタッフの1日分の予定（予約・休憩・業務）が重ならないかを確認
@@ -569,52 +667,117 @@ function deliverDueMails() {
   }
 }
 
-function bookingLines(bk) {
+const MAIL_STORE = "Ueno spa&massage CN Health & Beauty SALON";
+const MAIL_ADDR = "東京都台東区上野４丁目８－６プラザＵビル　3階";
+const MAIL_TEL = "03-6806-0324";
+const SEP = "------------------------------";
+const origin = () => process.env.DEMO_ORIGIN || "http://127.0.0.1:5520";
+
+// コースのカテゴリ表示（メールの「　整体 全身整体 60分」の先頭部分）
+function courseCategory(courseId) {
+  const p = String(courseId).slice(0, 6);
+  return {
+    "364321": "キャンペーン", "364323": "整体", "364324": "小顔矯正", "364325": "矯正整体",
+    "364326": "オイル", "364327": "フット", "364328": "フェイシャル",
+    "364329": "ハイパーナイフ", "364331": "ルーム",
+  }[p] || "メニュー";
+}
+function displayId(bk) {
+  return bk.display_id || bk.reference;
+}
+// 予約内容ブロック（-----で挟む部分。改行も画像どおり）
+function mailBlock(bk) {
   const d = bk.service_date;
-  const staffLabel = bk.nominated_staff_name
-    ? `${bk.nominated_staff_name}（指名）`
-    : { none: "指名なし", male: "男性スタッフ希望", female: "女性スタッフ希望" }[bk.staff || "none"] || "指名なし";
   return [
-    `予約番号：${bk.reference}`,
-    `日時：${fmtDateJa(d)} ${fmtTime(d, bk.start_at)}〜${fmtTime(d, bk.end_at)}`,
-    `メニュー：${bk.course_name}`,
-    `人数：${bk.people}名`,
-    `担当：${staffLabel}`,
-    ...(bk.nomination_fee ? [`指名料：${bk.nomination_fee.toLocaleString("ja-JP")}円`] : []),
-    `合計：${bk.total.toLocaleString("ja-JP")}円（税込）`,
+    SEP,
+    `${d}（${["日","月","火","水","木","金","土"][new Date(d + "T00:00:00Z").getUTCDay()]}）　${fmtTime(d, bk.start_at)}〜`,
+    `予約ID ${displayId(bk)}`,
+    `　${courseCategory(bk.course)} ${bk.course_name}`,
+    "",
+    `合計 ${bk.total.toLocaleString("ja-JP")} 円`,
+    SEP,
   ].join("\n");
 }
-
-const STORE_FOOTER = [
-  "", "■店舗情報", STORE_NAME,
-  "東京都台東区上野4丁目8-6 プラザUビル 3階",
-  "TEL：03-6806-0324（変更・取消はお電話で承ります）",
+// 店舗向けはお客様情報付きのブロック
+function mailBlockStore(bk) {
+  const d = bk.service_date;
+  return [
+    SEP,
+    `${d}（${["日","月","火","水","木","金","土"][new Date(d + "T00:00:00Z").getUTCDay()]}）　${fmtTime(d, bk.start_at)}〜`,
+    `予約ID ${displayId(bk)}`,
+    `　${courseCategory(bk.course)} ${bk.course_name}`,
+    "",
+    `お名前 ${bk.name || "（未入力）"}`,
+    `TEL ${bk.phone || "（未入力）"}`,
+    `メール ${bk.email || "（未入力）"}`,
+    `ご要望 ${bk.comment || "なし"}`,
+    "",
+    `合計 ${bk.total.toLocaleString("ja-JP")} 円`,
+    SEP,
+  ].join("\n");
+}
+const MAIL_COMMON = [
+  "",
+  "■ご予約内容に関するご質問やご不明な点がございましたら、ご利用の店舗までお問い合わせください。",
+  "",
+  "■このサービスは株式会社EPARKが運営・提供しております。",
+  "EPARKはサービスのみを提供するものであり、店舗運営者との間のトラブル・紛争については一切責任を負いかねます。",
+  "",
+  "■このメールは送信専用のメールアドレスから配信されています。",
+  "ご返信いただいても返信内容の確認およびご返答ができませんのでご了承ください。",
+  "",
+  "■このメールにお心当たりがない場合には、お手数ですが、システムサポートまでお知らせください。",
+  "システムサポート：pm-support@epark-r.jp",
+  SEP,
+  MAIL_STORE,
+  MAIL_ADDR,
+  MAIL_TEL,
 ].join("\n");
 
 // 予約確定時：完了メール（お客様）＋新規予約通知（店舗）＋双方のリマインドを予約する
 function queueBookingMails(bk) {
   const now = Date.now();
-  const guest = (bk.name || "お客様") + " 様";
+  const cancelUrl = bk.customer_token
+    ? `${origin()}/mypage?id=${bk.id}&token=${bk.customer_token}`
+    : `${origin()}/mypage`;
+  const customerBody = (lead) => [
+    lead,
+    "今回のご予約内容は以下のとおりです。",
+    "",
+    mailBlock(bk),
+    "ご来店を心よりお待ちしております。",
+    "",
+    "■開始時間に遅れる場合は、お電話にてご連絡ください。",
+    MAIL_TEL,
+    "",
+    "■ご予約内容の変更は、一度予約のキャンセルを行っていただき、再度予約を取り直してください。",
+    "※混雑状況によっては、再予約ができないことがございます。あらかじめご了承ください。",
+    "予約のキャンセルはこちら ⇒",
+    `${cancelUrl},,`,
+  ].join("\n") + MAIL_COMMON;
   if (bk.email) {
     queueMail("customer", "confirm", bk.email,
-      `【${STORE_NAME}】ご予約ありがとうございます（予約番号 ${bk.reference}）`,
-      `${guest}\n\nこの度はご予約いただき、誠にありがとうございます。\n以下の内容でご予約を承りました。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}\n\n当日お会いできることを楽しみにしております。`,
+      `${MAIL_STORE} ご予約内容確認`,
+      customerBody(`この度は「${MAIL_STORE}」にご予約いただきありがとうございます。`),
       now, bk.id);
-  }
-  queueMail("store", "notify", STORE_MAIL,
-    `【新規予約】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
-    `新しい予約が入りました。\n\n■予約内容\n${bookingLines(bk)}\n\n■お客様情報\nお名前：${bk.name || "（未入力）"}\nメール：${bk.email || "（未入力)"}\n電話：${bk.phone || "（未入力）"}\nご要望：${bk.comment || "なし"}`,
-    now, bk.id);
-  // リマインド：お客様は来店24時間前、店舗は当日朝9時（過ぎていれば即時）
-  if (bk.email) {
     queueMail("customer", "remind", bk.email,
-      `【リマインド】明日のご予約のご案内（予約番号 ${bk.reference}）`,
-      `${guest}\n\nご予約日が近づいてまいりましたので、ご案内いたします。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}\n\nご変更・お取消の場合はお早めにご連絡ください。\nご来店を心よりお待ちしております。`,
+      `${MAIL_STORE} ご予約リマインド`,
+      customerBody(`ご予約日が近づいてまいりましたのでご案内いたします。`),
       Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
   }
+  const storeBody = (lead) => [
+    lead,
+    "ご予約内容は以下のとおりです。",
+    "",
+    mailBlockStore(bk),
+  ].join("\n") + MAIL_COMMON;
+  queueMail("store", "notify", STORE_MAIL,
+    `${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
+    storeBody(`「${MAIL_STORE}」に新しいご予約が入りました。`),
+    now, bk.id);
   queueMail("store", "remind", STORE_MAIL,
-    `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
-    `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}\n\n■お客様情報\nお名前：${bk.name || "（未入力）"}\n電話：${bk.phone || "（未入力）"}`,
+    `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
+    storeBody(`本日のご予約のリマインドです。`),
     Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
   deliverDueMails();
 }
@@ -627,41 +790,60 @@ function dropPendingReminders(bookingId) {
 }
 
 function queueChangeMails(bk) {
-  const now = Date.now();
   dropPendingReminders(bk.id);
+  const now = Date.now();
   if (bk.email) {
     queueMail("customer", "change", bk.email,
-      `【${STORE_NAME}】ご予約内容変更のお知らせ（予約番号 ${bk.reference}）`,
-      `${(bk.name || "お客様")} 様\n\nご予約内容が変更されましたのでお知らせいたします。\n\n■変更後のご予約内容\n${bookingLines(bk)}${STORE_FOOTER}`,
+      `${MAIL_STORE} ご予約内容変更のお知らせ`,
+      [
+        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+        "この度、以下の内容にご予約を変更いたしましたのでご案内いたします。",
+        "",
+        mailBlock(bk),
+        "ご来店を心よりお待ちしております。",
+      ].join("\n") + MAIL_COMMON,
       now, bk.id);
     queueMail("customer", "remind", bk.email,
-      `【リマインド】明日のご予約のご案内（予約番号 ${bk.reference}）`,
-      `${(bk.name || "お客様")} 様\n\nご予約日が近づいてまいりましたので、ご案内いたします。\n\n■ご予約内容\n${bookingLines(bk)}${STORE_FOOTER}`,
+      `${MAIL_STORE} ご予約リマインド`,
+      [
+        `ご予約日が近づいてまいりましたのでご案内いたします。`,
+        "今回のご予約内容は以下のとおりです。",
+        "",
+        mailBlock(bk),
+        "ご来店を心よりお待ちしております。",
+      ].join("\n") + MAIL_COMMON,
       Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
   }
   queueMail("store", "change", STORE_MAIL,
-    `【予約変更】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
-    `予約が変更されました。\n\n■変更後の予約内容\n${bookingLines(bk)}`,
+    `${MAIL_STORE} ご予約変更のお知らせ（予約ID ${displayId(bk)}）`,
+    [`「${MAIL_STORE}」のご予約が変更されました。`, "変更後のご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
     now, bk.id);
   queueMail("store", "remind", STORE_MAIL,
-    `【本日の予約】${fmtTime(bk.service_date, bk.start_at)}〜 ${bk.course_name}（${bk.reference}）`,
-    `本日の予約のリマインドです。\n\n■予約内容\n${bookingLines(bk)}`,
+    `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
+    [`本日のご予約のリマインドです。`, "ご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
     Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
   deliverDueMails();
 }
 
 function queueCancelMails(bk) {
-  const now = Date.now();
   dropPendingReminders(bk.id);
+  const now = Date.now();
   if (bk.email) {
     queueMail("customer", "cancel", bk.email,
-      `【${STORE_NAME}】ご予約取消のお知らせ（予約番号 ${bk.reference}）`,
-      `${(bk.name || "お客様")} 様\n\n以下のご予約を取消いたしました。\n\n■取消したご予約\n${bookingLines(bk)}${STORE_FOOTER}\n\nまたのご利用を心よりお待ちしております。`,
+      `${MAIL_STORE} ご予約キャンセルのご案内`,
+      [
+        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+        "この度、以下のご予約を取り消しましたのでご案内いたします。",
+        "",
+        mailBlock(bk),
+        "またのご利用を心よりお待ちしております。",
+        `${origin()}/cn-ueno-health-and-beauty`,
+      ].join("\n") + MAIL_COMMON,
       now, bk.id);
   }
   queueMail("store", "cancel", STORE_MAIL,
-    `【予約取消】${fmtDateJa(bk.service_date)} ${fmtTime(bk.service_date, bk.start_at)} ${bk.course_name}（${bk.reference}）`,
-    `予約が取消されました。\n\n■取消した予約\n${bookingLines(bk)}`,
+    `${MAIL_STORE} ご予約キャンセルのお知らせ（予約ID ${displayId(bk)}）`,
+    [`「${MAIL_STORE}」のご予約がキャンセルされました。`, "取り消したご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
     now, bk.id);
   deliverDueMails();
 }
@@ -852,7 +1034,8 @@ function getPublicBooking(id, token) {
   if (!bk || !bk.customer_token || bk.customer_token !== token) throw err(404, "notFound");
   return {
     booking: {
-      id: bk.id, reference: bk.reference, status: bk.status,
+      id: bk.id, reference: bk.reference, displayId: String(displayId(bk)), status: bk.status,
+      language: bk.language || "ja", serviceDate: bk.service_date,
       start: bk.start_at, courseId: bk.course, courseName: bk.course_name,
       name: bk.name, people: bk.people, staff: bk.staff || "none",
       nominatedStaffName: bk.nominated_staff_name, nominationFee: bk.nomination_fee,
@@ -1001,6 +1184,32 @@ function handleDemoApi(req, res, url) {
     }
     res.writeHead(200, { "Content-Type": m2[1], "Cache-Control": "no-store" });
     res.end(Buffer.from(m2[2], "base64"));
+    return true;
+  }
+  if (url.pathname === "/api/bookings/cancel" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(raw || "{}");
+        const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+        const date = state.bookingIndex.get(String(b.id || ""));
+        if (!date) throw err(404, "notFound");
+        const ev2 = ensureEvents(date);
+        const bk = ev2.bookings.find((x) => x.id === b.id);
+        if (!bk || !bk.customer_token || bk.customer_token !== token) throw err(404, "notFound");
+        if (bk.status !== "confirmed") throw err(409, "alreadyCancelled");
+        bk.status = "cancelled";
+        ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
+        queueCancelMails(bk);
+        ensureDay(date).version++;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, status: "cancelled" }));
+      } catch (e) {
+        res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+      }
+    });
     return true;
   }
   if (url.pathname === "/api/bookings") {

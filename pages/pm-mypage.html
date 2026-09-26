@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>マイページ | CN Ueno health & beauty</title>
+<link rel="icon" href="/favicon.svg"/>
+<style>
+  /* 予約サイトと同じトーンのマイページ（画像のレイアウトに合わせた構成） */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #f3f4f6;
+    color: #1f2937;
+    font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", Arial, sans-serif;
+    font-size: 15px;
+  }
+  header.site {
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+  }
+  header.site img { width: 46px; height: 46px; object-fit: cover; border-radius: 4px; }
+  header.site b { font-size: 17px; }
+  header.site nav { margin-left: auto; display: flex; gap: 22px; }
+  header.site nav a { color: #6b7280; text-decoration: none; font-size: 12px; text-align: center; }
+  header.site nav a small { display: block; }
+  .tabs {
+    display: flex;
+    gap: 22px;
+    padding: 14px 24px 0;
+    font-weight: 600;
+    color: #9ca3af;
+  }
+  .tabs a {
+    color: inherit;
+    text-decoration: none;
+    padding-bottom: 8px;
+    border-bottom: 2px solid transparent;
+  }
+  .tabs a.active { color: #b08d4f; border-bottom-color: #b08d4f; }
+  main { max-width: 980px; padding: 16px 24px 60px; }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    margin-bottom: 18px;
+    overflow: hidden;
+  }
+  .card h2 {
+    font-size: 15px;
+    margin: 0;
+    padding: 16px 22px;
+    border-bottom: 1px solid #eceef1;
+  }
+  .rowline {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    padding: 17px 22px;
+    border-bottom: 1px solid #eceef1;
+  }
+  .rowline:last-child { border-bottom: none; }
+  .rowline .k { color: #374151; font-weight: 600; min-width: 84px; }
+  .badge {
+    display: inline-block;
+    color: #fff;
+    background: #b08d4f;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 5px 16px;
+  }
+  .badge.gray { background: #9ca3af; }
+  .when { font-size: 17px; font-weight: 700; }
+  .btnrow { display: flex; justify-content: center; padding: 18px; }
+  .gold {
+    font: inherit;
+    background: #c5a15e;
+    color: #fff;
+    font-weight: 700;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 34px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  .gold:hover { background: #b8934f; }
+  .cancel {
+    font: inherit;
+    color: #e0483e;
+    background: #fdf3f2;
+    border: 1px solid #e9a29c;
+    border-radius: 6px;
+    font-weight: 700;
+    padding: 12px 30px;
+    cursor: pointer;
+  }
+  .cancel:hover { background: #fbe6e4; }
+  .empty { color: #6b7280; padding: 26px 22px; }
+  @media (max-width: 640px) {
+    header.site nav { display: none; }
+    main { padding: 12px 12px 40px; }
+    .rowline { gap: 14px; }
+  }
+</style>
+</head>
+<body>
+  <header class="site">
+    <img src="/images/logo.jpg.webp" alt=""/>
+    <b>CN Ueno health &amp; beauty</b>
+    <nav>
+      <a href="/"><small>⌂</small><small id="nav-home">ホーム</small></a>
+      <a href="/book"><small>▣</small><small id="nav-book">予約</small></a>
+      <a href="/menus"><small>✋</small><small id="nav-menu">メニュー</small></a>
+    </nav>
+  </header>
+  <div class="tabs">
+    <a href="#home" id="tab-home">ホーム</a>
+    <a href="#resv" id="tab-resv">予約情報</a>
+    <a href="#member" id="tab-member">会員情報</a>
+  </div>
+  <main id="main"></main>
+
+<script>
+(function () {
+  "use strict";
+  // ---- 多言語（予約時の言語で表示・取消できる） ----
+  const L = {
+    ja: { home: "ホーム", resv: "予約情報", member: "会員情報", booked: "予約中", cancelled: "取消済み",
+      menu: "メニュー", total: "合計", cancelBtn: "予約取消", name: "お名前",
+      confirm: "この予約を取り消しますか？", done: "予約を取り消しました。", fail: "取消できませんでした。時間をおいてお試しください。",
+      empty: "表示できる予約がありません。予約完了ページの「マイページへ」から、このブラウザに予約が登録されます。",
+      yen: (n) => n.toLocaleString("ja-JP") + "円",
+      date: (d, hm) => { const [y, m, dd] = d.split("-").map(Number); const w = "日月火水木金土"[new Date(d + "T00:00:00Z").getUTCDay()]; return y + "年" + m + "月" + dd + "日（" + w + "）　" + hm; } },
+    en: { home: "Home", resv: "Bookings", member: "Member info", booked: "Booked", cancelled: "Cancelled",
+      menu: "Menu", total: "Total", cancelBtn: "Cancel booking", name: "Name",
+      confirm: "Cancel this booking?", done: "Your booking has been cancelled.", fail: "Could not cancel. Please try again later.",
+      empty: "No bookings to show. Bookings are saved to this browser from the booking-complete page.",
+      yen: (n) => "¥" + n.toLocaleString("en-US"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) + "  " + hm },
+    zh: { home: "首页", resv: "预约信息", member: "会员信息", booked: "已预约", cancelled: "已取消",
+      menu: "项目", total: "合计", cancelBtn: "取消预约", name: "姓名",
+      confirm: "确定要取消这个预约吗？", done: "预约已取消。", fail: "取消失败，请稍后再试。",
+      empty: "没有可显示的预约。预约完成页面的「我的页面」会把预约保存到本浏览器。",
+      yen: (n) => "¥" + n.toLocaleString("zh-CN"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short" }) + "  " + hm },
+    ko: { home: "홈", resv: "예약 정보", member: "회원 정보", booked: "예약중", cancelled: "취소됨",
+      menu: "메뉴", total: "합계", cancelBtn: "예약 취소", name: "이름",
+      confirm: "이 예약을 취소하시겠습니까?", done: "예약이 취소되었습니다.", fail: "취소하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      empty: "표시할 예약이 없습니다. 예약 완료 페이지의 '마이페이지'에서 이 브라우저에 저장됩니다.",
+      yen: (n) => "¥" + n.toLocaleString("ko-KR"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }) + "  " + hm },
+  };
+  const norm = (l) => (String(l || "").toLowerCase().startsWith("zh") ? "zh" : ["en", "ko", "zh", "ja"].includes(String(l || "").slice(0, 2)) ? String(l).slice(0, 2) : "ja");
+  const q = new URLSearchParams(location.search);
+  let pageLang = norm(q.get("lang") || localStorage.getItem("fm-lang") || "ja");
+  const T = () => L[pageLang] || L.ja;
+
+  const MYKEY = "cn-mypage";
+  const store = () => { try { return JSON.parse(localStorage.getItem(MYKEY) || "[]"); } catch { return []; } };
+  const saveStore = (list) => { try { localStorage.setItem(MYKEY, JSON.stringify(list.slice(-20))); } catch {} };
+
+  // メールの取消リンク（/mypage?id=..&token=..）から来た場合は登録して表示
+  if (q.get("id") && q.get("token")) {
+    const list = store().filter((x) => x.id !== q.get("id"));
+    list.push({ id: q.get("id"), token: q.get("token"), name: "", lang: pageLang });
+    saveStore(list);
+  }
+
+  const hm = (ms) => {
+    const d = new Date(ms + 9 * 3600e3);
+    return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+  };
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  let rows = []; // {entry, bk}
+  async function loadAll() {
+    const list = store();
+    rows = [];
+    for (const entry of list) {
+      try {
+        const r = await fetch("/api/bookings?id=" + encodeURIComponent(entry.id), {
+          headers: { Authorization: "Bearer " + entry.token }, cache: "no-store" });
+        if (!r.ok) continue;
+        const j = await r.json();
+        rows.push({ entry, bk: j.booking });
+      } catch {}
+    }
+    rows.sort((a, b) => b.bk.start - a.bk.start);
+    if (!q.get("lang") && rows[0]) pageLang = norm(localStorage.getItem("fm-lang") || rows[0].bk.language);
+  }
+
+  function bookingCard(row, withButtons) {
+    const t = L[norm(row.bk.language)] || T();
+    const cancelled = row.bk.status !== "confirmed";
+    return '<div class="card" data-id="' + esc(row.entry.id) + '">' +
+      '<div class="rowline"><span class="badge' + (cancelled ? " gray" : "") + '">' + (cancelled ? t.cancelled : t.booked) + "</span>" +
+      '<span class="when">' + t.date(row.bk.serviceDate, hm(row.bk.start)) + "</span></div>" +
+      '<div class="rowline"><span class="k">' + t.menu + "</span><span>" + esc(row.bk.courseName) + "</span></div>" +
+      '<div class="rowline"><span class="k">' + t.total + "</span><span>" + t.yen(row.bk.total) + "</span></div>" +
+      (withButtons && !cancelled
+        ? '<div class="btnrow"><button type="button" class="cancel" data-cancel="' + esc(row.entry.id) + '">' + t.cancelBtn + "</button></div>"
+        : "") +
+      "</div>";
+  }
+
+  function render() {
+    const t = T();
+    document.getElementById("tab-home").textContent = t.home;
+    document.getElementById("tab-resv").textContent = t.resv;
+    document.getElementById("tab-member").textContent = t.member;
+    document.getElementById("nav-home").textContent = t.home;
+    const tab = (location.hash || "#home").slice(1);
+    for (const id of ["home", "resv", "member"]) {
+      document.getElementById("tab-" + id).classList.toggle("active", tab === id);
+    }
+    const main = document.getElementById("main");
+    const name = store().map((x) => x.name).filter(Boolean).pop() || "";
+    if (!rows.length && tab !== "member") {
+      main.innerHTML = '<div class="card"><p class="empty">' + t.empty + "</p></div>";
+      return;
+    }
+    if (tab === "home") {
+      const latest = rows.find((r) => r.bk.status === "confirmed") || rows[0];
+      main.innerHTML =
+        '<div class="card"><h2>' + t.resv + "</h2>" +
+        (latest
+          ? bookingCard(latest, false).replace('<div class="card"', '<div class="card" style="box-shadow:none;margin:0"') +
+            '<div class="btnrow"><a class="gold" href="#resv">' + t.resv + "</a></div>"
+          : '<p class="empty">' + t.empty + "</p>") +
+        "</div>" +
+        '<div class="card"><h2>' + t.member + "</h2>" +
+        '<div class="rowline"><span class="k">' + t.name + "</span><span>" + esc(name) + "</span></div>" +
+        '<div class="btnrow"><a class="gold" href="#member">' + t.member + "</a></div></div>";
+    } else if (tab === "resv") {
+      main.innerHTML = rows.map((r) => bookingCard(r, true)).join("");
+    } else {
+      main.innerHTML =
+        '<div class="card"><h2>' + t.member + "</h2>" +
+        '<div class="rowline"><span class="k">' + t.name + "</span><span>" + esc(name) + "</span></div></div>";
+    }
+  }
+
+  document.addEventListener("click", async (e) => {
+    const id = e.target.closest("[data-cancel]")?.dataset.cancel;
+    if (!id) return;
+    const row = rows.find((r) => r.entry.id === id);
+    if (!row) return;
+    const t = L[norm(row.bk.language)] || T(); // 予約したときの言語で確認・完了を表示
+    if (!window.confirm(t.confirm)) return;
+    try {
+      const r = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + row.entry.token },
+        body: JSON.stringify({ id }),
+      });
+      if (!r.ok) throw new Error("cancel");
+      window.alert(t.done);
+    } catch {
+      window.alert(t.fail);
+      return;
+    }
+    await loadAll();
+    render();
+  });
+  window.addEventListener("hashchange", render);
+
+  loadAll().then(render);
+})();
+</script>
+</body>
+</html>

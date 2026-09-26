@@ -59,10 +59,10 @@ main.ledger-app .pm-pink > .ledger-staff-cell {
 }
 .pm-cloud {
   display: inline-block;
-  width: 26px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   vertical-align: middle;
-  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 20"><path fill="%23808b96" d="M20 18H7a5 5 0 0 1-1-9.9A7 7 0 0 1 19.6 9 4.5 4.5 0 0 1 20 18Z"/><path fill="%23aab4bd" d="M9 12a3.4 3.4 0 0 0-3.3 2.6A3 3 0 0 0 6 20h0-1a4 4 0 0 1-.6-7.9A5 5 0 0 1 9 12Z"/></svg>') center / contain no-repeat;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%233b82d0" d="M12 2c5.4 0 9.8 3.9 10 9H2c.2-5.1 4.6-9 10-9Z"/><path fill="%232f6cb0" d="M12 2c1.8 0 3.4 4 3.4 9H8.6C8.6 6 10.2 2 12 2Z"/><path fill="%23555" d="M11.3 11h1.4v8.2a2.6 2.6 0 0 1-5.2 0h1.5a1.1 1.1 0 0 0 2.3 0Z"/></svg>') center / contain no-repeat;
 }
 
 /* ---- モード選択の見た目を本物に合わせる（全体・シフトを選択状態に） ---- */
@@ -188,7 +188,20 @@ main.ledger-app .ledger-side.pm-side {
   flex-direction: column;
 }
 .pm-side .ledger-side-search { order: 6; }
-.pm-side:has(#pm-pd) .ledger-side-search { display: none; }
+/* 予約詳細パネルでは、本物と同じく最上部に「顧客を検索」入力欄を見せる
+   （×ボタンはパネル内のXが代替するため隠す） */
+main.ledger-app .ledger-side.pm-side:has(#pm-pd) .ledger-side-search {
+  display: flex;
+  order: -1;
+  margin: 2px 2px 8px;
+}
+main.ledger-app .ledger-side.pm-side:has(#pm-pd) .ledger-side-search input {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 8px 9px;
+}
+main.ledger-app .ledger-side.pm-side:has(#pm-pd) .ledger-side-search button { display: none; }
 /* 空き枠タップ時：本物と同じ茶色パネル。React側の検索欄は隠す（×は閉じる用に残す） */
 main.ledger-app .ledger-side.pm-side:has(.pm-new) { background: #987050; border-color: #7c5a3f; }
 main.ledger-app .pm-side:has(.pm-new) .ledger-side-search { display: none !important; }
@@ -1255,4 +1268,99 @@ main.ledger-app .pm-side:has(.pm-form) .ledger-side-search { display: none !impo
   border-radius: 5px;
   background: #fff;
   padding: 10px 18px;
+}
+
+
+/* ---- 本物の台帳画像に合わせた細部 ---- */
+/* 警告アイコン（バッジの外の⚠）と数字バッジ */
+.pm-warn { margin-left: auto; font-size: 15px; line-height: 1; }
+.pm-alert { margin-left: 6px; }
+
+/* 再読込ボタン：2本矢印の円形アイコン */
+main.ledger-app .ledger-toolbar > .ledger-refresh {
+  color: transparent !important;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23e8590c" d="M12 5a7 7 0 0 1 6.3 4h-2.5l3.6 4 3.6-4h-2.6A9 9 0 0 0 12 3a9 9 0 0 0-7.7 4.3l1.7 1A7 7 0 0 1 12 5Z"/><path fill="%23e8590c" d="M12 19a7 7 0 0 1-6.3-4h2.5L4.6 11 1 15h2.6A9 9 0 0 0 12 21a9 9 0 0 0 7.7-4.3l-1.7-1A7 7 0 0 1 12 19Z"/></svg>') center / 26px 26px no-repeat !important;
+  border: 0 !important;
+}
+
+/* 時計表示を画像と同じ大きさに */
+main.ledger-app .ledger-clock { font-size: 16px; font-weight: 700; }
+
+/* 点線メッセージエリア（日付またぎの案内） */
+main.ledger-app .ledger-modes span {
+  border: 1px dashed #a9a29a;
+  color: #555;
+  text-align: center;
+}
+
+/* 台帳下のボタン列 */
+.pm-ub-cat { padding: 10px 0 2px; }
+.pm-ub-cat button, .pm-ub-row button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid #b5b5b5;
+  border-radius: 3px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.pm-ub-row { display: flex; gap: 10px; padding: 8px 0 4px; }
+.pm-ub-row button { padding: 8px 18px; }
+
+/* 下部集計（4行構成） */
+main.ledger-app .ledger-summary:not([hidden]) { display: block; background: #fff; padding: 10px 16px; }
+.pm-ub-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff !important;
+  border: 1px solid #b5b5b5 !important;
+  border-radius: 3px;
+  padding: 8px 16px !important;
+  height: auto !important;
+}
+.pm-sum { display: flex; flex-wrap: wrap; gap: 4px 26px; font-weight: 700; font-size: 13px; padding: 4px 0; }
+.pm-sum-red { color: #e02020; }
+.pm-sum-blue { color: #1a6fc9; }
+
+/* 予約ブロックの本物表示（3行＋バッジ＋色分け） */
+main.ledger-app .ledger-event.pm-ev { padding: 1px 3px !important; line-height: 12px !important; }
+main.ledger-app .ledger-event.pm-ev .pm-ev-l1,
+main.ledger-app .ledger-event.pm-ev .pm-ev-l2,
+main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 12px;
+}
+.pm-bg {
+  display: inline-block;
+  font-style: normal;
+  font-size: 9px;
+  line-height: 11px;
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 2px;
+  margin-right: 2px;
+  vertical-align: top;
+}
+.pm-bg-m { background: #3b7ddd; }
+.pm-bg-f { background: #e8506e; }
+.pm-bg-multi { background: #b58900; }
+.pm-bg-new { background: #f08300; }
+.pm-bg-nom { background: #e8514d; }
+.pm-bg-mi { background: #8e8e8e; float: right; margin-right: 0; }
+main.ledger-app .ledger-event.pm-ev-green { background: #b2ec78 !important; border-color: #8fc356 !important; }
+main.ledger-app .ledger-event.pm-ev-lime { background: #eef98a !important; border-color: #c3cf5f !important; }
+main.ledger-app .ledger-event.pm-ev-purple { background: #bcb6ff !important; border-color: #a98ec0 !important; }
+main.ledger-app .ledger-event.pm-ev-red { background: #f28b80 !important; border-color: #d96a60 !important; }
+
+
+/* ---- 左パネルはなめらかにスライドイン ---- */
+main.ledger-app .ledger-side { animation: pm-side-in 0.18s ease-out; }
+@keyframes pm-side-in {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: none; }
 }
