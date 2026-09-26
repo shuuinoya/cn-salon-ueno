@@ -646,6 +646,13 @@ function staffCanDo(st, courseId) {
   return list.length === 0 || list.includes(courseId);
 }
 
+// コース名に性別指定がある場合は、リクエストの希望より優先する
+// （画面を経由しないPOSTでも、女性コースが男性スタッフに割り当たらないようにする）
+function effectivePref(courseId, pref) {
+  const g = courseGender(courseId);
+  return g !== "none" ? g : pref;
+}
+
 function profileOf(st) {
   try { return JSON.parse(st.profile || "{}"); } catch { return {}; }
 }
@@ -709,6 +716,7 @@ function getAvailability(q) {
   if (!course || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !(people >= 1 && people <= 3) ||
       !["none", "male", "female"].includes(pref)) throw err(400, "invalid");
   const dur = course.minutes;
+  const gpref = effectivePref(courseId, pref); // コース名の性別指定を優先
   const days = [];
   for (let i = 0; i < 7; i++) {
     const d = addDays(date, i);
@@ -719,13 +727,13 @@ function getAvailability(q) {
       // 受付対象外（受付停止日・過ぎた時間）は枠自体を返さず、画面では「－」表示にする
       if (!open) continue;
       if (d === today && m <= nowMinJst()) continue;
-      const free = freeStaffIds(d, m, m + dur, courseId, pref);
+      const free = freeStaffIds(d, m, m + dur, courseId, gpref);
       const ok = free.length >= people && (!staffId || free.includes(staffId));
       slots.push({ minute: m, available: ok, start: minToMs(d, m) });
     }
     days.push({ date: d, enabled: day.enabled, slots });
   }
-  return { staff: nominatableStaff(courseId, pref), days };
+  return { staff: nominatableStaff(courseId, gpref), days };
 }
 
 function createPublicBooking(body) {
@@ -753,14 +761,15 @@ function createPublicBooking(body) {
   const rk = String(body.requestKey || "");
   if (rk && state.requestKeys.has(rk)) return state.requestKeys.get(rk);
 
+  const gpref = effectivePref(body.course, pref); // コース名の性別指定を優先
   let nominated = null;
   if (staffId) {
-    nominated = nominatableStaff(body.course, pref).find((st) => st.id === staffId);
+    nominated = nominatableStaff(body.course, gpref).find((st) => st.id === staffId);
     if (!nominated) throw err(409, "staffUnavailable");
     if (Number(body.expectedNominationFee) !== nominated.nominationFee) throw err(409, "priceChanged");
   }
   const dur = course.minutes;
-  const free = freeStaffIds(date, m, m + dur, body.course, pref);
+  const free = freeStaffIds(date, m, m + dur, body.course, gpref);
   if (free.length < people || (staffId && !free.includes(staffId))) throw err(409, "soldOut");
 
   const assignee = staffId || free[0];
@@ -936,7 +945,7 @@ function handleDemoApi(req, res, url) {
       return true;
     }
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ staff: nominatableStaff(courseId, pref) }));
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ staff: nominatableStaff(courseId, effectivePref(courseId, pref)) }));
     return true;
   }
   if (url.pathname === "/api/staff/photo") {

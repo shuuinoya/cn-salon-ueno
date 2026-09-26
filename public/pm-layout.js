@@ -252,6 +252,17 @@
       });
     }
 
+    // 3c7-0) リロードが押せる状態のときも、押したら左パネルを閉じる
+    if (!window.__pmRefreshClose2) {
+      window.__pmRefreshClose2 = 1;
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".ledger-refresh")) return;
+        const closeBtn = [...document.querySelectorAll(".ledger-side button")]
+          .find((b) => (b.textContent === "×" || b.textContent === "X") && !b.closest("#pm-np"));
+        closeBtn?.click();
+      }, true);
+    }
+
     // 3c7) 再読込ボタンを押したら左の編集パネルを閉じて再読込する
     //（パネルが開いている間は本来のボタンがdisabledでクリックが発生しないため、
     //  透明のオーバーレイを重ねて「閉じる→再読込」を行う）
@@ -718,8 +729,10 @@
         if (!act || act === "none") return;
         const btn = (label) => [...form.querySelectorAll("button")]
           .find((b) => b.textContent === label && !b.closest("#pm-np"));
-        if (act === "close") btn("×")?.click();
-        else if (act === "book") btn("新規予約を入力")?.click();
+        if (act === "close") {
+          [...(side || document).querySelectorAll("button")]
+            .find((b) => b.textContent === "×" && !b.closest("#pm-np"))?.click();
+        } else if (act === "book") btn("新規予約を入力")?.click();
         else if (act === "break") btn("休憩")?.click();
         else if (act === "work") btn("業務")?.click();
       });
