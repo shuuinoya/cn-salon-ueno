@@ -140,6 +140,8 @@ main.ledger-app .ledger-logo {
   justify-content: center;
 }
 main.ledger-app .ledger-logo svg { display: block; }
+/* 置き換え前の元マーク（5枚花びら）は一瞬も見せない */
+main.ledger-app .ledger-logo:not([data-pm-flower]) > * { visibility: hidden; }
 
 /* ---- ヘッダー右：警告バッジ＋ユーザー表示 ---- */
 .pm-alert {

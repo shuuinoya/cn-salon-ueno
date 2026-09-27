@@ -131,17 +131,8 @@
     }
 
     // 3a1) 左上のロゴを本物と同じ「白い花びらマーク」にする
-    //      （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
+    decorateLogo();
     const logo = document.querySelector(".ledger-logo");
-    if (logo && !logo.dataset.pmFlower) {
-      logo.dataset.pmFlower = "1";
-      logo.textContent = "";
-      // ログイン画面と同じ4枚花びらのマーク（白）
-      logo.innerHTML =
-        '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">' +
-        '<path fill="#fff" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/>' +
-        "</svg>";
-    }
 
     // 3a2) 左上のロゴは押しても何も起きないようにする（予約サイトへ飛ばない）
     if (logo && !logo.dataset.pmNoNav) {
@@ -591,9 +582,23 @@
         if (document.querySelector(".ledger-side")) decorateSidePanelNow();
         decorateEvents();
         if (document.querySelector(".ledger-date-popover")) decorateCalendar();
+        decorateLogo();
       });
     });
     window.__pmPanelObs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // 左上のロゴ：元サイトの5枚花びらは見せず、最初からログイン画面と同じ4枚花びら（白）にする
+  // （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
+  function decorateLogo() {
+    const logo = document.querySelector(".ledger-logo");
+    if (!logo || logo.dataset.pmFlower) return;
+    logo.dataset.pmFlower = "1";
+    logo.textContent = "";
+    logo.innerHTML =
+      '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">' +
+      '<path fill="#fff" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/>' +
+      "</svg>";
   }
 
   // 表示中の日付のスケジュール全体（予約・業務・担当）を取得して共有する
