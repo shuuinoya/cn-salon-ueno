@@ -86,9 +86,11 @@ function sendFile(res, file, status, type, head, url) {
           // ?v=更新時刻 を付けて、ブラウザに古いキャッシュを使わせない
           text = text.replace("</body>", '<script src="/booking-tweaks.js?v=' + TWEAKS_VER + '" defer></script></body>');
         }
-        // 予約サイトのファビコンは店のマーク（丸いロゴ）。管理画面は従来のまま
+        // ファビコン：予約サイト＝店のマーク（丸いロゴ）／管理画面＝4枚花びらのクローバーで統一
         if (brandFor(file, url) === BOOKING_BRAND) {
           text = text.split("/favicon.svg").join("/fm-favicon.svg");
+        } else {
+          text = text.split("/favicon.svg").join("/pm-clover.svg");
         }
         // 管理画面の上書きスクリプト・CSSにも版番号を付け、古いキャッシュが残らないようにする
         text = text

@@ -588,6 +588,32 @@
     window.__pmPanelObs.observe(document.body, { childList: true, subtree: true });
   }
 
+  // ヘッダーメニューの開閉を本物と同じ挙動に：
+  // 1つ開いたら他は閉じる／外側をクリックしたら閉じる／項目を選んだら閉じる
+  if (!window.__pmMenuOne) {
+    window.__pmMenuOne = true;
+    document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (!(d instanceof HTMLDetailsElement) || !d.open) return;
+      if (!d.classList.contains("ledger-nav-menu")) return;
+      document.querySelectorAll("details.ledger-nav-menu[open]").forEach((o) => {
+        if (o !== d) o.open = false;
+      });
+    }, true); // toggleイベントはバブルしないためcaptureで受ける
+    document.addEventListener("click", (e) => {
+      const inMenu = e.target.closest && e.target.closest("details.ledger-nav-menu");
+      if (!inMenu) {
+        document.querySelectorAll("details.ledger-nav-menu[open]").forEach((o) => { o.open = false; });
+        return;
+      }
+      // メニューの中の項目を選んだら、そのメニューを閉じる（見出しのsummary自体は除く）
+      const item = e.target.closest("details.ledger-nav-menu button, details.ledger-nav-menu a");
+      if (item && !item.closest("summary")) {
+        setTimeout(() => { inMenu.open = false; }, 60);
+      }
+    });
+  }
+
   // 左上のロゴ：元サイトの5枚花びらは見せず、最初からログイン画面と同じ4枚花びら（白）にする
   // （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
   function decorateLogo() {
@@ -1549,26 +1575,61 @@
   // 店舗情報：予約フォームのフリーメッセージ欄の設定（保存すると予約サイトへ即時反映）
   async function openShopSettings() {
     document.getElementById("pm-shop-modal")?.remove();
-    let s = { visible: true, required: false, label: "", placeholder: "", description: "", maxLength: 2000 };
-    try {
-      const r = await fetch("/api/demo/settings", { cache: "no-store" });
-      s = (await r.json()).freeMessage || s;
-    } catch {}
+    let st = {};
+    try { st = await (await fetch("/api/demo/settings", { cache: "no-store" })).json(); } catch {}
+    const s = st.freeMessage || { visible: true, required: false, label: "", placeholder: "", description: "", maxLength: 2000 };
+    const m = st.shopMaster || {};
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const ro = (v) => '<input type="text" value="' + esc(v) + '" readonly class="pm-sm-ro">';
+    const inp = (id, v) => '<input type="text" id="' + id + '" value="' + esc(v) + '">';
+    const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
     const wrap = document.createElement("div");
     wrap.id = "pm-shop-modal";
     wrap.innerHTML =
-      '<section role="dialog" aria-modal="true">' +
-      "<h2>店舗マスタ｜予約用ホームページ</h2>" +
-      '<p class="pm-shop-sub">予約フォームの「フリーメッセージ（ご要望・ご相談）」欄の設定です。保存すると予約サイトに即時反映されます。</p>' +
-      '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-visible"> 入力欄を表示する</label>' +
-      '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-required"> 入力を必須にする</label>' +
-      '<label>見出し（空欄なら標準の文言）<input type="text" id="pm-fm-label" maxlength="60"></label>' +
-      '<label>入力欄のヒント（placeholder）<input type="text" id="pm-fm-placeholder" maxlength="200"></label>' +
-      '<label>説明文（欄の下に表示）<input type="text" id="pm-fm-description" maxlength="300"></label>' +
-      '<label>文字数制限（1〜2000）<input type="number" id="pm-fm-maxlength" min="1" max="2000"></label>' +
-      '<div class="pm-shop-actions"><button type="button" class="pm-red" id="pm-fm-save">保存</button>' +
-      '<button type="button" id="pm-fm-close">閉じる</button></div>' +
-      "</section>";
+      '<section role="dialog" aria-modal="true" class="pm-sm-dialog">' +
+      '<div class="pm-sm-head"><b>店舗マスタ</b></div>' +
+      '<div class="pm-sm-body">' +
+      '<div class="pm-sm-grid">' +
+        '<div class="pm-sm-l">企業ID</div><div class="pm-sm-v">' + ro(m.companyId) + '</div>' +
+        '<div class="pm-sm-l">エリアID</div><div class="pm-sm-v">' + ro(m.areaId) + '</div>' +
+        '<div class="pm-sm-l">店舗ID</div><div class="pm-sm-v">' + ro(m.shopId) + '</div>' +
+        '<div class="pm-sm-l">店舗コード</div><div class="pm-sm-v">' + inp("pm-sm-shopCode", m.shopCode) + '</div>' +
+        '<div class="pm-sm-l">店舗名<i>*</i></div><div class="pm-sm-v">' + inp("pm-sm-name", m.name) + '</div>' +
+        '<div class="pm-sm-l">店舗名略称<i>*</i></div><div class="pm-sm-v">' + inp("pm-sm-shortName", m.shortName) + '</div>' +
+        '<div class="pm-sm-l">郵便番号</div><div class="pm-sm-v">' + inp("pm-sm-zip", m.zip) + '</div>' +
+        '<div class="pm-sm-l">都道府県<i>*</i></div><div class="pm-sm-v"><select id="pm-sm-pref">' +
+          PREFS.map((p2) => '<option' + (p2 === (m.pref || "東京都") ? " selected" : "") + '>' + p2 + '</option>').join("") + '</select></div>' +
+        '<div class="pm-sm-l">市区町村番地<i>*</i></div><div class="pm-sm-v pm-sm-wide">' + inp("pm-sm-address", m.address) + '</div>' +
+        '<div class="pm-sm-l">住所2</div><div class="pm-sm-v pm-sm-wide">' + inp("pm-sm-address2", m.address2) + '</div>' +
+        '<div class="pm-sm-l">電話番号</div><div class="pm-sm-v">' + inp("pm-sm-tel", m.tel) + '</div>' +
+        '<div class="pm-sm-l">FAX番号</div><div class="pm-sm-v">' + inp("pm-sm-fax", m.fax) + '</div>' +
+        '<div class="pm-sm-l">メールアドレス</div><div class="pm-sm-v pm-sm-wide">' + inp("pm-sm-email", m.email) + '</div>' +
+        '<div class="pm-sm-l">ホームページURL</div><div class="pm-sm-v pm-sm-wide">' + inp("pm-sm-homepage", m.homepage) + '</div>' +
+        '<div class="pm-sm-l">担当部署</div><div class="pm-sm-v">' + inp("pm-sm-department", m.department) + '</div>' +
+        '<div class="pm-sm-l">担当者名</div><div class="pm-sm-v">' + inp("pm-sm-manager", m.manager) + '</div>' +
+        '<div class="pm-sm-l">背景色設定</div><div class="pm-sm-v pm-sm-wide pm-sm-radios">' +
+          '<label><input type="radio" name="pm-sm-bg" value="black"' + (m.bgColor === "black" ? " checked" : "") + '> ブラック</label>' +
+          '<label><input type="radio" name="pm-sm-bg" value="brown"' + (m.bgColor !== "black" ? " checked" : "") + '> ブラウン（デフォルト）</label>' +
+        '</div>' +
+      '</div>' +
+      // 折りたたみ（実物と同じ見出し。「予約用ホームページ」にフリーメッセージ設定が入っている）
+      '<details class="pm-sm-acc"><summary>業務設定</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
+      '<details class="pm-sm-acc"><summary>会員番号の発行処理</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
+      '<details class="pm-sm-acc" id="pm-sm-hp"><summary>予約用ホームページ</summary>' +
+        '<div class="pm-sm-fm">' +
+        '<p class="pm-shop-sub">予約フォームの「フリーメッセージ（ご要望・ご相談）」欄の設定です。保存すると予約サイトに即時反映されます。</p>' +
+        '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-visible"> 入力欄を表示する</label>' +
+        '<label class="pm-shop-check"><input type="checkbox" id="pm-fm-required"> 入力を必須にする</label>' +
+        '<label>見出し（空欄なら標準の文言）<input type="text" id="pm-fm-label" maxlength="60"></label>' +
+        '<label>入力欄のヒント（placeholder）<input type="text" id="pm-fm-placeholder" maxlength="200"></label>' +
+        '<label>説明文（欄の下に表示）<input type="text" id="pm-fm-description" maxlength="300"></label>' +
+        '<label>文字数制限（1〜2000）<input type="number" id="pm-fm-maxlength" min="1" max="2000"></label>' +
+        '<div class="pm-shop-actions"><button type="button" class="pm-red" id="pm-fm-save">保存</button></div>' +
+        '</div></details>' +
+      '<details class="pm-sm-acc"><summary>オンライン予約・店舗通知</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
+      '<details class="pm-sm-acc"><summary>店舗サマリ</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
+      '<div class="pm-shop-actions"><button type="button" id="pm-fm-close">閉じる</button></div>' +
+      '</div></section>';
     document.body.appendChild(wrap);
     const g = (id) => wrap.querySelector("#" + id);
     g("pm-fm-visible").checked = s.visible !== false;
@@ -1580,6 +1641,28 @@
     const close = () => wrap.remove();
     g("pm-fm-close").addEventListener("click", close);
     wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+    // 店舗マスタの編集は自動保存（入力から少し待って送信）
+    let smTimer = 0;
+    const saveShop = () => {
+      clearTimeout(smTimer);
+      smTimer = setTimeout(() => {
+        const body = { shopMaster: {
+          shopCode: g("pm-sm-shopCode").value, name: g("pm-sm-name").value, shortName: g("pm-sm-shortName").value,
+          zip: g("pm-sm-zip").value, pref: g("pm-sm-pref").value,
+          address: g("pm-sm-address").value, address2: g("pm-sm-address2").value,
+          tel: g("pm-sm-tel").value, fax: g("pm-sm-fax").value,
+          email: g("pm-sm-email").value, homepage: g("pm-sm-homepage").value,
+          department: g("pm-sm-department").value, manager: g("pm-sm-manager").value,
+          bgColor: wrap.querySelector('input[name="pm-sm-bg"]:checked')?.value || "brown",
+        } };
+        fetch("/api/demo/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body) }).catch(() => {});
+      }, 500);
+    };
+    wrap.querySelectorAll(".pm-sm-grid input:not(.pm-sm-ro), .pm-sm-grid select").forEach((el) => {
+      el.addEventListener("input", saveShop);
+      el.addEventListener("change", saveShop);
+    });
     g("pm-fm-save").addEventListener("click", async () => {
       try {
         const r = await fetch("/api/demo/settings", {
@@ -1597,7 +1680,6 @@
           }),
         });
         if (!r.ok) throw new Error();
-        close();
         window.alert("保存しました。予約サイトのフリーメッセージ欄に反映されます。");
       } catch {
         window.alert("保存できませんでした。接続を確認して再度お試しください。");

@@ -688,6 +688,69 @@ main.ledger-app .pm-orange, .pm-orange {
   font-size: 13px;
   color: #292929;
 }
+/* 店舗マスタ（実物と同じ表形式＋折りたたみ見出し） */
+#pm-shop-modal section.pm-sm-dialog {
+  width: min(1000px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid #d8c7a6;
+  border-radius: 8px;
+}
+.pm-sm-head {
+  background: #f9e6ae;
+  border-bottom: 1px solid #e6cf94;
+  border-radius: 8px 8px 0 0;
+  padding: 12px 18px;
+}
+.pm-sm-head b { font-size: 15px; color: #3f3428; }
+.pm-sm-body { padding: 16px 18px 18px; }
+.pm-sm-grid {
+  display: grid;
+  grid-template-columns: 170px 1fr 170px 1fr;
+  border-left: 1px solid #ddd2c2;
+  border-top: 1px solid #ddd2c2;
+  margin-bottom: 14px;
+}
+.pm-sm-l, .pm-sm-v {
+  border-right: 1px solid #ddd2c2;
+  border-bottom: 1px solid #ddd2c2;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+.pm-sm-l { font-size: 13px; color: #333; }
+.pm-sm-l i { color: #e02020; font-style: normal; margin-left: 2px; }
+.pm-sm-v.pm-sm-wide { grid-column: 2 / 5; }
+.pm-sm-v input[type="text"], .pm-sm-v select {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid #cfc6b8;
+  border-radius: 4px;
+  background: #fff;
+}
+.pm-sm-v input.pm-sm-ro { background: #ececec; color: #444; }
+.pm-sm-radios { gap: 22px; }
+.pm-sm-radios label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 400; }
+.pm-sm-acc {
+  background: #efe6dc;
+  border: 1px solid #e0d4c6;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.pm-sm-acc summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 16px;
+  color: #d9534a;
+  font-weight: 700;
+  font-size: 14px;
+}
+.pm-sm-acc summary::after { content: "▼"; font-size: 9px; margin-left: 6px; }
+.pm-sm-acc[open] summary::after { content: "▲"; }
+.pm-sm-acc .pm-sm-note { margin: 0; padding: 0 16px 12px; color: #8a7a68; }
+.pm-sm-acc .pm-sm-fm { background: #fff; margin: 0 10px 10px; padding: 12px 14px; border-radius: 4px; }
 #pm-shop-modal h2 { margin: 0 0 6px; font-size: 20px; }
 #pm-shop-modal .pm-shop-sub {
   color: #6b5b4b;
