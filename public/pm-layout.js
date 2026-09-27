@@ -264,6 +264,7 @@
         ["店舗情報", openShopSettings],
         ["スタッフ情報", () => staffBtn?.click()],
         ["メニュー一覧", openMenuList],
+        ["ホットペッパー連携", () => { location.href = "/admin/hotpepper"; }],
         ["ブース情報", null],
         ["経費マスタ", null],
         ["クレジットカード会社情報", null],
@@ -294,6 +295,7 @@
       else if (b.style.display === "none" && hasLabel) b.style.display = "";
     });
     refreshSched();
+    refreshShop().then(applyBizShade);
     decorateUnderbar();
     decorateSummary();
     decorateEvents();
@@ -614,6 +616,37 @@
     });
   }
 
+  // 店舗マスタ（業務設定）を定期取得し、営業時間外を台帳グリッドにグレー表示する
+  async function refreshShop(force) {
+    if (!force && window.__pmShopAt && Date.now() - window.__pmShopAt < 3000) return window.__pmShop;
+    try {
+      const r = await fetch("/api/demo/settings", { cache: "no-store" });
+      window.__pmShop = (await r.json()).shopMaster || null;
+      window.__pmShopAt = Date.now();
+    } catch {}
+    return window.__pmShop;
+  }
+  function applyBizShade() {
+    const sm = window.__pmShop;
+    if (!sm) return;
+    const key = sm.openStart + "-" + sm.openEnd;
+    document.querySelectorAll("main.ledger-app .ledger-track").forEach((tr) => {
+      let L = tr.querySelector(":scope > .pm-biz-off.pm-biz-l");
+      let R = tr.querySelector(":scope > .pm-biz-off.pm-biz-r");
+      if (!L) { L = document.createElement("i"); L.className = "pm-biz-off pm-biz-l"; tr.appendChild(L); }
+      if (!R) { R = document.createElement("i"); R.className = "pm-biz-off pm-biz-r"; tr.appendChild(R); }
+      if (tr.dataset.pmBiz === key) return;
+      tr.dataset.pmBiz = key;
+      const pct = (v) => (((v - 600) / 1020) * 100).toFixed(4);
+      L.style.left = "0";
+      L.style.width = pct(sm.openStart) + "%";
+      L.style.display = sm.openStart > 600 ? "" : "none";
+      R.style.left = pct(sm.openEnd) + "%";
+      R.style.width = (100 - Number(pct(sm.openEnd))).toFixed(4) + "%";
+      R.style.display = sm.openEnd < 1620 ? "" : "none";
+    });
+  }
+
   // 左上のロゴ：元サイトの5枚花びらは見せず、最初からログイン画面と同じ4枚花びら（白）にする
   // （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
   function decorateLogo() {
@@ -739,6 +772,7 @@
         el.classList.remove("lime", "purple");
         el.classList.add("pm-ev", "pm-ev-" + col);
         let l1 = "";
+        if (bk.source === "hotpepper") l1 += badge("hp", "HP");
         if (!nominated && bk.staff === "male") l1 += badge("m", "男");
         if (!nominated && bk.staff === "female") l1 += badge("f", "女");
         if (bk.multi || (bk.people || 1) > 1) l1 += badge("multi", "複");
@@ -772,7 +806,8 @@
     if (!bk) return;
     const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const s0 = pmMin(date, bk.start_at), e0 = pmMin(date, bk.end_at);
-    const tag = /WEB$/.test(bk.created_label || "") ? "オンライン予約" : "";
+    const tag = bk.source === "hotpepper" ? "ホットペッパー"
+      : /WEB$/.test(bk.created_label || "") ? "オンライン予約" : "";
     const lines = [
       ["会員番号", ""],
       ["顧客名", bk.hide_name ? "" : bk.name || ""],
@@ -1581,6 +1616,11 @@
     const m = st.shopMaster || {};
     const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
     const ro = (v) => '<input type="text" value="' + esc(v) + '" readonly class="pm-sm-ro">';
+    // 10:00〜27:00 を30分刻みで選ぶ時刻セレクト（値は分）
+    const timeSel = (id2, cur) => '<select id="' + id2 + '">' +
+      Array.from({ length: 35 }, (_, i) => 600 + i * 30).map((v) =>
+        '<option value="' + v + '"' + (v === cur ? " selected" : "") + '>' +
+        Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0') + '</option>').join("") + '</select>';
     const inp = (id, v) => '<input type="text" id="' + id + '" value="' + esc(v) + '">';
     const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
     const wrap = document.createElement("div");
@@ -1613,8 +1653,28 @@
         '</div>' +
       '</div>' +
       // 折りたたみ（実物と同じ見出し。「予約用ホームページ」にフリーメッセージ設定が入っている）
-      '<details class="pm-sm-acc"><summary>業務設定</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
-      '<details class="pm-sm-acc"><summary>会員番号の発行処理</summary><p class="pm-sm-note">デモ版ではこの項目の設定はありません。</p></details>' +
+      '<details class="pm-sm-acc" open><summary>業務設定</summary><div class="pm-biz">' +
+        '<div class="pm-biz-grid">' +
+        '<div class="pm-sm-l">業務開始時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-bizStart", m.bizStart ?? 600) + '</div>' +
+        '<div class="pm-sm-l">業務終了時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-bizEnd", m.bizEnd ?? 1620) + '</div>' +
+        '<div class="pm-sm-l">営業開始時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-openStart", m.openStart ?? 600) + '</div>' +
+        '<div class="pm-sm-l">営業終了時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-openEnd", m.openEnd ?? 1620) + '</div>' +
+        '<div class="pm-sm-l">予約開始時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-resStart", m.resStart ?? 600) + '</div>' +
+        '<div class="pm-sm-l">予約締切時間<i>*</i></div><div class="pm-sm-v">' + timeSel("pm-bz-resEnd", m.resEnd ?? 1560) + '</div>' +
+        '<div class="pm-sm-l">営業日切り替え時間</div><div class="pm-sm-v pm-sm-wide"><select id="pm-bz-daySwitch">' +
+          [24,25,26,27,28,29,30].map((h) => '<option value="' + h + '"' + (h === (m.daySwitch ?? 30) ? " selected" : "") + '>' + h + '</option>').join("") + '</select></div>' +
+        '<div class="pm-sm-l">時間表示単位</div><div class="pm-sm-v pm-sm-wide pm-sm-radios">' +
+          '<label><input type="radio" name="pm-bz-unit" value="basic"' + (m.timeUnit === "basic" ? " checked" : "") + '> 基本</label>' +
+          '<label><input type="radio" name="pm-bz-unit" value="all"' + (m.timeUnit !== "basic" ? " checked" : "") + '> 全体</label>' +
+        '</div>' +
+        '</div>' +
+        '<p class="pm-sm-note">予約開始〜予約締切は予約サイトの受付枠に、営業開始〜終了は予約台帳の営業時間帯（外側はグレー表示）に即時反映されます。</p>' +
+      '</div></details>' +
+      '<details class="pm-sm-acc" open><summary>会員番号の発行処理</summary><div class="pm-biz"><div class="pm-biz-grid">' +
+        '<div class="pm-sm-l">会員番号の自動発行</div><div class="pm-sm-v pm-sm-wide">' + ro(m.memberAuto ?? "無効") + '</div>' +
+        '<div class="pm-sm-l">会員番号の桁数</div><div class="pm-sm-v">' + ro(m.memberDigits ?? "3") + '</div>' +
+        '<div class="pm-sm-l">会員番号次の番号</div><div class="pm-sm-v">' + ro(m.memberNext ?? "1") + '</div>' +
+      '</div></div></details>' +
       '<details class="pm-sm-acc" id="pm-sm-hp"><summary>予約用ホームページ</summary>' +
         '<div class="pm-sm-fm">' +
         '<p class="pm-shop-sub">予約フォームの「フリーメッセージ（ご要望・ご相談）」欄の設定です。保存すると予約サイトに即時反映されます。</p>' +
@@ -1654,12 +1714,20 @@
           email: g("pm-sm-email").value, homepage: g("pm-sm-homepage").value,
           department: g("pm-sm-department").value, manager: g("pm-sm-manager").value,
           bgColor: wrap.querySelector('input[name="pm-sm-bg"]:checked')?.value || "brown",
+          bizStart: Number(g("pm-bz-bizStart").value), bizEnd: Number(g("pm-bz-bizEnd").value),
+          openStart: Number(g("pm-bz-openStart").value), openEnd: Number(g("pm-bz-openEnd").value),
+          resStart: Number(g("pm-bz-resStart").value), resEnd: Number(g("pm-bz-resEnd").value),
+          daySwitch: Number(g("pm-bz-daySwitch").value),
+          timeUnit: wrap.querySelector('input[name="pm-bz-unit"]:checked')?.value || "all",
         } };
         fetch("/api/demo/settings", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body) }).catch(() => {});
+          body: JSON.stringify(body) })
+          .then(() => refreshShop(true))
+          .then(() => applyBizShade())
+          .catch(() => {});
       }, 500);
     };
-    wrap.querySelectorAll(".pm-sm-grid input:not(.pm-sm-ro), .pm-sm-grid select").forEach((el) => {
+    wrap.querySelectorAll(".pm-sm-grid input:not(.pm-sm-ro), .pm-sm-grid select, .pm-biz select, .pm-biz input[type=radio]").forEach((el) => {
       el.addEventListener("input", saveShop);
       el.addEventListener("change", saveShop);
     });

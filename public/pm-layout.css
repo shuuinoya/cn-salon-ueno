@@ -751,6 +751,35 @@ main.ledger-app .pm-orange, .pm-orange {
 .pm-sm-acc[open] summary::after { content: "▲"; }
 .pm-sm-acc .pm-sm-note { margin: 0; padding: 0 16px 12px; color: #8a7a68; }
 .pm-sm-acc .pm-sm-fm { background: #fff; margin: 0 10px 10px; padding: 12px 14px; border-radius: 4px; }
+/* 業務設定・会員番号：白カード内の表形式 */
+.pm-sm-acc .pm-biz { background: #fff; margin: 0 10px 12px; padding: 12px 14px; border-radius: 4px; }
+.pm-biz-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr 200px 1fr;
+  border-left: 1px solid #ddd2c2;
+  border-top: 1px solid #ddd2c2;
+}
+.pm-biz-grid .pm-sm-l, .pm-biz-grid .pm-sm-v {
+  border-right: 1px solid #ddd2c2;
+  border-bottom: 1px solid #ddd2c2;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+.pm-biz-grid select { width: 100%; font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #cfc6b8; border-radius: 4px; background: #fff; }
+.pm-biz-grid .pm-sm-wide { grid-column: 2 / 5; }
+.pm-biz .pm-sm-note { padding: 8px 2px 0; }
+
+/* 台帳：営業時間外のグレー表示（店舗マスタの営業開始・終了に即時連動） */
+main.ledger-app .ledger-track .pm-biz-off {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgb(110 100 90 / 0.16);
+  pointer-events: none;
+  z-index: 1;
+}
 #pm-shop-modal h2 { margin: 0 0 6px; font-size: 20px; }
 #pm-shop-modal .pm-shop-sub {
   color: #6b5b4b;
@@ -1431,6 +1460,7 @@ main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
 .pm-bg-new { background: #f08300; }
 .pm-bg-nom { background: #e8514d; }
 .pm-bg-mi { background: #8e8e8e; float: right; margin-right: 0; }
+.pm-bg-hp { background: #f4511e; }
 /* お客様の枠は最初から最終の色で表示する（描画後に色が切り替わって見えないよう、
    色分け前の枠はごく短時間だけ描画を保留し、色分けが済んだ瞬間にその色で現れる） */
 main.ledger-app .ledger-event:not(.pm-ev):not(.activity) {

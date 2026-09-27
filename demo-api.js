@@ -292,11 +292,21 @@ const state = {
       homepage: "https://online.peakmanager.com/ja/t5p4e4/home",
       department: "", manager: "大水　寛",
       bgColor: "brown",
+      // 業務設定（分単位。600=10:00、1620=27:00。実物と同じ初期値）
+      bizStart: 600, bizEnd: 1620,     // 業務開始・終了
+      openStart: 600, openEnd: 1620,   // 営業開始・終了（台帳の営業時間帯）
+      resStart: 600, resEnd: 1560,     // 予約開始・予約締切（オンライン予約の受付枠 10:00〜26:00）
+      daySwitch: 30,                   // 営業日切り替え時間（30=翌6時表記。表示のみ）
+      timeUnit: "all",                 // 時間表示単位（basic/all。表示のみ）
+      // 会員番号の発行処理（実物と同じ表示。読み取り専用）
+      memberAuto: "無効", memberDigits: "3", memberNext: "1",
     },
   },
   bookingSerial: 100,
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
+  hpKeys: new Map(),       // ホットペッパー連携の予約番号 -> 予約ID（重複受信を防ぐ）
+  hpLog: [],               // ホットペッパー連携の受信履歴（管理画面の連携ページに表示）
   reports: new Map(),      // 営業実績（日報）の入力内容 date -> {weather, ...}
 };
 
@@ -1045,6 +1055,11 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
     .map((st) => st.id);
 }
 
+// 分（600=10:00、1620=27:00）を「HH:MM」表記にする（24時以降もそのまま 25:30 等で表す）
+function fmtTime2(min) {
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
+}
+
 function nowMinJst() {
   const t = todayJst();
   return Math.round((Date.now() - dayStartMs(t)) / 60000);
@@ -1068,7 +1083,11 @@ function getAvailability(q) {
     const day = ensureDay(d);
     const open = day.enabled && d >= today && d <= addDays(today, 84);
     const slots = [];
-    for (let m = 600; m <= 1500; m += 10) {
+    // 店舗マスタの「予約開始時間〜予約締切時間」の範囲だけ受け付ける（終了が27:00を超える枠は不可）
+    const sm = state.settings.shopMaster;
+    const mFrom = Math.max(600, sm.resStart);
+    const mTo = Math.min(sm.resEnd, 1620 - dur);
+    for (let m = mFrom; m <= mTo; m += 10) {
       // 受付対象外（受付停止日・過ぎた時間）は枠自体を返さず、画面では「－」表示にする
       if (!open) continue;
       if (d === today && m <= nowMinJst()) continue;
@@ -1109,7 +1128,10 @@ function createPublicBooking(body) {
   if (date < today || date > addDays(today, 84)) throw err(400, "invalid");
   if (!ensureDay(date).enabled) throw err(409, "soldOut");
   const m = Math.round((Number(body.start) - dayStartMs(date)) / 60000);
-  if (!(Number.isInteger(m) && m >= 600 && m <= 1500 && m % 5 === 0)) throw err(400, "invalid");
+  // 予約開始時間〜予約締切時間（店舗マスタの業務設定）の範囲外は受け付けない
+  const smB = state.settings.shopMaster;
+  const mMax = Math.min(smB.resEnd, 1620 - course.minutes);
+  if (!(Number.isInteger(m) && m >= Math.max(600, smB.resStart) && m <= mMax && m % 5 === 0)) throw err(400, "invalid");
   if (date === today && m <= nowMinJst()) throw err(409, "soldOut");
 
   // 多重送信は同じ結果を返す
@@ -1588,8 +1610,21 @@ function handleDemoApi(req, res, url) {
           if (parsed.shopMaster) {
             const sm = state.settings.shopMaster;
             for (const k of ["shopCode", "name", "shortName", "zip", "pref", "address", "address2",
-              "tel", "fax", "email", "homepage", "department", "manager", "bgColor"]) {
+              "tel", "fax", "email", "homepage", "department", "manager", "bgColor", "timeUnit"]) {
               if (k in parsed.shopMaster) sm[k] = String(parsed.shopMaster[k] || "").slice(0, 200);
+            }
+            // 業務設定（時刻は分単位・10:00〜27:00の範囲、開始<終了のときだけ反映）
+            const num = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(n / 5) * 5 : null; };
+            for (const [a, b] of [["bizStart", "bizEnd"], ["openStart", "openEnd"], ["resStart", "resEnd"]]) {
+              if (a in parsed.shopMaster || b in parsed.shopMaster) {
+                const s2 = num(parsed.shopMaster[a] ?? sm[a]);
+                const e2 = num(parsed.shopMaster[b] ?? sm[b]);
+                if (s2 !== null && e2 !== null && s2 >= 600 && e2 <= 1620 && s2 < e2) { sm[a] = s2; sm[b] = e2; }
+              }
+            }
+            if ("daySwitch" in parsed.shopMaster) {
+              const d2 = Number(parsed.shopMaster.daySwitch);
+              if (Number.isFinite(d2) && d2 >= 24 && d2 <= 30) sm.daySwitch = Math.round(d2);
             }
           }
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -1617,6 +1652,124 @@ function handleDemoApi(req, res, url) {
     const mails = [...state.mails].sort((a, b) => b.createdAt - a.createdAt);
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ mails }));
+    return true;
+  }
+
+  // ---- ホットペッパー連携（デモ） ------------------------------------------
+  // 外部（ホットペッパー側のシステム）からの予約通知を受け取り、同じ枠を当台帳でも埋める。
+  // 空き判定は自社予約とまったく同じ条件（シフト・休憩/業務・既存予約・鍵・対応メニュー・性別）
+  // を通すため、自社の予約サイトと枠が被ることはない（埋まっていれば slotTaken で拒否）。
+  if (url.pathname === "/api/partner/hotpepper") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ ok: true, log: state.hpLog }));
+      return true;
+    }
+    if (req.method !== "POST") { res.writeHead(405); res.end(); return true; }
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+    req.on("end", () => {
+      const logIt = (entry) => { state.hpLog.unshift({ at: new Date().toISOString(), ...entry }); state.hpLog.length = Math.min(state.hpLog.length, 50); };
+      const fail = (code, error, extra = {}) => {
+        logIt({ result: "拒否", error, ...extra });
+        res.writeHead(code, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error }));
+      };
+      try {
+        const b = JSON.parse(raw || "{}");
+        const rid = String(b.reservationId || "").trim();
+        if (!rid) return fail(400, "invalid", { note: "reservationIdなし" });
+
+        // ホットペッパー側でのキャンセル → こちらの枠も開放する
+        if (b.action === "cancel") {
+          const bid = state.hpKeys.get(rid);
+          const d0 = bid && state.bookingIndex.get(bid);
+          const bk0 = d0 && ensureEvents(d0).bookings.find((x) => x.id === bid);
+          if (!bk0) return fail(404, "notFound", { rid });
+          if (bk0.status === "confirmed") {
+            bk0.status = "cancelled";
+            bk0.cancelled = true;
+            ensureDay(d0).version++;
+          }
+          logIt({ result: "取消", rid, date: d0 });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, cancelled: true }));
+          return;
+        }
+
+        // 重複受信は同じ結果を返す（多重POSTでも枠を二重に埋めない）
+        if (state.hpKeys.has(rid)) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, id: state.hpKeys.get(rid), duplicated: true }));
+          return;
+        }
+
+        const date = String(b.date || "");
+        const minutes = Math.round(Number(b.minutes));
+        const price = Math.round(Number(b.price));
+        const name = String(b.name || "").trim();
+        const menu = String(b.menu || "").trim();
+        let start = b.start;
+        if (typeof start === "string" && /^\d{1,2}:\d{2}$/.test(start)) {
+          const [h, mi] = start.split(":").map(Number);
+          start = h * 60 + mi;
+        }
+        start = Math.round(Number(start));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name || !menu ||
+            !(minutes >= 10 && minutes <= 600) || !(price >= 0) ||
+            !(Number.isInteger(start) && start % 5 === 0)) return fail(400, "invalid", { rid });
+        const end = start + minutes;
+        if (start < 600 || end > 1620) return fail(400, "outsideHours", { rid });
+        const today = todayJst();
+        if (date < today || date > addDays(today, 84)) return fail(400, "invalid", { rid, note: "受付範囲外の日付" });
+        if (!ensureDay(date).enabled) return fail(409, "closed", { rid });
+
+        // メニュー名が当店メニューと一致すれば、対応メニュー・性別条件も同じ基準で判定する
+        const course = [...courseStore.values()].find((c) => c.name === menu) || null;
+        const gender = course ? courseGender(course.id) : (menu.includes("女性") ? "female" : menu.includes("男性") ? "male" : "none");
+        let candidates = state.staff
+          .filter((st) => st.active === 1 && !st.locked)
+          .filter((st) => (course ? staffCanDo(st, course.id) : true))
+          .filter((st) => gender === "none" || st.gender === gender)
+          .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
+          .sort((a, c) => a.sort_order - c.sort_order);
+        const wantName = String(b.staffName || "").trim();
+        if (wantName) candidates = candidates.filter((st) => st.name === wantName);
+        if (!candidates.length) return fail(409, "slotTaken", { rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu });
+
+        const assignee = candidates[0];
+        state.bookingSerial++;
+        const id = "hp-" + state.bookingSerial;
+        const ev = ensureEvents(date);
+        ev.bookings.push({
+          id, reference: rid, service_date: date, status: "confirmed",
+          start_at: minToMs(date, start), end_at: minToMs(date, end),
+          people: 1, course: course ? course.id : "", course_name: menu, course_label: menu,
+          name, email: String(b.email || ""), phone: String(b.phone || ""),
+          comment: String(b.comment || ""),
+          total: price, base_price: price, paid_amount: 0,
+          nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
+          staff: "none", customer_token: null,
+          source: "hotpepper", booth: "HP",
+          created_label: (() => {
+            const n = new Date(Date.now() + 9 * 3600e3);
+            return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " HP";
+          })(),
+          customer_gender: gender === "female" ? "f" : gender === "male" ? "m" : "",
+          is_new: isRepeatEmail(String(b.email || "")) ? 0 : 1,
+        });
+        ev.assignments.push({ booking_id: id, staff_id: assignee.id });
+        state.bookingIndex.set(id, date);
+        state.hpKeys.set(rid, id);
+        ensureDay(date).version++;
+        logIt({ result: "受信", rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu, price, name, staff: assignee.name });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, id, staff: assignee.name }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid" }));
+      }
+    });
     return true;
   }
 
