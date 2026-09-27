@@ -584,7 +584,10 @@ function postSchedule(body) {
       // 新規スタッフのIDは数字8桁の連番で採番する（ID欄がすべて数字8桁で揃うように）
       let staffRecId = p.id;
       if (!prevStaff) {
-        const next = Math.max(10000000, ...state.staff.map((s) => Number(String(s.id).slice(0, 8)) || 0)) + 1;
+        // 採番は単調増加（削除で最大番号が消えても同じ番号を再利用しない）
+        const next = Math.max(state.staffIdHigh || 10000000,
+          ...state.staff.map((s) => Number(String(s.id).slice(0, 8)) || 0)) + 1;
+        state.staffIdHigh = next;
         staffRecId = `${next}-0000-4000-8000-${String(next).padStart(12, "0")}`;
         if (state.photos.has(p.id)) {
           state.photos.set(staffRecId, state.photos.get(p.id));
