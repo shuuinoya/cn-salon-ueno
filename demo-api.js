@@ -251,7 +251,7 @@ const state = {
     gender: s.gender,
     active: 1,
     courses: "[]", // 空=全メニュー対応
-    locked: ["豊", "中山 優吾", "平良 陽太", "山田 恵", "小倉 有美子", "未定"].includes(s.name) ? 1 : 0, // 鍵（予約受付停止）
+    locked: 0, // 鍵（予約受付停止）は最初はかけない。台帳の鍵ボタンで自由にON/OFFできる
     profile: JSON.stringify({
       nickname: "",
       personalNomination: s.name !== "未定", // 「未定」は指名不可の割当用スタッフ
@@ -321,105 +321,11 @@ function ensureEvents(date) {
   if (state.events.has(date)) return state.events.get(date);
   const ev = { bookings: [], blocks: [], assignments: [] };
   state.events.set(date, ev);
-  // 当日だけ、本物の予約台帳の画像と同じ予定を最初から載せておく
-  // （それ以外の日は、予約サイトからの予約と管理画面での手入力のみ）
-  if (date === todayJst()) seedTodayEvents(date, ev);
+  // ダミーの予約・業務は載せない。予約サイトからの本物の予約と、
+  // 管理画面での手入力だけが台帳に表示される
   return ev;
 }
 
-// 画像と同じ当日の業務・予約一式（集計値も画像と一致するよう金額まで揃えている）
-function seedTodayEvents(date, ev) {
-  const S = {
-    sugita: "aaaaaa12-0000-4000-8000-000000000012",
-    yutaka: "aaaaaa01-0000-4000-8000-000000000001",
-    nakayama: "aaaaaa02-0000-4000-8000-000000000002",
-    taira: "aaaaaa04-0000-4000-8000-000000000004",
-    yamada: "aaaaaa05-0000-4000-8000-000000000005",
-    ogura: "aaaaaa14-0000-4000-8000-000000000014",
-    takera: "aaaaaa15-0000-4000-8000-000000000015",
-    mitei: "aaaaaa16-0000-4000-8000-000000000016",
-  };
-  let n = 0;
-  const block = (sid, start, end) => {
-    n++;
-    ev.blocks.push({ id: "blk-seed-" + n, staff_id: sid, date, start_at: minToMs(date, start), end_at: minToMs(date, end), kind: "work", note: "" });
-  };
-  const book = (sid, start, end, courseId, extra) => {
-    n++;
-    const c = getCourse(courseId);
-    const id = "bk-seed-" + n;
-    const bk = {
-      id, reference: "SD" + String(n).padStart(6, "0"), service_date: date,
-      status: "confirmed", start_at: minToMs(date, start), end_at: minToMs(date, end),
-      people: 1, course: courseId, course_name: c.name,
-      name: "", email: "", phone: "", comment: "",
-      total: c.price, base_price: c.price,
-      nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
-      staff: "none", customer_token: null,
-      booth: "新規1(1)", course_label: c.name, is_new: 1, multi: 0, hide_name: 0,
-      customer_gender: "", created_label: date + " 09:00 WEB", display_id: 247378000 + n,
-      ...extra,
-    };
-    bk.reference = String(bk.display_id); // 予約ID（画像と同じ9桁数値）
-    ev.bookings.push(bk);
-    state.bookingIndex.set(id, date);
-    if (sid) ev.assignments.push({ booking_id: id, staff_id: sid });
-    return bk;
-  };
-  // 業務ブロック
-  block(S.sugita, 1050, 1110);   // 17:30〜18:30
-  block(S.yutaka, 750, 810);     // 12:30〜13:30
-  block(S.nakayama, 600, 690);   // 10:00〜11:30
-  block(S.nakayama, 690, 750);   // 11:30〜12:30
-  block(S.taira, 600, 660);      // 10:00〜11:00
-  block(S.taira, 690, 810);      // 11:30〜13:30
-  block(S.taira, 810, 930);      // 13:30〜15:30
-  block(S.taira, 1020, 1080);    // 17:00〜18:00
-  block(S.yamada, 1140, 1200);   // 19:00〜20:00
-  block(S.ogura, 1140, 1200);    // 19:00〜20:00
-  block(S.takera, 990, 1110);    // 16:30〜18:30
-  block(S.takera, 1110, 1230);   // 18:30〜20:30
-  block(S.takera, 1230, 1290);   // 20:30〜21:30
-  block(S.mitei, 930, 990);      // 15:30〜16:30
-  // 予約（合計 98,100円・新規5名・リピート2名・計7件）
-  book(S.nakayama, 750, 870, "364321-4822671", {
-    name: "ゲスト", staff: "male", booth: "新規1(2)", multi: 1,
-    course_label: "本日限定】全身整体60分＋足裏60分", created_label: date + " 08:12 WEB", customer_gender: "m",
-  });
-  book(S.mitei, 750, 870, "364321-4822671", {
-    name: "nadinehoduc", staff: "female", booth: "新規1(3)", multi: 1,
-    course_label: "本日限定】全身整体60分＋足裏60分", created_label: date + " 07:58 WEB", customer_gender: "f",
-  });
-  book(S.ogura, 900, 1020, "364321-4822711", {
-    name: "Katelyn Cartwright", staff: "female", booth: "新規1(1)",
-    course_label: "今月キャンペーン：女性オイル120", created_label: date + " 10:41 WEB", customer_gender: "f",
-  });
-  book(S.nakayama, 930, 990, "364326-4822708", {
-    name: "伊東敦", staff: "male", booth: "新規1(1)",
-    course_label: "【男】オイルリンパ60", created_label: date + " 11:05 WEB", customer_gender: "m",
-  });
-  book(S.nakayama, 1110, 1230, "364326-4823102", {
-    name: "Irwin", staff: "male", booth: "新規1(1)", is_new: 0,
-    course_label: "【男】オイルリンパ120", created_label: date + " 12:20 WEB", customer_gender: "m",
-  });
-  book(S.sugita, 1230, 1290, "364327-4822712", {
-    name: "タカタミカ", staff: "none", booth: "新規1(1)",
-    email: "mika_takata@hotmail.com", phone: "16467345696",
-    course_label: "フット(足湯＋足裏〜ふくらぎ)60", created_label: date + " 18:33 PC",
-    customer_gender: "f", display_id: 247378863,
-  });
-  book(S.sugita, 1290, 1380, "364326-4822709", {
-    name: "", hide_name: 1, is_new: 0, staff: "male",
-    nomination_fee: 500, nominated_staff_id: S.sugita, nominated_staff_name: "杉田 祐哉",
-    total: 17000, booth: "新規1(1)",
-    course_label: "【男】オイルリンパ90", created_label: date + " 13:44 PC", customer_gender: "m",
-  });
-  // 画面に出ない取消1件・無断キャンセル2件（下部集計用。cancelled以外だと
-  // 復元版のReactが「未定」行を合成してしまうため、無断はフラグで区別する）
-  book(null, 600, 660, "364323-4822701", { name: "取消済み", status: "cancelled" });
-  book(null, 660, 720, "364323-4822701", { name: "無断1", status: "cancelled", no_show: 1 });
-  book(null, 720, 780, "364323-4822701", { name: "無断2", status: "cancelled", no_show: 1 });
-}
 
 // スタッフの1日分の予定（予約・休憩・業務）が重ならないかを確認
 function overlaps(date, staffId, start, end, ignoreId) {
