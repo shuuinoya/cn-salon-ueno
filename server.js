@@ -37,9 +37,12 @@ function brandFor(file, url) {
 
 // サイト名そのままの入口URL。転送ではなくその場で表示し、
 // アドレスバーには名前のURLが残る（予約サイト＝店名／管理画面＝CNsalon@board）
-// booking-tweaks.js の更新時刻（キャッシュ破棄用の版番号）
-let TWEAKS_VER = "1";
-try { TWEAKS_VER = String(Math.floor(fs.statSync(path.join(__dirname, "public", "booking-tweaks.js")).mtimeMs)); } catch {}
+// 上書きスクリプト類の更新時刻（キャッシュ破棄用の版番号）
+function fileVer(name) {
+  try { return String(Math.floor(fs.statSync(path.join(__dirname, "public", name)).mtimeMs)); } catch { return "1"; }
+}
+const TWEAKS_VER = fileVer("booking-tweaks.js");
+const PM_VER = fileVer("pm-layout.js") + "-" + fileVer("pm-layout.css");
 
 const ENTRY_URLS = {
   "/cn-ueno-health-and-beauty": "/",
@@ -87,6 +90,10 @@ function sendFile(res, file, status, type, head, url) {
         if (brandFor(file, url) === BOOKING_BRAND) {
           text = text.split("/favicon.svg").join("/fm-favicon.svg");
         }
+        // 管理画面の上書きスクリプト・CSSにも版番号を付け、古いキャッシュが残らないようにする
+        text = text
+          .split('href="/pm-layout.css"').join('href="/pm-layout.css?v=' + PM_VER + '"')
+          .split('src="/pm-layout.js"').join('src="/pm-layout.js?v=' + PM_VER + '"');
       }
       // サイト名の付け替え（HTML本文・RSCペイロード・JSチャンクをまとめて揃える）
       if (text.includes(OLD_BRAND)) text = text.split(OLD_BRAND).join(brandFor(file, url));

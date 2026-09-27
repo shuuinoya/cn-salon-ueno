@@ -25,7 +25,9 @@
   border-radius: 2px;
   background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23909090" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-.8"/></svg>') center no-repeat;
 }
-.pm-lockbtn:hover { outline: 2px solid #e9625b; outline-offset: 1px; }
+/* 赤い枠は出さない（ホバー・クリック時とも控えめな表示に） */
+.pm-lockbtn:hover { background-color: #efe7da; }
+.pm-lockbtn:focus, .pm-lockbtn:focus-visible { outline: none; }
 .pm-locked .pm-lockbtn {
   background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23555555" stroke-width="2.4"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
 }
@@ -1039,22 +1041,26 @@ main.ledger-app .pm-orange, .pm-orange {
 .pm-co-ok:hover { background: #d45953; }
 
 /* ---- 日付ピッカー：予約状況カレンダー ---- */
-.ledger-date-popover.pm-cal { width: min(680px, calc(100vw - 24px)); }
+/* カレンダーは装飾が済むまで描画を保留し、最初から完成状態で出す（0.8秒で安全解除） */
+main.ledger-app .ledger-date-popover:not(.pm-cal-ready) {
+  animation: pm-ev-hold 0.01s linear 0.8s both;
+}
+.ledger-date-popover.pm-cal { width: min(400px, calc(100vw - 24px)); }
 .pm-cal .ledger-date-month,
 .pm-cal .ledger-date-days,
 .pm-cal .ledger-date-close { display: none !important; }
-#pm-caldiv { font-size: 15px; color: #333; }
+#pm-caldiv { font-size: 11px; color: #333; }
 .pm-cal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px 10px;
+  padding: 5px 10px 6px;
   border-bottom: 1px solid #e0d6ca;
 }
-.pm-cal-head b { font-size: 19px; }
+.pm-cal-head b { font-size: 13px; }
 .pm-cal-head button {
   font: inherit;
-  font-size: 16px;
+  font-size: 13px;
   background: none;
   border: none;
   cursor: pointer;
@@ -1066,7 +1072,7 @@ main.ledger-app .pm-orange, .pm-orange {
   grid-template-columns: repeat(7, 1fr);
   text-align: center;
   font-weight: 700;
-  padding: 8px 0;
+  padding: 5px 0;
   color: #8a6a3a;
 }
 .pm-cal-week .sun { color: #c0392b; }
@@ -1079,15 +1085,15 @@ main.ledger-app .pm-orange, .pm-orange {
 }
 .pm-cal-day {
   position: relative;
-  min-height: 64px;
+  min-height: 32px;
   border-right: 1px solid #e0d6ca;
   border-bottom: 1px solid #e0d6ca;
   background: #fff;
-  padding: 8px 0 12px;
+  padding: 3px 0 9px;
   text-align: center;
   cursor: pointer;
 }
-.pm-cal-day b { font-weight: 700; font-size: 16px; }
+.pm-cal-day b { font-weight: 700; font-size: 11px; }
 .pm-cal-day small { color: #e8514d; font-weight: 700; margin-left: 2px; }
 .pm-cal-day.sun b { color: #c0392b; }
 .pm-cal-day.sat b { color: #3b5bd6; }
@@ -1101,17 +1107,17 @@ main.ledger-app .pm-orange, .pm-orange {
   position: absolute;
   left: 0;
   right: 0;
-  height: 5px;
+  height: 4px;
   display: block;
 }
-.pm-cal-day .st-y { bottom: 5px; background: #f9e94e; }
+.pm-cal-day .st-y { bottom: 4px; background: #f9e94e; }
 .pm-cal-day .st-r { bottom: 0; background: #e8514d; }
 .pm-cal-legend {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px 18px;
-  padding: 12px 14px 6px;
-  font-size: 13px;
+  gap: 3px 10px;
+  padding: 6px 8px 3px;
+  font-size: 10px;
 }
 .pm-cal-legend .sq {
   display: inline-block;
@@ -1360,6 +1366,13 @@ main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
 .pm-bg-new { background: #f08300; }
 .pm-bg-nom { background: #e8514d; }
 .pm-bg-mi { background: #8e8e8e; float: right; margin-right: 0; }
+/* お客様の枠は最初から最終の色で表示する（描画後に色が切り替わって見えないよう、
+   色分け前の枠はごく短時間だけ描画を保留し、色分けが済んだ瞬間にその色で現れる） */
+main.ledger-app .ledger-event:not(.pm-ev):not(.activity) {
+  animation: pm-ev-hold 0.01s linear 0.8s both;
+}
+@keyframes pm-ev-hold { from { opacity: 0; } to { opacity: 1; } }
+
 main.ledger-app .ledger-event.pm-ev-green { background: #b2ec78 !important; border-color: #8fc356 !important; }
 main.ledger-app .ledger-event.pm-ev-lime { background: #eef98a !important; border-color: #c3cf5f !important; }
 main.ledger-app .ledger-event.pm-ev-purple { background: #bcb6ff !important; border-color: #a98ec0 !important; }

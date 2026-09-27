@@ -187,18 +187,29 @@
           const cur = window.__pmLocks?.[name];
           if (!cur || b.dataset.busy) return;
           b.dataset.busy = "1";
+          // 押した瞬間に行を青く（解除なら元に）してから、サーバーに保存する（楽観更新）
+          const next = cur.locked ? 0 : 1;
+          cur.locked = next;
+          row.classList.toggle("pm-blue", !!next);
+          row.classList.toggle("pm-locked", !!next);
           try {
-            await fetch("/api/demo/schedule", {
+            const r = await fetch("/api/demo/schedule", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 action: "lockStaff",
                 date: new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10),
                 staffId: cur.id,
-                locked: cur.locked ? 0 : 1,
+                locked: next,
               }),
             });
+            if (!r.ok) throw new Error("lockStaff failed");
             await refreshLocks(true);
+          } catch {
+            // 保存に失敗したら見た目を元に戻す
+            cur.locked = next ? 0 : 1;
+            row.classList.toggle("pm-blue", !!cur.locked);
+            row.classList.toggle("pm-locked", !!cur.locked);
           } finally { delete b.dataset.busy; }
         }, true);
         cell.appendChild(b);
@@ -579,6 +590,7 @@
         queued = 0;
         if (document.querySelector(".ledger-side")) decorateSidePanelNow();
         decorateEvents();
+        if (document.querySelector(".ledger-date-popover")) decorateCalendar();
       });
     });
     window.__pmPanelObs.observe(document.body, { childList: true, subtree: true });
@@ -1169,8 +1181,19 @@
         '<span><i class="sq" style="background:#fff;border:1px solid #999"></i> シフト情報がありません</span>' +
         '<span><b class="pm-cal-cnt">( )</b> 予約数</span>' +
         "</div>";
+      pop.classList.add("pm-cal-ready"); // 完成してから表示する（描画保留の解除）
     });
   }
+
+  // カレンダーのデータを先読みしておき、開いた瞬間から完成状態で出せるようにする
+  function prefetchCalendar() {
+    const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
+    const first = new Date(today.slice(0, 7) + "-01T00:00:00Z");
+    const start = new Date(first.getTime() - first.getUTCDay() * 86400000);
+    fetchCalData(start.toISOString().slice(0, 10));
+  }
+  prefetchCalendar();
+  setInterval(prefetchCalendar, 7000);
 
   // 空き枠タップ時の左パネル：本物と同じ「開始時間／予約の登録（性別）／予約以外の登録（休憩・業務）」
   function decorateNewPanel() {
