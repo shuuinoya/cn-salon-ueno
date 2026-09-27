@@ -136,16 +136,76 @@
   }
 
   // ---- 利用規約・プライバシーポリシー：リンクを押すとポップアップで本文を表示 ----
-  const TERMS_JA = [
-    ["第1条（適用）", "本規約は、CN Ueno health & beauty（以下「当店」）が提供する施術サービスおよびオンライン予約の利用条件を定めるものです。お客様は、予約の申込みをもって本規約に同意したものとみなします。"],
-    ["第2条（予約の成立）", "予約は、予約フォームの送信後、当店からの予約確認メールの送信をもって成立します。予約時間は施術の開始時刻です。開始10分前を目安にお越しください。"],
-    ["第3条（変更・キャンセル）", "予約の変更・キャンセルは、マイページまたはお電話（03-6806-0324）にて、予約時間の前までにご連絡ください。ご連絡のないキャンセル（無断キャンセル）が続いた場合、以後のご予約をお断りすることがあります。"],
-    ["第4条（遅刻）", "予約時間に遅れてお越しの場合、施術時間を短縮させていただくことがあります。15分以上ご連絡なく遅れた場合は、キャンセル扱いとさせていただくことがあります。"],
-    ["第5条（施術をお断りする場合）", "以下に該当する場合、施術をお断りすることがあります。(1)飲酒されている場合 (2)伝染性の疾患・皮膚疾患がある場合 (3)妊娠中で医師の許可がない場合 (4)スタッフへの迷惑行為・セクシュアルハラスメントに当たる行為があった場合"],
-    ["第6条（体調・健康状態）", "持病・けが・通院中など健康に不安のある方は、必ず事前にお申し出ください。施術は治療行為ではなく、リラクゼーションを目的としたものです。"],
-    ["第7条（貴重品）", "貴重品はお客様ご自身で管理をお願いいたします。店内での紛失・盗難について、当店は責任を負いかねます。"],
-    ["第8条（免責）", "お客様の申告漏れ、または当店の責によらない事由により生じた損害について、当店は責任を負わないものとします。"],
-    ["第9条（規約の変更）", "本規約は必要に応じて変更されることがあります。変更後の規約は、当店ウェブサイトに掲載した時点で効力を生じます。"],
+  // ---- 利用規約：正式文書「CN health & beauty salon オンライン予約サービス利用規約」をそのまま掲載 ----
+  const TERMS_DOC = [
+    ["sub", "CN health & beauty salon オンライン予約サービス利用規約"],
+    ["sub", "2026年9月27日　制定・施行"],
+    ["sub", "CN health & beauty salon"],
+    ["ch", "第１章　総則"],
+    ["ar", "第１条（総則）"],
+    ["p", "１．本規約は、CN health & beauty salon（以下「当サロン」という）が提供するCN health & beauty salonオンライン予約サービス（第２条で定義する）の利用に関して、利用者（以下「利用者」という）が遵守すべき事項を定めたものである。"],
+    ["p", "２．利用者は、CN health & beauty salonオンライン予約サービスの利用に関し、本規約のほか、本規約の下位規約、ルール等（総称して以下「本規約等」という）を遵守するものとする。"],
+    ["p", "３．当サロンは、利用者がCN health & beauty salonオンライン予約サービスを利用した場合、当該利用者が本規約に同意したものとみなす。"],
+    ["p", "４．利用者がCN health & beauty salonオンライン予約サービスを利用するにあたり登録した情報に基づき、当サロンの顧客として登録されるものとし、当サロンから書面・FAX・電話・電子メール等により、当サロンが取り扱う各種サービスの案内等が送られることについて、予め同意する。"],
+    ["ar", "第２条（CN health & beauty salonオンライン予約サービス）"],
+    ["p", "「CN health & beauty salonオンライン予約サービス」とは、オンライン予約サービス（以下「予約サービス」という）を提供するとともに、リラクゼーション・ビューティ情報、ユーザアンケート、その他の関連情報の紹介（総称して以下「情報サービス」という）を行うサービスである。"],
+    ["ch", "第２章　CN health & beauty salonオンライン予約サービスの利用"],
+    ["ar", "第３条（利用方法）"],
+    ["p", "１．利用者は、「CN health & beauty salonオンライン予約サービス」において予約サービスまたは情報サービスを利用するに際し、本規約等の内容を十分に確認のうえ利用するものとする。"],
+    ["p", "２．利用者は、当サロンが運営するサロン店舗（リラクゼーションサロン、ネイルサロン、エステサロン等を指しますが、それらに限られません。）（以下、「店舗運営者」という）であって、お客様に対して、取引の対象となる役務または商品を提供または販売する者が提供するサービスを利用するときは、当該店舗運営者が定める規約、約款、ガイドライン、ルール等を十分に確認のうえ利用するものとする。"],
+    ["ch", "第３章　サービス利用にあたっての注意事項"],
+    ["ar", "第４条（利用者への連絡方法）"],
+    ["p", "当サロンおよび店舗運営者は、利用者に対し、必要に応じて、予約時または情報登録時に取得した電子メールアドレス、住所、電話番号等を利用して連絡できるものとする。いずれかの方法により連絡するかについては、当該連絡を行う当サロンまたはサービス提供者の判断によるものとする。"],
+    ["ch", "第４章　個人情報の取扱"],
+    ["ar", "第５条（個人情報）"],
+    ["p", "１．当サロンは、利用者の個人情報を別途定める「個人情報保護方針」に従い取り扱うものとし、利用者は、これに同意するものとする。"],
+    ["p", "２．当サロンは、本規約に係らず、裁判所もしくは正規の法的執行機関からの問い合わせに応じて、利用者の個人情報の公開を求められた場合には、問い合わせに応じる可能性があるものとする。"],
+    ["ar", "第６条（パスワードの管理）"],
+    ["p", "１．パスワードは、他人に知られることがないよう利用者本人が責任をもって管理するものとする。"],
+    ["p", "２．入力されたメールアドレスおよびパスワードが登録されたものと一致することを所定の方法により確認した場合、利用者本人による利用があったものとみなし、それらが盗用、不正使用その他の事情により会員以外の者が利用している場合であっても、それにより生じた損害について、当サロンは一切責任を負わないものとする。"],
+    ["ar", "第７条（店舗運営者による個人情報の取扱）"],
+    ["p", "１．店舗運営者は、利用者に提供するサービスの向上のために、再来店した際に「CN health & beauty salonオンライン予約サービス」を利用して、利用者の過去のサービス利用内容、ご要望や特徴など、関連情報を記録することができる。"],
+    ["p", "２．これらの関連情報は、他の店舗運営者や第三者とは共有されない。ただし、グループ経営の同系列の店舗運営者間で関連情報が共有される場合があることを利用者は同意するものとする。"],
+    ["p", "３．当サロンは、「CN health & beauty salonオンライン予約サービス」のシステムに保存されている情報のバックアップのためにコピーを作成する。"],
+    ["ch", "第５章　電子メールに関する取扱"],
+    ["ar", "第８条（電子メール）"],
+    ["p", "１．利用者は、「CN health & beauty salonオンライン予約サービス」を利用した際に、当サロンもしくは店舗運営者から定期的な電子メールを受信することを選択した場合は、当サロンもしくは店舗運営者が電子メールを送信することに同意したものとする。"],
+    ["p", "２．利用者が、当サロンもしくは店舗運営者から定期的な電子メールを受信することを選択しなかった場合であっても、予約の確認・変更・取消に関するメール、予約の無断キャンセルに関するメール、その他、予約に関連するその他の電子メールを受信することを同意するものとする。"],
+    ["ch", "第６章　料金および決済"],
+    ["ar", "第９条（深夜料金）"],
+    ["p", "１．22時を過ぎる業務または施術（22時以降に開始する施術、および22時を過ぎて継続する施術を含む）については、通常の施術料金とは別に、深夜料金として2,000円を申し受けるものとする。"],
+    ["p", "２．利用者は、前項の深夜料金が発生する時間帯に予約を行った場合、当該深夜料金の支払いに同意したものとみなす。"],
+    ["ar", "第１０条（決済手数料）"],
+    ["p", "１．利用者が現金以外の方法（クレジットカード、電子マネー、QRコード決済等を含むが、これらに限られない）により料金を支払う場合は、お支払い金額の5％を決済手数料として申し受けるものとする。"],
+    ["p", "２．現金でお支払いの場合は、前項の決済手数料はかからないものとする。"],
+    ["ch", "第７章　一般条項"],
+    ["ar", "第１１条（禁止事項）"],
+    ["p", "１．利用者は、「CN health & beauty salonオンライン予約サービス」の利用に際して、次の各号の行為を行わないものとする。"],
+    ["p", "（１）本規約等に違反する行為"],
+    ["p", "（２）サービス提供者、他の利用者、その他第三者に対し、その権利を侵害し、不利益を与え、または不快感を抱かせる行為"],
+    ["p", "（３）当サロンが承認した以外の方法で「CN health & beauty salonオンライン予約サービス」を利用する行為"],
+    ["p", "（４）有害なコンピュータプログラム等を送信または書き込む行為"],
+    ["p", "（５）スパムメール、チェーンレター、ジャンクメール等を送信する行為"],
+    ["p", "（６）法令または公序良俗に反する行為"],
+    ["p", "（７）その他当サロンが禁止する行為"],
+    ["p", "２．当サロンは、利用者が前項各号の一の行為に該当すると判断した場合には、事前に通知することなく、当該利用者に対し、「CN health & beauty salonオンライン予約サービス」の利用停止を行うことができるものとし、これにより当該利用者に何らかの損害が生じたとしても、当サロンは一切責任を負わないものとする。"],
+    ["ar", "第１２条（免責事項）"],
+    ["p", "１．予約サービスにおける当サロンの責任は、利用者と店舗運営者の間で予約が成立した場合に、予約情報を伝達することに限定され、これ以外については、本規約等で特に定める場合を除き、一切の責任を負わない。"],
+    ["p", "２．利用者と店舗運営者との間でトラブル、紛争等が生じた場合は、利用者と当該店舗運営者との間で直接解決するものとし、当サロンは一切の責任を負わない。"],
+    ["p", "３．当サロンは、別途明示された規定がある場合を除き、予約の成立前における通信回線やコンピュータ等の障害によるシステムの中断・遅滞・中止・データの焼失、データへの不正アクセスにより生じた損害、ならびに「CN health & beauty salonオンライン予約サービス」の情報サービス利用に関して利用者に生じた損害について、一切の責任を負わない。"],
+    ["p", "４．当サロンは、利用者の電子メール環境または伝達経路の不備により、当サロンが配信した電子メールが当該利用者に到着しなかったことにより生じた損害について、一切の責任を負わない。"],
+    ["p", "５．利用者は、「CN health & beauty salonオンライン予約サービス」の利用に際し、自ら行った行為について責任を負うものとし、第三者に損害を与えた場合、自己の責任と費用負担で解決するものとする。"],
+    ["p", "６．当サロンは、利用者に対し、適宜情報提供やアドバイスを行うことがあるが、それにより責任を負うものではない。"],
+    ["p", "７．当サロンは、利用者が本規約等に違反したことによって生じた損害について、一切の責任を負わない。"],
+    ["p", "８．当サロンは、「CN health & beauty salonオンライン予約サービス」が提供しているＷＥＢページ、サーバ、ドメイン等から送られるメールならびに予約サービスおよび情報サービスのコンテンツ等に、コンピュータウィルス等の有害なものが含まれないことを保証しない。"],
+    ["p", "９．当サロンは、システムの定期保守や緊急保守を行う場合、システムに負荷が集中した場合、利用者のセキュリティを確保する必要が生じた場合、その他必要があると判断した場合には、事前に通知することなく「CN health & beauty salonオンライン予約サービス」のサービスの全部または一部の提供を中断または停止することができるものとする。当サロンは、この場合に利用者に発生した損害について、一切の責任を負わない。"],
+    ["p", "１０．当サロンは、利用者に対し、当サロンまたはサービス提供者が「CN health & beauty salonオンライン予約サービス」に掲示した情報の真偽、正確性、信頼性等につき一切保証しないものとし、当該情報に起因して利用者に発生した損害について、一切の責任を負わない。"],
+    ["ar", "第１３条（本規約等の変更）"],
+    ["p", "１．当サロンは、利用者に対する事前の通知なく本規約等を改定できるものとし、本規約等改定後は、改定後の本規約等を適用するものとする。なお、利用者が「CN health & beauty salonオンライン予約サービス」を利用した場合、改定後の本規約等に同意したものとする。"],
+    ["p", "２．当サロンは、その判断により利用者に事前に通知・連絡することなく、「CN health & beauty salonオンライン予約サービス」のサービスの全部または一部を変更・廃止することができるものとする。"],
+    ["ar", "第１４条（準拠法、合意管轄）"],
+    ["p", "本規約は日本法に基づき解釈されるものとし、本規約に関し訴訟の必要が生じた場合には、東京地方裁判所を第一審の専属的合意管轄裁判所とする。"],
+    ["cp", "Copyright 2026 CN health & beauty salon. All Rights Reserved."],
   ];
   const PRIVACY_JA = [
     ["1. 取得する情報", "当店は、予約の受付にあたり、お名前・メールアドレス・電話番号・ご要望等の情報を取得します。"],
@@ -154,17 +214,6 @@
     ["4. 安全管理", "個人情報への不正アクセス、紛失、漏えい等を防止するため、適切な安全管理措置を講じます。"],
     ["5. 開示・訂正・削除", "ご本人からの個人情報の開示・訂正・削除のお申し出には、本人確認のうえ速やかに対応します。"],
     ["6. お問い合わせ窓口", "個人情報の取扱いに関するお問い合わせ：cnsalon2021@gmail.com／03-6806-0324（CN Ueno health & beauty）"],
-  ];
-  const TERMS_EN = [
-    ["Article 1 (Scope)", "These terms set out the conditions for using the treatment services and online booking provided by CN Ueno health & beauty (the \"Salon\"). By submitting a booking you are deemed to have agreed to these terms."],
-    ["Article 2 (Booking)", "A booking is confirmed when the Salon sends a booking confirmation email. The booked time is the treatment start time; please arrive about 10 minutes early."],
-    ["Article 3 (Changes / Cancellation)", "Please change or cancel via My Page or by phone (03-6806-0324) before your booked time. Repeated no-shows may result in future bookings being declined."],
-    ["Article 4 (Late arrival)", "If you arrive late, the treatment time may be shortened. Arrivals more than 15 minutes late without notice may be treated as a cancellation."],
-    ["Article 5 (Refusal of service)", "Service may be refused if you (1) are intoxicated, (2) have an infectious or skin disease, (3) are pregnant without a doctor's approval, or (4) engage in harassment toward staff."],
-    ["Article 6 (Health conditions)", "Please inform us in advance of any illness, injury, or ongoing medical treatment. Treatments are for relaxation and are not medical care."],
-    ["Article 7 (Valuables)", "Please look after your valuables yourself. The Salon is not responsible for loss or theft on the premises."],
-    ["Article 8 (Liability)", "The Salon is not liable for damage arising from undisclosed conditions or causes not attributable to the Salon."],
-    ["Article 9 (Amendments)", "These terms may be amended as necessary. Amended terms take effect when posted on the Salon's website."],
   ];
   const PRIVACY_EN = [
     ["1. Information we collect", "We collect your name, email address, phone number, and requests when you make a booking."],
@@ -176,8 +225,8 @@
   ];
   function openTermsModal(doc, en) {
     document.getElementById("fm-doc-modal")?.remove();
-    const items = doc === "privacy" ? (en ? PRIVACY_EN : PRIVACY_JA) : (en ? TERMS_EN : TERMS_JA);
-    const title = doc === "privacy" ? (en ? "Privacy Policy" : "プライバシーポリシー") : (en ? "Terms of Service" : "利用規約");
+    const items = doc === "privacy" ? (en ? PRIVACY_EN : PRIVACY_JA) : null;
+    const title = doc === "privacy" ? (en ? "Privacy Policy" : "プライバシーポリシー") : "利用規約";
     const wrap = document.createElement("div");
     wrap.id = "fm-doc-modal";
     wrap.innerHTML =
@@ -187,9 +236,13 @@
           (doc === "privacy"
             ? "<p>" + (en
                 ? "CN Ueno health & beauty handles your personal information as follows."
-                : "CN Ueno health & beauty（以下「当店」）は、お客様の個人情報を以下のとおり取り扱います。") + "</p>"
-            : "") +
-          items.map(([h, b]) => "<h3>" + h + "</h3><p>" + b + "</p>").join("") +
+                : "CN Ueno health & beauty（以下「当店」）は、お客様の個人情報を以下のとおり取り扱います。") + "</p>" +
+              items.map(([h, b]) => "<h3>" + h + "</h3><p>" + b + "</p>").join("")
+            : TERMS_DOC.map(([t, x]) =>
+                t === "ch" ? '<h2 class="fm-doc-ch">' + x + "</h2>" :
+                t === "ar" ? "<h3>" + x + "</h3>" :
+                t === "sub" ? '<p class="fm-doc-sub">' + x + "</p>" :
+                t === "cp" ? '<p class="fm-doc-cp">' + x + "</p>" : "<p>" + x + "</p>").join("")) +
         "</div>" +
         '<div class="fm-doc-foot"><button type="button" class="fm-doc-close">' + (en ? "Close" : "閉じる") + "</button></div>" +
       "</div>";
@@ -208,6 +261,9 @@
         "#fm-doc-modal .fm-doc-x{font:inherit;font-size:22px;line-height:1;border:0;background:none;color:#999;cursor:pointer;padding:0 2px}" +
         "#fm-doc-modal .fm-doc-body{overflow-y:auto;padding:6px 22px 14px;font-size:13.5px;line-height:1.9;color:#444}" +
         "#fm-doc-modal .fm-doc-body h3{font-size:13.5px;margin:14px 0 2px;color:#8a6a33}" +
+        "#fm-doc-modal .fm-doc-body .fm-doc-ch{font-size:14px;font-weight:700;margin:20px 0 4px;color:#6b4f2a}" +
+        "#fm-doc-modal .fm-doc-body .fm-doc-sub{margin:0;color:#555}" +
+        "#fm-doc-modal .fm-doc-body .fm-doc-cp{margin-top:18px;color:#888;font-size:12px}" +
         "#fm-doc-modal .fm-doc-body p{margin:0 0 4px}" +
         "#fm-doc-modal .fm-doc-foot{padding:12px 20px;border-top:1px solid #ead9bd;text-align:center}" +
         "#fm-doc-modal .fm-doc-close{font:inherit;background:#b08d4f;color:#fff;border:0;border-radius:6px;padding:10px 42px;font-weight:700;cursor:pointer}";
