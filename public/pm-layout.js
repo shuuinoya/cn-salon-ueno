@@ -924,6 +924,12 @@
            ["予約タグ", "TORICOM"], ["施術タグ", ""], ["施術コメント", ""]]
             .map(([k, v]) => "<tr><th>" + k + "</th><td>" + v + "</td></tr>").join("") +
         "</tbody></table>" +
+        '<div class="pm-move" id="pm-move" hidden>' +
+          '<div class="pm-move-title">予約の移動（成立する候補のみ）</div>' +
+          '<div class="pm-move-row"><select id="pm-mv-staff"></select><select id="pm-mv-time"></select></div>' +
+          '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="move">移動する</button></div>' +
+          '<p class="pm-move-note" id="pm-mv-note">対応メニュー・シフト・休憩・既存予約・受付停止を確認した候補だけを表示します。</p>' +
+        "</div>" +
       "</div>";
 
     let pd = old;
@@ -937,6 +943,7 @@
         if (act === "close") buttons.find((b) => b.textContent === "戻る")?.click();
         else if (act === "cancel") buttons.find((b) => b.textContent === "予約取消")?.click();
         else if (act === "edit") form.classList.toggle("pm-editing");
+        else if (act === "move") submitMove(pd);
         else if (act === "pay") openCheckout();
         else if (act === "customer") {
           const q = new URLSearchParams({
@@ -952,6 +959,7 @@
       });
     }
     if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+    fillMoveTargets(pd, bkRow, dateISO);
     // 顧客マスタ画面へ引き継ぐ情報
     pd.dataset.cname = name;
     pd.dataset.ctel = tel;
@@ -959,6 +967,110 @@
     pd.dataset.cref = bookingId;
     pd.dataset.ccomment = ((val("コメント")?.textContent || "").trim() === "なし" ? "" : (val("コメント")?.textContent || "").trim());
     pd.dataset.cgender = menu.includes("女性") ? "f" : menu.includes("男性") ? "m" : "f";
+  }
+
+  // ---- 予約の移動（スタッフ振り分け） ----
+  // 候補はサーバーの統一判定（対応メニュー・シフト・休憩/業務・既存予約・鍵・性別条件・人数分の空き）
+  // /api/demo/move-targets が返す「実際に成立するスタッフと時間」だけを表示する
+  async function fillMoveTargets(pd, bkRow, dateISO) {
+    const box = pd.querySelector("#pm-move");
+    if (!box) return;
+    if (!bkRow || !bkRow.id || !dateISO) { box.hidden = true; return; }
+    box.hidden = false;
+    const version = (window.__pmSchedData?.days || []).find((d) => d.date === dateISO)?.version ?? 0;
+    const key = bkRow.id + ":" + dateISO + ":" + version;
+    if (pd.dataset.mvKey === key) return;
+    pd.dataset.mvKey = key;
+    let data = null;
+    try {
+      const r = await fetch(`/api/demo/move-targets?date=${dateISO}&id=${encodeURIComponent(bkRow.id)}`, { cache: "no-store" });
+      if (r.ok) data = await r.json();
+    } catch {}
+    if (pd.dataset.mvKey !== key) return; // 別の予約に切り替わっていたら破棄
+    const staffSel2 = pd.querySelector("#pm-mv-staff");
+    const timeSel = pd.querySelector("#pm-mv-time");
+    const note = pd.querySelector("#pm-mv-note");
+    if (!data || !data.ok || !staffSel2 || !timeSel) { box.hidden = true; return; }
+    pd.dataset.mvId = data.id;
+    pd.dataset.mvDate = data.date;
+    pd.dataset.mvDur = String(data.duration);
+    if (!data.staff.length) {
+      staffSel2.innerHTML = '<option value="">候補なし</option>';
+      timeSel.innerHTML = "";
+      staffSel2.disabled = timeSel.disabled = true;
+      note.textContent = "この予約を移動できる空き候補がありません（対応メニュー・シフト・空き状況を満たすスタッフ不在）。";
+      applyMoveOptionGuards(data);
+      return;
+    }
+    staffSel2.disabled = timeSel.disabled = false;
+    staffSel2.innerHTML = data.staff.map((s) =>
+      '<option value="' + s.id + '"' + (s.current ? " selected" : "") + ">" +
+      s.name.replace(/</g, "&lt;") + (s.current ? "（現在の担当）" : s.sameTime ? "（同時刻OK）" : "（要時間変更）") +
+      "</option>").join("");
+    const fillTimes = () => {
+      const s = data.staff.find((x) => x.id === staffSel2.value) || data.staff[0];
+      timeSel.innerHTML = s.slots.map((t) =>
+        '<option value="' + t + '"' + (t === data.start ? " selected" : "") + ">" +
+        pmHM(t) + "〜" + pmHM(t + data.duration) + (t === data.start ? "（現在と同時刻）" : "") +
+        "</option>").join("");
+      if (!s.slots.includes(data.start)) timeSel.selectedIndex = 0;
+    };
+    if (!staffSel2.dataset.pmMv) { staffSel2.dataset.pmMv = "1"; staffSel2.addEventListener("change", fillTimes); }
+    fillTimes();
+    note.textContent = "対応メニュー・シフト・休憩・既存予約・受付停止を確認した候補だけを表示します。";
+    applyMoveOptionGuards(data);
+  }
+
+  // 編集フォーム側の「担当スタッフ」も、候補外（対応不可・空きなし）は選べないようにする
+  function applyMoveOptionGuards(data) {
+    const form = document.querySelector(".ledger-side-form.pm-booking");
+    const sel = form?.querySelector("label select");
+    if (!sel) return;
+    const okIds = new Set(data.staff.map((s) => s.id));
+    for (const op of sel.options) {
+      if (!op.value) continue;
+      const okOp = okIds.has(op.value);
+      if (op.disabled === okOp) op.disabled = !okOp;
+    }
+  }
+
+  async function submitMove(pd) {
+    const staffId = pd.querySelector("#pm-mv-staff")?.value;
+    const start = Number(pd.querySelector("#pm-mv-time")?.value);
+    const dur = Number(pd.dataset.mvDur);
+    const date = pd.dataset.mvDate;
+    const id = pd.dataset.mvId;
+    if (!staffId || !id || !Number.isFinite(start) || !dur) { alert("移動できる候補がありません。"); return; }
+    const version = (window.__pmSchedData?.days || []).find((d) => d.date === date)?.version ?? 0;
+    try {
+      const r = await fetch("/api/demo/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "moveBooking", date, id, staffId, start, end: start + dur, revision: version }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.ok && out.ok) {
+        delete pd.dataset.mvKey;
+        alert("予約を移動しました。");
+        document.querySelector(".ledger-side-form .ledger-form-actions button")?.parentElement
+          ?.querySelectorAll("button").forEach((b) => { if (b.textContent === "戻る") b.click(); });
+        await refreshSched(true);
+        decorateEvents();
+        return;
+      }
+      const msg = {
+        soldOut: "その時間はご案内できません（重複・受付停止・対応外のいずれか）。",
+        outsideShift: "移動先スタッフのシフト時間外です。",
+        scheduleConflict: "画面の情報が古くなっています。最新の状態で再度お試しください。",
+        staffUnavailable: "そのスタッフには移動できません。",
+        notFound: "この予約は既に取消されています。",
+      }[out.error] || "移動できませんでした。";
+      alert(msg);
+      delete pd.dataset.mvKey;
+      await refreshSched(true);
+    } catch {
+      alert("通信に失敗しました。もう一度お試しください。");
+    }
   }
 
   // 日付ピッカー：本物と同じ「予約状況カレンダー」を既存ピッカーに被せる

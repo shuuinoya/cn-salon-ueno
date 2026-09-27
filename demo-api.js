@@ -468,6 +468,7 @@ function postSchedule(body) {
       if (!bk) throw err(404, "notFound");
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
+      if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
       if (mvTarget.locked) throw err(409, "soldOut");            // 鍵中のスタッフには入れられない
       if (!staffCanDo(mvTarget, bk.course)) throw err(409, "soldOut"); // 対応可能メニュー外は不可
       const mvGender = courseGender(bk.course);
@@ -1579,6 +1580,57 @@ function handleDemoApi(req, res, url) {
     const mails = [...state.mails].sort((a, b) => b.createdAt - a.createdAt);
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ mails }));
+    return true;
+  }
+
+  // 予約の移動候補：対応メニュー・シフト・休憩/業務・既存予約・鍵・性別条件を
+  // すべて満たす「実際に成立するスタッフと時間」だけを返す（判定は freeStaffIds に一本化）
+  if (url.pathname === "/api/demo/move-targets" && (req.method === "GET" || req.method === "HEAD")) {
+    const date = url.searchParams.get("date");
+    const id = url.searchParams.get("id") || "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid" }));
+      return true;
+    }
+    const ev = ensureEvents(date);
+    const bk = ev.bookings.find((b) => b.id === id && b.status === "confirmed");
+    if (!bk) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "notFound" }));
+      return true;
+    }
+    const start = msToMin(date, bk.start_at);
+    const dur = msToMin(date, bk.end_at) - start;
+    const gender = courseGender(bk.course);
+    const people = bk.people || 1;
+    // 5分刻みで一日を走査し、その時刻に予約全体（人数分）が成立するスタッフだけを拾う
+    const slotsByStaff = new Map();
+    for (let t = 600; t + dur <= 1620; t += 5) {
+      const ids = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id);
+      if (ids.length < people) continue; // 複数名予約は人数分の空きが必要
+      for (const sid of ids) {
+        if (!slotsByStaff.has(sid)) slotsByStaff.set(sid, []);
+        slotsByStaff.get(sid).push(t);
+      }
+    }
+    const current = ev.assignments.find((a) => a.booking_id === bk.id)?.staff_id || null;
+    const list = state.staff
+      .filter((st) => slotsByStaff.has(st.id))
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((st) => ({
+        id: st.id,
+        name: st.name,
+        current: st.id === current,
+        sameTime: slotsByStaff.get(st.id).includes(start),
+        slots: slotsByStaff.get(st.id),
+      }));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({
+      ok: true, id: bk.id, date, start, duration: dur, people,
+      course: bk.course, course_name: bk.course_name,
+      staff: list,
+    }));
     return true;
   }
 
