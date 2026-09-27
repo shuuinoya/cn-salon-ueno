@@ -340,6 +340,32 @@
       });
     });
 
+    // 3c6b2) 予約枠にカーソルを乗せると詳細ツールチップを表示（本物と同じ項目構成）
+    if (!window.__pmEvTip) {
+      window.__pmEvTip = 1;
+      document.addEventListener("mouseover", (e) => {
+        const el = e.target.closest(".ledger-event");
+        if (!el || el.classList.contains("activity")) { document.getElementById("pm-evtip")?.remove(); return; }
+        showEventTip(el);
+      });
+      document.addEventListener("mouseout", (e) => {
+        if (e.target.closest && e.target.closest(".ledger-event")) document.getElementById("pm-evtip")?.remove();
+      });
+      document.addEventListener("scroll", () => document.getElementById("pm-evtip")?.remove(), true);
+    }
+
+    // 3c6c) 「シフト追加」は本物と同じ「シフト新規登録」モーダルを開く
+    if (!window.__pmShiftAdd) {
+      window.__pmShiftAdd = 1;
+      document.addEventListener("click", (e) => {
+        const b = e.target.closest(".ledger-add");
+        if (!b || b.textContent.trim() !== "シフト追加") return;
+        e.preventDefault();
+        e.stopPropagation();
+        openShiftAdd();
+      }, true);
+    }
+
     // 3c7-0) リロードが押せる状態のときも、押したら左パネルを閉じる
     if (!window.__pmRefreshClose2) {
       window.__pmRefreshClose2 = 1;
@@ -684,6 +710,123 @@
         el.innerHTML = '<span class="pm-ev-l1">' + l1 + '</span><span class="pm-ev-l2">' + l2 +
           '</span><span class="pm-ev-l3">' + l3 + "</span>";
       });
+    });
+  }
+
+  // 予約枠のホバー詳細（会員番号〜会計情報まで本物と同じ並び）
+  function showEventTip(el) {
+    const d = window.__pmSchedData;
+    if (!d) return;
+    const date = d.__date;
+    const row = el.closest(".ledger-row");
+    const staffName = row?.querySelector(".ledger-staff-cell b")?.textContent || "";
+    const sid = (d.staff || []).find((st) => st.name === staffName)?.id;
+    const pct = parseFloat(el.style.left || "0");
+    const startMin = 600 + Math.round((pct * 1020) / 100 / 5) * 5;
+    const bk = (d.bookings || []).find((b) => b.status === "confirmed" &&
+      (d.assignments || []).some((a) => a.booking_id === b.id && a.staff_id === sid) &&
+      Math.abs(pmMin(date, b.start_at) - startMin) <= 3);
+    if (!bk) return;
+    const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const s0 = pmMin(date, bk.start_at), e0 = pmMin(date, bk.end_at);
+    const tag = /WEB$/.test(bk.created_label || "") ? "オンライン予約" : "";
+    const lines = [
+      ["会員番号", ""],
+      ["顧客名", bk.hide_name ? "" : bk.name || ""],
+      ["ブース", bk.booth || "新規1(1)"],
+      ["スタッフ", staffName + (bk.nominated_staff_name ? "（指名）" : "")],
+      ["予約時間", pmHM(s0) + "〜" + pmHM(e0)],
+      ["コース", bk.course_name || ""],
+      ["オプション", ""],
+      ["予約タグ", tag],
+      ["施術タグ", ""],
+      ["こだわり", ""],
+      ["施術コメント", bk.comment || ""],
+      ["備考1", ""],
+      ["備考2", ""],
+      ["会計情報", bk.paid_amount ? "会計済み（" + bk.paid_amount.toLocaleString("ja-JP") + "円）" : "未会計"],
+    ];
+    let tip = document.getElementById("pm-evtip");
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.id = "pm-evtip";
+      document.body.appendChild(tip);
+    }
+    tip.innerHTML = lines.map(([k, v]) => esc(k) + "：" + esc(v)).join("<br/>");
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = "hidden";
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+    const tw = tip.offsetWidth || 360;
+    const th = tip.offsetHeight || 320;
+    let x = r.left + r.width * 0.6;
+    let y = r.bottom + 8;
+    if (x + tw > window.innerWidth - 12) x = window.innerWidth - tw - 12;
+    if (y + th > window.innerHeight - 12) y = Math.max(10, r.top - th - 8);
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+    tip.style.visibility = "visible";
+  }
+
+  // 「シフト新規登録」モーダル（本物と同じ：スタッフ選択＋開始/終了時間＋OK）
+  async function openShiftAdd() {
+    document.getElementById("pm-shiftadd")?.remove();
+    await refreshSched(true);
+    const staff = (window.__pmSchedData?.staff || []);
+    const date = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime")
+      || new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
+    const hourOpts = Array.from({ length: 18 }, (_, i) => 10 + i)  // 10〜27時（27=翌3時）
+      .map((h) => `<option value="${h}">${h}</option>`).join("");
+    const minOpts = Array.from({ length: 12 }, (_, i) => i * 5)
+      .map((m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+    const wrap = document.createElement("div");
+    wrap.id = "pm-shiftadd";
+    wrap.innerHTML =
+      '<div class="pm-sa-modal" role="dialog" aria-modal="true">' +
+      '<div class="pm-sa-head"><b>シフト新規登録</b><button type="button" class="pm-sa-x" data-sa="close">✕</button></div>' +
+      '<div class="pm-sa-body">' +
+      '<div class="pm-sa-staffrow"><select id="pm-sa-staff">' +
+      '<option value="">スタッフを選択してください</option>' +
+      staff.map((st) => `<option value="${st.id}">${st.name}</option>`).join("") +
+      "</select></div>" +
+      '<div class="pm-sa-timerow"><span class="pm-sa-cap">開始時間</span>' +
+      '<select id="pm-sa-sh">' + hourOpts + '</select><b>:</b><select id="pm-sa-sm">' + minOpts + "</select></div>" +
+      '<div class="pm-sa-timerow"><span class="pm-sa-cap">終了時間</span>' +
+      '<select id="pm-sa-eh">' + hourOpts + '</select><b>:</b><select id="pm-sa-em">' + minOpts + "</select></div>" +
+      '<div class="pm-sa-actions"><button type="button" class="pm-sa-ok" data-sa="ok">OK</button></div>' +
+      "</div></div>";
+    document.body.appendChild(wrap);
+    wrap.querySelector("#pm-sa-eh").value = "27"; // 既定 10:00〜27:00（本物と同じ）
+    const close = () => wrap.remove();
+    wrap.addEventListener("click", async (e) => {
+      if (e.target === wrap || e.target.closest('[data-sa="close"]')) { close(); return; }
+      if (!e.target.closest('[data-sa="ok"]')) return;
+      const staffId = wrap.querySelector("#pm-sa-staff").value;
+      if (!staffId) { window.alert("スタッフを選択してください。"); return; }
+      const start = Number(wrap.querySelector("#pm-sa-sh").value) * 60 + Number(wrap.querySelector("#pm-sa-sm").value);
+      const end = Number(wrap.querySelector("#pm-sa-eh").value) * 60 + Number(wrap.querySelector("#pm-sa-em").value);
+      if (!(start < end)) { window.alert("終了時間は開始時間より後にしてください。"); return; }
+      try {
+        const version = (window.__pmSchedData?.days || []).find((d) => d.date === date)?.version || 0;
+        const r = await fetch("/api/demo/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "bulkShift", date, cells: [{ date, staffId, revision: version }], start, end }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          window.alert(j.error === "scheduleConflict"
+            ? "その時間帯の外に予約・予定が残っているため登録できません。\n（画面を再読込して最新の状態をご確認ください）"
+            : "登録できませんでした。時間をご確認ください。");
+          return;
+        }
+        close();
+        window.__pmSchedAt = 0;
+        await refreshSched(true);
+        decorateEvents();
+      } catch {
+        window.alert("通信エラーが発生しました。");
+      }
     });
   }
 
