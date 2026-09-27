@@ -5,6 +5,22 @@
   "use strict";
   let settings = null;
 
+  // 入力欄の書体を明示：環境によって数字が高さバラバラの書体（オールドスタイル数字）に
+  // 落ちるのを防ぎ、電話番号・メール等が揃った字形で表示されるようにする
+  (function fontFix() {
+    if (document.getElementById("fm-font-fix")) return;
+    const st = document.createElement("style");
+    st.id = "fm-font-fix";
+    st.textContent =
+      "input, select, textarea, button {" +
+      'font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, ' +
+      '"Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", Meiryo, sans-serif !important;' +
+      "font-variant-numeric: lining-nums !important;" +
+      'font-feature-settings: "lnum" 1 !important;' +
+      "}";
+    (document.head || document.documentElement).appendChild(st);
+  })();
+
   async function load() {
     try {
       const r = await fetch("/api/demo/settings", { cache: "no-store" });
