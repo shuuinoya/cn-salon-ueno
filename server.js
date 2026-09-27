@@ -39,8 +39,7 @@ function brandFor(file, url) {
 // アドレスバーには名前のURLが残る（予約サイト＝店名／管理画面＝CNsalon@board）
 const ENTRY_URLS = {
   "/cn-ueno-health-and-beauty": "/",
-  "/cn-ueno": "/",
-  "/cnsalon@board": "/admin/login",
+  "/cnsalon-board": "/admin/login",
 };
 
 // URLの ?course= / ?courses= でページの中身が変わるので、保存したページを選び分ける
@@ -102,12 +101,11 @@ function send404(res, head) {
 // 数字なしのURL用ホスト名（「〜.localhost」はブラウザが自動で自分のPCに解決する）
 const NAME_HOSTS = {
   "cn-ueno-health-and-beauty.localhost": "/",
-  "cn-ueno.localhost": "/",
   "cnsalon-board.localhost": "/admin/login",
-  "cnsalonboard.localhost": "/admin/login",
 };
-const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?$/i;
-const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?$/i;
+// 許可するホスト名は正式URLの2つ＋localhost/127.0.0.1のみ（旧別名・その他の名前は拒否＝URLを統一）
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty\.localhost|cnsalon-board\.localhost)(:\d+)?$/i;
+const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty\.localhost|cnsalon-board\.localhost)(:\d+)?$/i;
 
 const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
@@ -178,7 +176,7 @@ const handler = (req, res) => {
   } catch {
     return send404(res, head);
   }
-  // 入口URL：/cn-ueno-health-and-beauty（予約サイト）・/CNsalon@board（管理画面）
+  // 入口URL：/cn-ueno-health-and-beauty（予約サイト）・/cnsalon-board（管理画面）
   // アドレスバーに名前を残すため、転送せずその場で本来のページを表示する
   const entry = ENTRY_URLS[pathname.toLowerCase()];
   if (entry) {
@@ -236,7 +234,7 @@ server.on("listening", () => {
   const server80 = http.createServer(handler);
   server80.on("error", () => {
     console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
-    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
+    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/cnsalon-board`);
   });
   server80.on("listening", () => {
     console.log(`  予約サイト【${BOOKING_BRAND}】 : http://cn-ueno-health-and-beauty.localhost/`);
@@ -246,7 +244,7 @@ server.on("listening", () => {
   if (port === 5520) server80.listen(80);
   else {
     console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
-    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/CNsalon@board`);
+    console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/cnsalon-board`);
   }
 });
 server.listen(port, HOST);
