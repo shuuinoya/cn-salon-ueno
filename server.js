@@ -37,6 +37,10 @@ function brandFor(file, url) {
 
 // サイト名そのままの入口URL。転送ではなくその場で表示し、
 // アドレスバーには名前のURLが残る（予約サイト＝店名／管理画面＝CNsalon@board）
+// booking-tweaks.js の更新時刻（キャッシュ破棄用の版番号）
+let TWEAKS_VER = "1";
+try { TWEAKS_VER = String(Math.floor(fs.statSync(path.join(__dirname, "public", "booking-tweaks.js")).mtimeMs)); } catch {}
+
 const ENTRY_URLS = {
   "/cn-ueno-health-and-beauty": "/",
   "/cnsalon-board": "/admin/login",
@@ -76,7 +80,8 @@ function sendFile(res, file, status, type, head, url) {
         );
         // 予約ページには、管理画面のフリーメッセージ設定を反映するスクリプトを差し込む
         if (url.pathname.startsWith("/book")) {
-          text = text.replace("</body>", '<script src="/booking-tweaks.js" defer></script></body>');
+          // ?v=更新時刻 を付けて、ブラウザに古いキャッシュを使わせない
+          text = text.replace("</body>", '<script src="/booking-tweaks.js?v=' + TWEAKS_VER + '" defer></script></body>');
         }
         // 予約サイトのファビコンは店のマーク（丸いロゴ）。管理画面は従来のまま
         if (brandFor(file, url) === BOOKING_BRAND) {
