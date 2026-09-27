@@ -78,6 +78,10 @@ function sendFile(res, file, status, type, head, url) {
         if (url.pathname.startsWith("/book")) {
           text = text.replace("</body>", '<script src="/booking-tweaks.js" defer></script></body>');
         }
+        // 予約サイトのファビコンは店のマーク（丸いロゴ）。管理画面は従来のまま
+        if (brandFor(file, url) === BOOKING_BRAND) {
+          text = text.split("/favicon.svg").join("/fm-favicon.svg");
+        }
       }
       // サイト名の付け替え（HTML本文・RSCペイロード・JSチャンクをまとめて揃える）
       if (text.includes(OLD_BRAND)) text = text.split(OLD_BRAND).join(brandFor(file, url));
