@@ -1324,6 +1324,14 @@ main.ledger-app .ledger-summary:not([hidden]) { display: block; background: #fff
 .pm-sum-red { color: #e02020; }
 .pm-sum-blue { color: #1a6fc9; }
 
+/* 予約・休憩・業務ブロックは行の枠にぴったり収める（高さいっぱい・時間幅どおり） */
+main.ledger-app .ledger-event {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+}
+
 /* 予約ブロックの本物表示（3行＋バッジ＋色分け） */
 main.ledger-app .ledger-event.pm-ev { padding: 1px 3px !important; line-height: 12px !important; }
 main.ledger-app .ledger-event.pm-ev .pm-ev-l1,
