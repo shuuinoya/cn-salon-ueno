@@ -306,6 +306,7 @@ const state = {
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
   hpKeys: new Map(),       // ホットペッパー連携の予約番号 -> 予約ID（重複受信を防ぐ）
+  hpSeenUids: new Set(),   // メール取込で走査済みのメール番号（毎分の再解析を避ける）
   hpLog: [],               // ホットペッパー連携の受信履歴（管理画面の連携ページに表示）
   reports: new Map(),      // 営業実績（日報）の入力内容 date -> {weather, ...}
 };
@@ -1055,6 +1056,282 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
     .map((st) => st.id);
 }
 
+// ---- ホットペッパー連携の中核（API受信とメール取込の両方から使う） --------------
+function hpLogIt(entry) {
+  state.hpLog.unshift({ at: new Date().toISOString(), ...entry });
+  state.hpLog.length = Math.min(state.hpLog.length, 50);
+}
+
+// 予約通知1件を台帳へ反映する（成功: {status:200,json:{ok:true,...}}、失敗: 4xx/409）
+function hpNotify(b, via) {
+  const failed = (code, error, extra = {}) => {
+    hpLogIt({ via, result: "拒否", error, ...extra });
+    return { status: code, json: { error } };
+  };
+  const rid = String(b.reservationId || "").trim();
+  if (!rid) return failed(400, "invalid", { note: "reservationIdなし" });
+
+  if (b.action === "cancel") {
+    const bid = state.hpKeys.get(rid);
+    const d0 = bid && state.bookingIndex.get(bid);
+    const bk0 = d0 && ensureEvents(d0).bookings.find((x) => x.id === bid);
+    if (!bk0) return failed(404, "notFound", { rid });
+    if (bk0.status === "confirmed") {
+      bk0.status = "cancelled";
+      bk0.cancelled = true;
+      ensureDay(d0).version++;
+    }
+    hpLogIt({ via, result: "取消", rid, date: d0 });
+    return { status: 200, json: { ok: true, cancelled: true } };
+  }
+
+  if (state.hpKeys.has(rid)) return { status: 200, json: { ok: true, id: state.hpKeys.get(rid), duplicated: true } };
+
+  const date = String(b.date || "");
+  const minutes = Math.round(Number(b.minutes));
+  const price = Math.round(Number(b.price));
+  const name = String(b.name || "").trim();
+  const menu = String(b.menu || "").trim();
+  let start = b.start;
+  if (typeof start === "string" && /^\d{1,2}:\d{2}$/.test(start)) {
+    const [h, mi] = start.split(":").map(Number);
+    start = h * 60 + mi;
+  }
+  start = Math.round(Number(start));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name || !menu ||
+      !(minutes >= 10 && minutes <= 600) || !(price >= 0) ||
+      !(Number.isInteger(start) && start % 5 === 0)) return failed(400, "invalid", { rid });
+  const end = start + minutes;
+  if (start < 600 || end > 1620) return failed(400, "outsideHours", { rid });
+  const today = todayJst();
+  if (date < today || date > addDays(today, 84)) return failed(400, "invalid", { rid, note: "受付範囲外の日付" });
+  if (!ensureDay(date).enabled) return failed(409, "closed", { rid });
+
+  const course = [...courseStore.values()].find((c) => c.name === menu) || null;
+  const gender = course ? courseGender(course.id) : (menu.includes("女性") ? "female" : menu.includes("男性") ? "male" : "none");
+  let candidates = state.staff
+    .filter((st) => st.active === 1 && !st.locked)
+    .filter((st) => (course ? staffCanDo(st, course.id) : true))
+    .filter((st) => gender === "none" || st.gender === gender)
+    .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
+    .sort((a, c) => a.sort_order - c.sort_order);
+  const wantName = String(b.staffName || "").trim();
+  if (wantName) candidates = candidates.filter((st) => st.name === wantName);
+  if (!candidates.length) return failed(409, "slotTaken", { rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu });
+
+  const assignee = candidates[0];
+  state.bookingSerial++;
+  const id = "hp-" + state.bookingSerial;
+  const ev = ensureEvents(date);
+  ev.bookings.push({
+    id, reference: rid, service_date: date, status: "confirmed",
+    start_at: minToMs(date, start), end_at: minToMs(date, end),
+    people: 1, course: course ? course.id : "", course_name: menu, course_label: menu,
+    name, email: String(b.email || ""), phone: String(b.phone || ""),
+    comment: String(b.comment || ""),
+    total: price, base_price: price, paid_amount: 0,
+    nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
+    staff: "none", customer_token: null,
+    source: "hotpepper", booth: "HP",
+    created_label: (() => {
+      const n = new Date(Date.now() + 9 * 3600e3);
+      return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " HP";
+    })(),
+    customer_gender: gender === "female" ? "f" : gender === "male" ? "m" : "",
+    is_new: isRepeatEmail(String(b.email || "")) ? 0 : 1,
+  });
+  ev.assignments.push({ booking_id: id, staff_id: assignee.id });
+  state.bookingIndex.set(id, date);
+  state.hpKeys.set(rid, id);
+  ensureDay(date).version++;
+  hpLogIt({ via, result: "受信", rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu, price, name, staff: assignee.name });
+  return { status: 200, json: { ok: true, id, staff: assignee.name } };
+}
+
+// 予約通知メールの本文から予約内容を取り出す（表記ゆれにある程度耐える）
+function parseHpMail(subject, text) {
+  const t = String(text || "").replace(/\r/g, "");
+  const pick = (re) => { const m = t.match(re); return m ? m[1].trim() : ""; };
+  const rid = pick(/(?:予約番号|予約No\.?|受付番号)[：:\s]*([A-Za-z0-9-]+)/);
+  // 来店日時：2026/09/29 15:00 ／ 2026年9月29日 15:00 の両方に対応
+  let date = "", start = "";
+  let m = t.match(/(?:来店日時|ご来店日時|日時|予約日時)[：:\s]*(\d{4})[\/年](\d{1,2})[\/月](\d{1,2})日?[（(]?[^\d]*?(\d{1,2}):(\d{2})/);
+  if (m) {
+    date = `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
+    start = `${m[4]}:${m[5]}`;
+  }
+  const menu = pick(/(?:メニュー|クーポン・メニュー|ご利用メニュー)[：:\s]*([^\n]+)/);
+  const priceS = pick(/(?:合計金額|合計|料金|金額)[：:\s]*[¥￥]?([\d,]+)/);
+  const name = pick(/(?:氏名|お名前|ご予約者)[：:\s]*([^\n]+)/).replace(/\s*様$/, "");
+  const phone = pick(/(?:電話番号|TEL)[：:\s]*([\d\-+ ]+)/);
+  const minS = pick(/(\d{2,3})分/) || (menu.match(/(\d{2,3})分/) || [])[1] || "";
+  if (!rid || !date || !start || !menu || !name) return null;
+  return {
+    reservationId: rid, date, start,
+    minutes: Number(minS) || 60,
+    menu, price: Number(priceS.replace(/,/g, "")) || 0,
+    name, phone,
+  };
+}
+
+// RFC2047のSubject（=?UTF-8?B?...?= など）を復号する（UTF-8のB/Q対応）
+function decodeMimeWord(s) {
+  return String(s || "").replace(/=\?utf-8\?([bq])\?([^?]+)\?=/gi, (all, enc, data) => {
+    try {
+      if (enc.toLowerCase() === "b") return Buffer.from(data, "base64").toString("utf8");
+      return Buffer.from(data.replace(/_/g, " ").replace(/=([0-9A-Fa-f]{2})/g, (x, h) => String.fromCharCode(parseInt(h, 16))), "binary").toString("utf8");
+    } catch { return all; }
+  });
+}
+
+// MIMEメール本文から text/plain パートを取り出して復号する
+// （multipart/alternative＋base64/quoted-printable のよくある構成に対応）
+function extractMailText(raw) {
+  const t = String(raw || "");
+  const decodePart = (headers, body) => {
+    const cte = (headers.match(/Content-Transfer-Encoding:\s*([\w-]+)/i) || [])[1] || "";
+    let out = body;
+    if (/base64/i.test(cte)) {
+      try { out = Buffer.from(body.replace(/[^A-Za-z0-9+\/=]/g, ""), "base64").toString("utf8"); } catch {}
+    } else if (/quoted-printable/i.test(cte)) {
+      const bytes = [];
+      const src = body.replace(/=\r?\n/g, "");
+      for (let i = 0; i < src.length; i++) {
+        if (src[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(src.slice(i + 1, i + 3))) {
+          bytes.push(parseInt(src.slice(i + 1, i + 3), 16));
+          i += 2;
+        } else bytes.push(src.charCodeAt(i) & 0xff);
+      }
+      out = Buffer.from(bytes).toString("utf8");
+    }
+    return out;
+  };
+  // text/plain パートを探す（ヘッダ→空行→本文→次の境界）
+  const m = t.match(/Content-Type:\s*text\/plain[^]*?\r?\n\r?\n([^]*?)(?:\r?\n--|$)/i);
+  if (m) {
+    const headStart = t.lastIndexOf("Content-Type: text/plain", t.indexOf(m[1]));
+    const headers = t.slice(Math.max(0, headStart), t.indexOf(m[1]));
+    return decodePart(headers, m[1]);
+  }
+  // マルチパートでない場合：全体をそのまま（base64一括にも耐える）
+  if (/^[A-Za-z0-9+\/=\r\n]+$/.test(t.trim()) && t.trim().length > 80) {
+    try { return Buffer.from(t.replace(/\s+/g, ""), "base64").toString("utf8"); } catch {}
+  }
+  return decodePart(t.slice(0, 400), t);
+}
+
+// 最小限のIMAPクライアント：未読メールから予約通知を探して取り込む
+// done(err, {checked, imported, results})
+function imapPollHotpepper(done) {
+  const cfg = loadMailConfig();
+  const hp = cfg && cfg.hotpepper;
+  if (!cfg || !hp || !hp.enabled) return done(new Error("mailConfigMissing"));
+  const subjFilter = String(hp.subjectFilter || "予約");
+  const host = hp.imapHost || "imap.gmail.com";
+  const port = Number(hp.imapPort) || 993;
+  // 直近2日分を走査する（自分宛テスト送信のように既読で届くメールも拾える。
+  // 予約の重複は reservationId で防ぐため、同じメールを再解析しても安全）
+  const d2 = new Date(Date.now() - 2 * 86400000);
+  const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const sinceStr = `${d2.getUTCDate()}-${MON[d2.getUTCMonth()]}-${d2.getUTCFullYear()}`;
+  const sock = tls.connect({ host, port, servername: host }, () => {});
+  sock.setTimeout(25000, () => { sock.destroy(); done(new Error("imapTimeout")); });
+  let buf = Buffer.alloc(0);
+  let step = 0;
+  let tagN = 0;
+  let pendingTag = "";
+  let collected = "";
+  let ids = [];
+  let idx = -1;
+  let current = null;
+  const results = [];
+  let finished = false;
+  const finish = (err, res) => { if (finished) return; finished = true; try { sock.end(); } catch {} done(err, res); };
+  const send = (cmd) => {
+    pendingTag = "a" + (++tagN);
+    collected = "";
+    sock.write(pendingTag + " " + cmd + "\r\n");
+  };
+  const markSeenUid = (id2) => {
+    state.hpSeenUids.add(id2);
+    if (state.hpSeenUids.size > 500) state.hpSeenUids = new Set([...state.hpSeenUids].slice(-300));
+  };
+  const nextMail = () => {
+    idx++;
+    while (idx < ids.length && state.hpSeenUids.has(ids[idx])) idx++;
+    if (idx >= ids.length) { step = 90; send("LOGOUT"); return; }
+    current = { id: ids[idx], subject: "", body: "" };
+    step = 40;
+    send(`FETCH ${current.id} (BODY.PEEK[HEADER.FIELDS (SUBJECT)])`);
+  };
+  sock.on("error", (e) => finish(e));
+  sock.on("data", (d) => {
+    buf = Buffer.concat([buf, d]);
+    const text = buf.toString("utf8");
+    const lines = text.split("\r\n");
+    const doneLine = lines.find((l) => l.startsWith(pendingTag + " "));
+    if (step === 0) {
+      if (!text.includes("\r\n")) return;
+      buf = Buffer.alloc(0);
+      step = 10;
+      send(`LOGIN "${cfg.user}" "${cfg.pass}"`);
+      return;
+    }
+    if (!doneLine) return;
+    collected = text;
+    buf = Buffer.alloc(0);
+    if (/^a\d+ (NO|BAD)/.test(doneLine)) {
+      if (step === 40 || step === 50) { markSeenUid(current.id); nextMail(); return; }
+      finish(new Error("imap:" + doneLine.slice(0, 80)));
+      return;
+    }
+    if (step === 10) { step = 20; send("SELECT INBOX"); return; }
+    if (step === 20) { step = 30; send(`SEARCH SINCE ${sinceStr}`); return; }
+    if (step === 30) {
+      const m = collected.match(/\* SEARCH([\d ]*)/);
+      ids = m ? m[1].trim().split(/ +/).filter(Boolean).slice(-25) : [];
+      idx = -1;
+      nextMail();
+      return;
+    }
+    if (step === 40) {
+      const sm = collected.match(/Subject:\s*([^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)/i);
+      current.subject = decodeMimeWord((sm ? sm[1] : "").replace(/\r?\n[ \t]/g, ""));
+      if (!current.subject.includes(subjFilter)) { markSeenUid(current.id); nextMail(); return; }
+      step = 50;
+      send(`FETCH ${current.id} (BODY.PEEK[TEXT])`);
+      return;
+    }
+    if (step === 50) {
+      const rawBody = collected.replace(/^\* \d+ FETCH[^\n]*\n/, "").replace(/\)\r\n?a\d+ OK[^]*$/, "");
+      const body = extractMailText(rawBody);
+      const parsed = parseHpMail(current.subject, body);
+      markSeenUid(current.id);
+      if (parsed) {
+        const out = hpNotify(parsed, "メール");
+        results.push({ id: current.id, subject: current.subject.slice(0, 60), status: out.status,
+          imported: out.status === 200 && !out.json.duplicated });
+      }
+      nextMail();
+      return;
+    }
+    if (step === 90) { finish(null, { checked: ids.length, imported: results.filter((r) => r.imported).length, results }); }
+  });
+}
+
+// 予約通知メールの自動取り込み（毎分）。テスト用サーバーでは HP_MAIL=1 のときだけ動かす
+const HP_MAIL_ON = (() => {
+  const c = loadMailConfig();
+  if (!c || !c.hotpepper || !c.hotpepper.enabled) return false;
+  if (process.env.HP_MAIL === "0") return false;
+  if (process.env.PORT && process.env.HP_MAIL !== "1") return false;
+  return true;
+})();
+if (HP_MAIL_ON) {
+  const hpTimer = setInterval(() => imapPollHotpepper(() => {}), 60000);
+  if (hpTimer.unref) hpTimer.unref();
+}
+
 // 分（600=10:00、1620=27:00）を「HH:MM」表記にする（24時以降もそのまま 25:30 等で表す）
 function fmtTime2(min) {
   return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
@@ -1661,110 +1938,57 @@ function handleDemoApi(req, res, url) {
   // を通すため、自社の予約サイトと枠が被ることはない（埋まっていれば slotTaken で拒否）。
   if (url.pathname === "/api/partner/hotpepper") {
     if (req.method === "GET" || req.method === "HEAD") {
+      const c = loadMailConfig();
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ ok: true, log: state.hpLog }));
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({
+        ok: true, log: state.hpLog,
+        mailIntake: { configured: !!(c && c.hotpepper && c.hotpepper.enabled), auto: HP_MAIL_ON },
+      }));
       return true;
     }
     if (req.method !== "POST") { res.writeHead(405); res.end(); return true; }
+    if (url.searchParams.get("poll") === "1") {
+      imapPollHotpepper((e2, r2) => {
+        if (e2) { res.writeHead(409, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: e2.message })); }
+        else { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, ...r2 })); }
+      });
+      return true;
+    }
     let raw = "";
     req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
     req.on("end", () => {
-      const logIt = (entry) => { state.hpLog.unshift({ at: new Date().toISOString(), ...entry }); state.hpLog.length = Math.min(state.hpLog.length, 50); };
-      const fail = (code, error, extra = {}) => {
-        logIt({ result: "拒否", error, ...extra });
-        res.writeHead(code, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error }));
-      };
       try {
         const b = JSON.parse(raw || "{}");
-        const rid = String(b.reservationId || "").trim();
-        if (!rid) return fail(400, "invalid", { note: "reservationIdなし" });
+        const out = hpNotify(b, "API");
+        res.writeHead(out.status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(out.json));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid" }));
+      }
+    });
+    return true;
+  }
 
-        // ホットペッパー側でのキャンセル → こちらの枠も開放する
-        if (b.action === "cancel") {
-          const bid = state.hpKeys.get(rid);
-          const d0 = bid && state.bookingIndex.get(bid);
-          const bk0 = d0 && ensureEvents(d0).bookings.find((x) => x.id === bid);
-          if (!bk0) return fail(404, "notFound", { rid });
-          if (bk0.status === "confirmed") {
-            bk0.status = "cancelled";
-            bk0.cancelled = true;
-            ensureDay(d0).version++;
-          }
-          logIt({ result: "取消", rid, date: d0 });
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, cancelled: true }));
+  // 検証用：allowToに載っている宛先へ任意メールを送る（HP通知メールの疑似投函など）
+  if (url.pathname === "/api/demo/mailtest" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(raw || "{}");
+        const cfg = loadMailConfig();
+        const to = cfg && cfg.allowTo && cfg.allowTo[0];
+        const allowed = to && realSendAllowed(to);
+        if (!allowed) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "mailConfigMissing" }));
           return;
         }
-
-        // 重複受信は同じ結果を返す（多重POSTでも枠を二重に埋めない）
-        if (state.hpKeys.has(rid)) {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, id: state.hpKeys.get(rid), duplicated: true }));
-          return;
-        }
-
-        const date = String(b.date || "");
-        const minutes = Math.round(Number(b.minutes));
-        const price = Math.round(Number(b.price));
-        const name = String(b.name || "").trim();
-        const menu = String(b.menu || "").trim();
-        let start = b.start;
-        if (typeof start === "string" && /^\d{1,2}:\d{2}$/.test(start)) {
-          const [h, mi] = start.split(":").map(Number);
-          start = h * 60 + mi;
-        }
-        start = Math.round(Number(start));
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name || !menu ||
-            !(minutes >= 10 && minutes <= 600) || !(price >= 0) ||
-            !(Number.isInteger(start) && start % 5 === 0)) return fail(400, "invalid", { rid });
-        const end = start + minutes;
-        if (start < 600 || end > 1620) return fail(400, "outsideHours", { rid });
-        const today = todayJst();
-        if (date < today || date > addDays(today, 84)) return fail(400, "invalid", { rid, note: "受付範囲外の日付" });
-        if (!ensureDay(date).enabled) return fail(409, "closed", { rid });
-
-        // メニュー名が当店メニューと一致すれば、対応メニュー・性別条件も同じ基準で判定する
-        const course = [...courseStore.values()].find((c) => c.name === menu) || null;
-        const gender = course ? courseGender(course.id) : (menu.includes("女性") ? "female" : menu.includes("男性") ? "male" : "none");
-        let candidates = state.staff
-          .filter((st) => st.active === 1 && !st.locked)
-          .filter((st) => (course ? staffCanDo(st, course.id) : true))
-          .filter((st) => gender === "none" || st.gender === gender)
-          .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
-          .sort((a, c) => a.sort_order - c.sort_order);
-        const wantName = String(b.staffName || "").trim();
-        if (wantName) candidates = candidates.filter((st) => st.name === wantName);
-        if (!candidates.length) return fail(409, "slotTaken", { rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu });
-
-        const assignee = candidates[0];
-        state.bookingSerial++;
-        const id = "hp-" + state.bookingSerial;
-        const ev = ensureEvents(date);
-        ev.bookings.push({
-          id, reference: rid, service_date: date, status: "confirmed",
-          start_at: minToMs(date, start), end_at: minToMs(date, end),
-          people: 1, course: course ? course.id : "", course_name: menu, course_label: menu,
-          name, email: String(b.email || ""), phone: String(b.phone || ""),
-          comment: String(b.comment || ""),
-          total: price, base_price: price, paid_amount: 0,
-          nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
-          staff: "none", customer_token: null,
-          source: "hotpepper", booth: "HP",
-          created_label: (() => {
-            const n = new Date(Date.now() + 9 * 3600e3);
-            return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " HP";
-          })(),
-          customer_gender: gender === "female" ? "f" : gender === "male" ? "m" : "",
-          is_new: isRepeatEmail(String(b.email || "")) ? 0 : 1,
+        smtpSend(allowed, { to, subject: String(b.subject || "テスト"), body: String(b.text || "") }, (err) => {
+          res.writeHead(err ? 502 : 200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(err ? { error: String(err.message) } : { ok: true, to }));
         });
-        ev.assignments.push({ booking_id: id, staff_id: assignee.id });
-        state.bookingIndex.set(id, date);
-        state.hpKeys.set(rid, id);
-        ensureDay(date).version++;
-        logIt({ result: "受信", rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu, price, name, staff: assignee.name });
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, id, staff: assignee.name }));
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "invalid" }));
