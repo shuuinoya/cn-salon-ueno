@@ -136,14 +136,11 @@
     if (logo && !logo.dataset.pmFlower) {
       logo.dataset.pmFlower = "1";
       logo.textContent = "";
+      // ログイン画面と同じ4枚花びらのマーク（白）
       logo.innerHTML =
-        '<svg viewBox="0 0 44 44" width="32" height="32" aria-hidden="true" focusable="false">' +
-        '<g fill="#fff" transform="translate(23 21)">' +
-        ["350", "62", "134", "206", "278"].map((a) =>
-          '<path transform="rotate(' + a + ')" d="M0 -3.8 C-4.8 -6.6 -6.4 -12.6 -3.4 -16.8 C-1.6 -19.2 1.6 -19.2 3.4 -16.8 C6.4 -12.6 4.8 -6.6 0 -3.8 Z"/>'
-        ).join("") +
-        '<path transform="translate(-11 13) rotate(214) scale(0.5)" d="M0 -3.8 C-4.8 -6.6 -6.4 -12.6 -3.4 -16.8 C-1.6 -19.2 1.6 -19.2 3.4 -16.8 C6.4 -12.6 4.8 -6.6 0 -3.8 Z"/>' +
-        "</g></svg>";
+        '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">' +
+        '<path fill="#fff" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/>' +
+        "</svg>";
     }
 
     // 3a2) 左上のロゴは押しても何も起きないようにする（予約サイトへ飛ばない）
