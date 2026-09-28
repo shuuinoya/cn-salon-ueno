@@ -1331,6 +1331,9 @@ function imapPollHotpepper(done) {
   const subjFilter = String(hp.subjectFilter || "予約");
   const host = hp.imapHost || "imap.gmail.com";
   const port = Number(hp.imapPort) || 993;
+  // 通知の受信箱は送信用Gmailと別アカウントでもよい（サロンボードの通知先に合わせられる）
+  const imapUser = hp.imapUser || cfg.user;
+  const imapPass = hp.imapPass || cfg.pass;
   // 直近2日分を走査する（自分宛テスト送信のように既読で届くメールも拾える。
   // 予約の重複は reservationId で防ぐため、同じメールを再解析しても安全）
   const d2 = new Date(Date.now() - 2 * 86400000);
@@ -1376,7 +1379,7 @@ function imapPollHotpepper(done) {
       if (!text.includes("\r\n")) return;
       buf = Buffer.alloc(0);
       step = 10;
-      send(`LOGIN "${cfg.user}" "${cfg.pass}"`);
+      send(`LOGIN "${imapUser}" "${imapPass}"`);
       return;
     }
     if (!doneLine) return;

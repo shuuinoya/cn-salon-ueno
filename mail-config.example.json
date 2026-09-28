@@ -16,5 +16,6 @@
     "subjectFilter": "ご予約",
     "imapHost": "imap.gmail.com",
     "imapPort": 993
-  }
+  },
+  "_サロンボード連動": "サロンボードの予約通知メールの届くアドレスをここに設定すると本番連動になります。通知先が送信用Gmailと別の場合は hotpepper に imapUser / imapPass（そのメールのアプリパスワード）を追加してください"
 }
