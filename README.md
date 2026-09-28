@@ -15,6 +15,8 @@
 
 「〜.local」の名前は、サーバー起動中にmDNS（Bonjour。macOS標準の`dns-sd`）で同じネットワークへ配信されます。Mac・iPhone・iPad・Windows 10以降・Android 12以降はそのまま開けます。名前で開けない端末は、起動時にターミナルへ表示されるIPのURL（例 `http://192.168.x.x/`、管理画面は `/cnsalon-board`）でも開けます。Wi-Fiを替えた後は F5 で再起動すると新しいIPで配信し直します。
 
+**鍵マークつき（HTTPS）で開くには：** サーバーは443番でHTTPSでも配信しています（`https://cn-ueno-health-and-beauty.local/` など、上記すべての名前で有効）。ブラウザの「保護されていない通信」表示を消すには、各端末に一度だけローカル証明書（CN salon local CA）を入れます。手順は **http://cnsalon-board.local/https-setup** （このMacでは http://cnsalon-board.localhost/https-setup ）に、iPhone・Mac・Windows・Android別で書いてあります。証明書はこのMac上で自動生成され（`tls/`。gitやzipには含めません）、このパソコンのサイトにしか効かないので他サイトの通信には影響しません。証明書を入れない端末は今までどおり http:// で使えます。
+
 どちらも**数字のない、サイト名だけのURL**です。開いた後もアドレスバーに名前が残ります（転送されません）。
 このMac上では、番号つきの http://127.0.0.1:5520/cn-ueno-health-and-beauty ／ http://127.0.0.1:5520/cnsalon-board も使えます。
 ※接続を受け付けるのはこのパソコンと同じネットワークのプライベートIPのみで、**インターネットには公開されません**。
@@ -46,7 +48,8 @@
 - **セキュリティヘッダ**：`X-Content-Type-Options: nosniff`／`X-Frame-Options: DENY`（他サイトへの埋め込み禁止）／`Referrer-Policy: no-referrer`（参照元を外部へ送らない）
 - 外部のCDN・解析タグ等への通信はありません（画像・JS・CSS・フォントはすべてローカル配信。元サイトのCloudflareボット判定コードも除去済み）
 - ホットペッパー連携の受け口（`POST /api/partner/hotpepper`）はこのパソコン上からのみ受け付けます（本番では連携先のAPIキー検証に相当）
-- 本デモはLAN内のみのHTTP配信です。インターネット公開する場合は、HTTPS終端（リバースプロキシ等）の下に置く前提の構成にしてあります（認証情報はURLに載せず、CookieはHttpOnly）
+- **HTTPS（443番）**：このMacで自動生成するローカルCA（`tls/`・git/zip対象外）による証明書つきで、全URLがHTTPSでも開けます。CAを信頼させた端末は鍵マーク表示（手順: `/https-setup`）。CAの秘密鍵はこのMacから出ません。認証情報はURLに載せず、CookieはHttpOnly。インターネット公開時は正規CA証明書のHTTPS終端の下へ置く前提です
+- **複数端末のリアルタイム同期**：台帳などの画面はサーバーへ数秒間隔で照会しており、別の端末（別ブラウザ・iPhone等）での予約・シフト・受付停止などの変更は、開いたままの画面にも数秒以内に自動反映されます（リロード不要）
 
 元サイト https://cn-salon-ueno.cnsalon2021.chatgpt.site を、2026年9月24日時点のまま保存したものです。
 `pages/` と `public/` の中身は基本的に元サイトのままです。例外は、追加したページ（demo-admin.html・pm-login.html・not-found.html）と、予約確認・完了ページのラベル折り返しバグを直すために最小修正した3ファイル（BookingText-*.js・page-WafCof8Y.js・page-ChO0-Npx.js）です。

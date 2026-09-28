@@ -136,7 +136,75 @@ const NAME_HOSTS = {
 const HOST_NAMES = "cn-ueno-health-and-beauty(\\.localhost|\\.local)?|cnsalon-board(\\.localhost|\\.local)?";
 const PRIVATE_IPS = "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3}";
 const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
-const LOCAL_ORIGIN_RE = new RegExp(`^http:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
+const LOCAL_ORIGIN_RE = new RegExp(`^https?:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
+
+// ---- HTTPS用のローカル証明書（このMac専用の小さな認証局） ----
+// ブラウザの「保護されていない通信」表示を消すため、443番でHTTPSでも配信する。
+// 証明書はこのMac上で生成し（tls/ フォルダ。gitやzipには含めない）、
+// 各端末に「CN salon local CA」を信頼させると鍵マークつきで開けるようになる。
+// 秘密鍵はこのMacから出ないので、外部の認証局・インターネットは不要。
+function ensureTls(lanIp) {
+  const { execFileSync } = require("child_process");
+  const dir = path.join(__dirname, "tls");
+  const f = (n) => path.join(dir, n);
+  const san = "DNS:localhost,DNS:cn-ueno-health-and-beauty.localhost,DNS:cnsalon-board.localhost," +
+    "DNS:cn-ueno-health-and-beauty.local,DNS:cnsalon-board.local," +
+    "DNS:cn-ueno-health-and-beauty,DNS:cnsalon-board,IP:127.0.0.1" + (lanIp ? `,IP:${lanIp}` : "");
+  try {
+    // IPが変わっていなければ既存の証明書をそのまま使う
+    if (fs.readFileSync(f("san.txt"), "utf8") === san &&
+      fs.existsSync(f("server.pem")) && fs.existsSync(f("server.key")) && fs.existsSync(f("ca.pem"))) {
+      return { key: f("server.key"), cert: f("server.pem"), ca: f("ca.pem"), caDer: f("ca.der") };
+    }
+  } catch {}
+  fs.mkdirSync(dir, { recursive: true });
+  const sh = (args) => execFileSync("/usr/bin/openssl", args, { stdio: "ignore" });
+  if (!fs.existsSync(f("ca.pem")) || !fs.existsSync(f("ca.key"))) {
+    fs.writeFileSync(f("ca.cnf"),
+      "[req]\ndistinguished_name=dn\nx509_extensions=v3_ca\nprompt=no\n[dn]\nCN=CN salon local CA\n" +
+      "[v3_ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n");
+    sh(["req", "-x509", "-newkey", "rsa:2048", "-keyout", f("ca.key"), "-out", f("ca.pem"),
+      "-days", "3650", "-nodes", "-config", f("ca.cnf")]);
+  }
+  // iPhone等のプロファイル取り込み用にDER形式も用意する
+  sh(["x509", "-in", f("ca.pem"), "-outform", "der", "-out", f("ca.der")]);
+  fs.writeFileSync(f("ext.cnf"),
+    "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n" +
+    `subjectAltName=${san}\n`);
+  sh(["req", "-newkey", "rsa:2048", "-keyout", f("server.key"), "-nodes",
+    "-out", f("server.csr"), "-subj", "/CN=cnsalon-board.local"]);
+  sh(["x509", "-req", "-in", f("server.csr"), "-CA", f("ca.pem"), "-CAkey", f("ca.key"),
+    "-CAcreateserial", "-out", f("server.pem"), "-days", "825", "-extfile", f("ext.cnf")]);
+  fs.writeFileSync(f("san.txt"), san);
+  return { key: f("server.key"), cert: f("server.pem"), ca: f("ca.pem"), caDer: f("ca.der") };
+}
+
+// 「鍵マークつきで開く」ための案内ページ（証明書の配布とインストール手順）
+const HTTPS_SETUP_HTML = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>鍵マークつきで開く設定</title>
+<style>body{font-family:"Hiragino Sans",sans-serif;max-width:680px;margin:0 auto;padding:24px 16px;color:#3d3229;line-height:1.9;background:#faf6f0}
+h1{font-size:20px;border-bottom:2px solid #8b6b4f;padding-bottom:8px}h2{font-size:16px;color:#8a6a33;margin-top:28px}
+a.dl{display:inline-block;background:#8b6b4f;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold}
+code{background:#eee3d5;padding:1px 6px;border-radius:4px}ol{padding-left:22px}small{color:#6b5b4b}</style></head><body>
+<h1>「保護されていない通信」を消して鍵マークで開く</h1>
+<p>このシステムはお店のパソコンの中だけで動いています。下の証明書（<b>CN salon local CA</b>）を端末に信頼させると、
+<b>https://cn-ueno-health-and-beauty.local/</b>（予約サイト）・<b>https://cnsalon-board.local/</b>（管理画面）が鍵マークつきで開けます。</p>
+<p><a class="dl" href="/ca.crt" download="cn-salon-ca.crt">証明書をダウンロード（cn-salon-ca.crt）</a></p>
+<h2>iPhone・iPad</h2>
+<ol><li>上のボタンを押す →「プロファイルがダウンロードされました」と出る</li>
+<li>設定 → 一般 → VPNとデバイス管理 →「CN salon local CA」→ インストール</li>
+<li>設定 → 一般 → 情報 → 証明書信頼設定 →「CN salon local CA」を<b>オン</b></li></ol>
+<h2>Mac</h2>
+<ol><li>ダウンロードした cn-salon-ca.crt をダブルクリック（キーチェーンアクセスに入る）</li>
+<li>キーチェーンアクセスで「CN salon local CA」をダブルクリック → 信頼 →「常に信頼」</li></ol>
+<h2>Windows</h2>
+<ol><li>ダウンロードした cn-salon-ca.crt をダブルクリック →「証明書のインストール」</li>
+<li>保存場所は「現在のユーザー」→「証明書をすべて次のストアに配置する」→<b>信頼されたルート証明機関</b> → 完了</li></ol>
+<h2>Android</h2>
+<ol><li>設定 → セキュリティ → その他 → 証明書のインストール → CA証明書 → ダウンロードしたファイルを選択</li></ol>
+<p><small>※この証明書はこのお店のパソコンで作られたもので、このパソコンのサイトにしか効きません（他のサイトの通信には影響しません）。
+インストールしない端末でも、今までどおり http:// のURLでそのまま使えます。</small></p>
+</body></html>`;
 
 const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
@@ -185,6 +253,23 @@ const handler = (req, res) => {
       return res.end();
     }
   }
+  // HTTPS用の証明書配布と設定案内（鍵マークつきで開くための手順ページ）
+  if (url.pathname === "/https-setup") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(head ? undefined : HTTPS_SETUP_HTML);
+  }
+  if (url.pathname === "/ca.crt") {
+    const der = path.join(__dirname, "tls", "ca.der");
+    if (!fs.existsSync(der)) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, {
+      "Content-Type": "application/x-x509-ca-cert",
+      "Content-Disposition": 'attachment; filename="cn-salon-ca.crt"',
+      "Cache-Control": "no-store",
+    });
+    if (!head) return fs.createReadStream(der).pipe(res);
+    return res.end();
+  }
+
   if (NAME_HOSTS[hostName] && url.pathname === "/") {
     url.pathname = NAME_HOSTS[hostName];
   }
@@ -306,6 +391,25 @@ server.on("listening", () => {
           console.log(`    予約サイト : http://cn-ueno-health-and-beauty.local/`);
           console.log(`    管理画面   : http://cnsalon-board.local/`);
           console.log(`    名前で開けない端末は : http://${ip}/ （管理画面は http://${ip}/cnsalon-board ）`);
+        }
+        // HTTPS（443番）。証明書を信頼させた端末は鍵マークつきの https:// で開ける
+        // （Wi-Fi未接続でもこのMac内の https://〜.localhost/ 用に起動する）
+        try {
+          const t = ensureTls(ip || "");
+          const server443 = require("https").createServer({
+            key: fs.readFileSync(t.key),
+            cert: fs.readFileSync(t.cert) + fs.readFileSync(t.ca), // 中間なしのCA直署名＋チェーン同梱
+          }, handler);
+          server443.on("error", () => { console.log("  （443番が使用中のためHTTPSは休止。http:// はそのまま使えます）"); });
+          server443.on("listening", () => {
+            console.log("  鍵マークつき（証明書を入れた端末）:");
+            console.log(`    予約サイト : https://cn-ueno-health-and-beauty.local/ ・ https://cn-ueno-health-and-beauty.localhost/`);
+            console.log(`    管理画面   : https://cnsalon-board.local/ ・ https://cnsalon-board.localhost/`);
+            console.log(`    証明書の入れ方 : http://cnsalon-board.local/https-setup （どの端末からでも開けます）`);
+          });
+          server443.listen(443);
+        } catch {
+          console.log("  （証明書を作成できなかったためHTTPSは休止。http:// はそのまま使えます）");
         }
       }
     } catch {}
