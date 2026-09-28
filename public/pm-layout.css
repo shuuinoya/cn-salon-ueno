@@ -140,7 +140,9 @@ main.ledger-app .ledger-logo {
   justify-content: center;
 }
 main.ledger-app .ledger-logo svg { display: block; }
-/* 元の桜マークはどの画面・どの瞬間も見せない（クローバー以外のロゴ中身は非表示） */
+/* 元の桜マークはどの画面・どの瞬間も見せない（クローバー以外のロゴ中身は非表示）。
+   Reactは状況により「✿」という文字でも描くため、文字サイズ0＋透明で文字も封じる */
+.ledger-logo { font-size: 0 !important; color: transparent !important; }
 .ledger-logo svg:not(.pm-clover),
 .ledger-logo img { display: none !important; }
 
