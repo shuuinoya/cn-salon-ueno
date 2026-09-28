@@ -218,15 +218,17 @@
     const navMenu = document.querySelector(".ledger-nav-menu > div");
     if (navMenu && !navMenu.dataset.pmMenu) {
       navMenu.dataset.pmMenu = "1";
-      const orig = [...navMenu.querySelectorAll("button")];
-      const dayBtn = orig.find((b) => b.textContent === "日別予約台帳");
-      const monthBtn = orig.find((b) => b.textContent === "月間シフト作成");
-      orig.forEach((b) => { b.style.display = "none"; });
+      [...navMenu.querySelectorAll("button")].forEach((b) => { b.style.display = "none"; });
+      // 画面切替（スタッフ情報など）で元ボタンが作り直されるため、クリック時に毎回探す
+      const findOrig = (label) => [...document.querySelectorAll(".ledger-nav-menu > div button")]
+        .find((b) => b.textContent === label && b.style.display === "none");
+      const dayBtn = () => findOrig("日別予約台帳");
+      const monthBtn = () => findOrig("月間シフト作成");
       const items = [
-        ["トップ", () => dayBtn?.click()],
-        ["予約受付", () => dayBtn?.click()],
+        ["トップ", () => dayBtn()?.click()],
+        ["予約受付", () => dayBtn()?.click()],
         ["予約一覧", () => {
-          dayBtn?.click();
+          dayBtn()?.click();
           setTimeout(() => {
             [...document.querySelectorAll(".ledger-underbar button")]
               .find((b) => b.textContent === "予約一覧")?.click();
@@ -235,7 +237,7 @@
         ["支払・レジ", null],
         ["物販販売", null],
         ["返客一覧", null],
-        ["月間シフト入力", () => monthBtn?.click()],
+        ["月間シフト入力", () => monthBtn()?.click()],
         ["本日のオンライン設定状況", null],
         ["シフトひな型設定", null],
         ["シフトパターン設定", null],
@@ -271,7 +273,7 @@
         ["クレジットカード会社情報", null],
         ["電子マネー情報", null],
         ["TORICOM設定", null],
-        ["ユーザ情報", null],
+        ["ユーザ情報（アカウント管理）", openAccountAdmin],
       ];
       for (const [label, fn] of shopItems) {
         const b = document.createElement("button");
@@ -279,6 +281,12 @@
         b.textContent = label;
         if (fn) b.addEventListener("click", fn);
         else { b.title = "デモ版では使用できません"; b.style.opacity = "0.55"; }
+        if (fn === openAccountAdmin) {
+          // アカウント管理は管理者のみ（表示は目安。実際の制限はサーバー側で強制）
+          getWhoami().then((w) => {
+            if (w.role !== "admin") { b.style.opacity = "0.55"; b.title = "管理者のみ使用できます"; }
+          });
+        }
         shopMenu.appendChild(b);
       }
     }
@@ -1786,6 +1794,127 @@
         window.alert("保存しました。予約サイトのフリーメッセージ欄に反映されます。");
       } catch {
         window.alert("保存できませんでした。接続を確認して再度お試しください。");
+      }
+    });
+  }
+
+  // ログイン中アカウントの情報（1回だけ取得して使い回す）
+  let pmWhoamiP = null;
+  function getWhoami() {
+    if (!pmWhoamiP) {
+      pmWhoamiP = fetch("/api/demo/whoami", { cache: "no-store" })
+        .then((r) => r.json())
+        .catch(() => ({ user: null }));
+    }
+    return pmWhoamiP;
+  }
+
+  // 店舗情報：ユーザ情報（アカウント管理）。管理者のみ（サーバー側でも権限を強制）
+  async function openAccountAdmin() {
+    const me = await getWhoami();
+    if (me.role !== "admin") { window.alert("アカウント管理は管理者のみ使用できます。"); return; }
+    document.getElementById("pm-account-modal")?.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "pm-account-modal";
+    wrap.innerHTML =
+      '<section role="dialog" aria-modal="true">' +
+      "<h2>店舗マスタ｜ユーザ情報（アカウント管理）</h2>" +
+      '<p class="pm-shop-sub">スタッフが自分の端末（MacBook・iPhone・iPad・Windows等）からログインするためのアカウントを管理します。権限は「管理者＞マネージャー＞スタッフ」の3段階で、操作できる範囲はサーバー側で必ず検証されます。</p>' +
+      '<div class="pm-menu-new">' +
+      '<input type="text" id="pm-ac-user" placeholder="ログインID（半角英数4〜20）" maxlength="20">' +
+      '<input type="text" id="pm-ac-name" placeholder="表示名" maxlength="40">' +
+      '<input type="password" id="pm-ac-pass" placeholder="パスワード（8文字以上）" maxlength="60">' +
+      '<select id="pm-ac-role"><option value="staff">スタッフ</option><option value="manager">マネージャー</option><option value="admin">管理者</option></select>' +
+      '<button type="button" class="pm-red" id="pm-ac-add">追加</button>' +
+      "</div>" +
+      '<div class="pm-ac-list">読み込み中…</div>' +
+      '<h3 class="pm-tk-h">認証ログ（直近）</h3>' +
+      '<div class="pm-ac-log">読み込み中…</div>' +
+      '<div class="pm-shop-actions"><button type="button" id="pm-ac-close">閉じる</button></div>' +
+      "</section>";
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.querySelector("#pm-ac-close").addEventListener("click", close);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const ERRS = {
+      badUser: "ログインIDは半角英数・-・_ の4〜20文字にしてください。",
+      userExists: "そのログインIDは既に使われています。",
+      shortPass: "パスワードは8文字以上にしてください。",
+      badRole: "権限の指定が不正です。",
+      lastAdmin: "有効な管理者が最後の1人になるため、この変更はできません。",
+      notFound: "対象のアカウントが見つかりません。",
+    };
+    const api = async (body) => {
+      const r = await fetch("/api/demo/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j2 = await r.json().catch(() => ({}));
+      if (!r.ok) { window.alert(ERRS[j2.error] || "操作に失敗しました。"); return null; }
+      return j2;
+    };
+    async function loadAccounts() {
+      try {
+        const d = await (await fetch("/api/demo/accounts", { cache: "no-store" })).json();
+        const rows = (d.accounts || []).map((a) =>
+          '<tr data-user="' + esc(a.user) + '"><td><b>' + esc(a.user) + "</b>" + (a.user === me.user ? "（自分）" : "") + "</td>" +
+          "<td>" + esc(a.name) + "</td>" +
+          '<td><select class="ac-role">' +
+          ["staff", "manager", "admin"].map((r2) =>
+            '<option value="' + r2 + '"' + (a.role === r2 ? " selected" : "") + ">" +
+            ({ staff: "スタッフ", manager: "マネージャー", admin: "管理者" }[r2]) + "</option>").join("") +
+          "</select></td>" +
+          "<td>" + (a.active ? "有効" : "<b>停止中</b>") + "</td>" +
+          '<td><button type="button" class="ac-toggle">' + (a.active ? "停止" : "再開") + "</button> " +
+          '<button type="button" class="ac-pass">パスワード再設定</button> ' +
+          '<button type="button" class="ac-del">削除</button></td></tr>');
+        wrap.querySelector(".pm-ac-list").innerHTML =
+          '<table class="pm-tk-table"><thead><tr><th>ログインID</th><th>表示名</th><th>権限</th><th>状態</th><th></th></tr></thead><tbody>' +
+          rows.join("") + "</tbody></table>";
+        wrap.querySelector(".pm-ac-log").innerHTML = (d.authLog || []).length
+          ? '<div class="pm-ac-lograw">' + d.authLog.map((l) => {
+              const t = new Date(l.at + 9 * 3600e3).toISOString().slice(5, 16).replace("T", " ");
+              if (l.kind === "login") return esc(t) + "　ログイン" + (l.ok ? "成功" : (l.reason === "locked" ? "ロック中" : "失敗")) + "　" + esc(l.user || "(未入力)");
+              if (l.kind === "api") return esc(t) + "　権限外アクセス拒否　" + esc(l.user || "(未ログイン)") + "　" + esc(l.path || "");
+              if (l.kind === "account") return esc(t) + "　アカウント" + ({ add: "追加", update: "変更", delete: "削除" }[l.op] || l.op) + "　" + esc(l.target) + "（操作者:" + esc(l.by) + "）";
+              return esc(t);
+            }).join("<br>") + "</div>"
+          : '<p class="pm-tk-empty">記録はまだありません。</p>';
+      } catch { wrap.querySelector(".pm-ac-list").textContent = "読み込みに失敗しました"; }
+    }
+    loadAccounts();
+    wrap.querySelector("#pm-ac-add").addEventListener("click", async () => {
+      const body = {
+        action: "add",
+        user: wrap.querySelector("#pm-ac-user").value.trim(),
+        name: wrap.querySelector("#pm-ac-name").value.trim(),
+        pass: wrap.querySelector("#pm-ac-pass").value,
+        role: wrap.querySelector("#pm-ac-role").value,
+      };
+      if (await api(body)) {
+        ["#pm-ac-user", "#pm-ac-name", "#pm-ac-pass"].forEach((s) => { wrap.querySelector(s).value = ""; });
+        loadAccounts();
+      }
+    });
+    wrap.addEventListener("change", async (e) => {
+      const row = e.target.closest("tr[data-user]");
+      if (row && e.target.classList.contains("ac-role")) {
+        if (!(await api({ action: "update", user: row.dataset.user, role: e.target.value }))) loadAccounts();
+      }
+    });
+    wrap.addEventListener("click", async (e) => {
+      const row = e.target.closest("tr[data-user]");
+      if (!row) return;
+      const user = row.dataset.user;
+      if (e.target.classList.contains("ac-toggle")) {
+        const on = e.target.textContent === "再開";
+        if (!on && !window.confirm(user + " を停止しますか？（この端末を含む全端末で即時ログインできなくなります）")) return;
+        if (await api({ action: "update", user, active: on })) loadAccounts();
+      } else if (e.target.classList.contains("ac-pass")) {
+        const p2 = window.prompt(user + " の新しいパスワード（8文字以上）を入力してください。");
+        if (p2 === null) return;
+        if (await api({ action: "update", user, pass: p2 })) window.alert("パスワードを変更しました。");
+      } else if (e.target.classList.contains("ac-del")) {
+        if (!window.confirm(user + " を削除しますか？（元に戻せません）")) return;
+        if (await api({ action: "delete", user })) loadAccounts();
       }
     });
   }

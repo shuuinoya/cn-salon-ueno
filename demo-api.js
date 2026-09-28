@@ -8,21 +8,54 @@ const path = require("path");
 const net = require("net");
 const tls = require("tls");
 
-// ---- 管理画面ログイン -----------------------------------------------------
+// ---- 管理画面ログイン（アカウント・権限・セッション） ---------------------
+// ・パスワードは平文で保持せずハッシュで照合する
+// ・ログインごとに端末別のセッションを発行（複数端末から同時利用できる）
+// ・権限は admin > manager > staff の3段階。すべての管理APIはサーバー側で
+//   ログインと権限を検証する（URLを知っているだけでは何も見えない・できない）
+const crypto = require("crypto");
+const hashPass = (p) => crypto.createHash("sha256").update(String(p)).digest("hex");
 const ADMIN_ID = "kudaka1228";
-const ADMIN_PASS = "cnsalon2026";
-const adminSessions = new Set(); // 有効なセッショントークン（メモリ上のみ）
+const ADMIN_PASS_HASH = "83cd05b641499627e43bd8a389cf712e2b3cf75bcda25c8e0b76593c848949de"; // 初期管理者
+const SESSION_MAX_AGE = 7 * 86400000; // セッション有効期間（7日）
+const adminSessions = new Map(); // token -> { user, created }（メモリ上のみ）
+const ROLE_LV = { staff: 1, manager: 2, admin: 3 };
+const ROLE_LABEL = { admin: "管理者", manager: "マネージャー", staff: "スタッフ" };
 
 function sessionTokenOf(req) {
   const m = /(?:^|;\s*)pm_session=([a-f0-9]+)/.exec(req.headers.cookie || "");
   return m ? m[1] : "";
 }
+// ログイン済みかつ有効なアカウントのときだけ、そのアカウントを返す
+// （停止・削除・権限変更は既存セッションにも即時反映される）
+function sessionAccount(req) {
+  const token = sessionTokenOf(req);
+  const s = adminSessions.get(token);
+  if (!s) return null;
+  if (Date.now() - s.created > SESSION_MAX_AGE) { adminSessions.delete(token); return null; }
+  const acc = state.accounts.get(s.user);
+  return acc && acc.active ? acc : null;
+}
 function isAdminSession(req) {
-  return adminSessions.has(sessionTokenOf(req));
+  return !!sessionAccount(req);
+}
+function roleAtLeast(req, role) {
+  const a = sessionAccount(req);
+  return !!a && ROLE_LV[a.role] >= (ROLE_LV[role] || 99);
+}
+function denyApi(req, res) {
+  const code = isAdminSession(req) ? 403 : 401;
+  res.writeHead(code, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: code === 401 ? "loginRequired" : "forbidden" }));
 }
 function clearSession(req, res) {
   adminSessions.delete(sessionTokenOf(req));
   res.setHeader("Set-Cookie", "pm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+}
+// 認証イベントの記録（パスワード等の機密は残さない）
+function authLogPush(entry) {
+  state.authLog.push({ at: Date.now(), ...entry });
+  if (state.authLog.length > 200) state.authLog.splice(0, state.authLog.length - 200);
 }
 
 // ---- 実送信の設定（任意） -------------------------------------------------
@@ -320,6 +353,12 @@ const state = {
   hpSeenUids: new Set(),   // メール取込で走査済みのメール番号（毎分の再解析を避ける）
   hpLog: [],               // ホットペッパー連携の受信履歴（管理画面の連携ページに表示）
   reports: new Map(),      // 営業実績（日報）の入力内容 date -> {weather, ...}
+  // 管理画面のアカウント（権限つき）。パスワードはハッシュのみ保持
+  accounts: new Map([
+    [ADMIN_ID, { user: ADMIN_ID, name: "久高（管理者）", role: "admin", active: true, pass: ADMIN_PASS_HASH, createdAt: Date.now() }],
+  ]),
+  authLog: [],             // 認証イベント（成功・失敗・権限外アクセス。機密は含めない）
+  loginFails: new Map(),   // ユーザー名 -> {n, until}（連続失敗によるロック）
 };
 
 function ensureDay(date) {
@@ -1748,15 +1787,32 @@ function handleDemoApi(req, res, url) {
     req.on("end", () => {
       let b = {};
       try { b = JSON.parse(raw || "{}"); } catch {}
-      if (String(b.user || "") === ADMIN_ID && String(b.pass || "") === ADMIN_PASS) {
-        const token = Array.from({ length: 4 }, () => Math.random().toString(16).slice(2)).join("");
-        adminSessions.add(token);
+      const user = String(b.user || "").slice(0, 40);
+      const ip = req.socket.remoteAddress || "";
+      // 連続失敗によるロック（総当たり対策）
+      const lock = state.loginFails.get(user);
+      if (lock && lock.until > Date.now()) {
+        authLogPush({ kind: "login", user, ok: false, reason: "locked", ip });
+        res.writeHead(429, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "tooManyAttempts" }));
+      }
+      const acc = state.accounts.get(user);
+      // 停止中アカウントも「存在しない」と同じ応答にする（存在の推測をさせない）
+      if (acc && acc.active && acc.pass === hashPass(String(b.pass || ""))) {
+        state.loginFails.delete(user);
+        const token = crypto.randomBytes(24).toString("hex"); // 端末ごとに独立したセッション
+        adminSessions.set(token, { user, created: Date.now() });
+        if (adminSessions.size > 500) adminSessions.delete(adminSessions.keys().next().value);
+        authLogPush({ kind: "login", user, ok: true, ip });
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Set-Cookie": `pm_session=${token}; Path=/; HttpOnly; SameSite=Lax`,
         });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, role: acc.role, name: acc.name }));
       } else {
+        const n = (lock ? lock.n : 0) + 1;
+        state.loginFails.set(user, { n, until: n >= 5 ? Date.now() + 60000 : 0 });
+        authLogPush({ kind: "login", user, ok: false, ip });
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "invalidLogin" }));
       }
@@ -1767,6 +1823,115 @@ function handleDemoApi(req, res, url) {
     clearSession(req, res);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return true;
+  }
+
+  // ---- サーバー側の認証・権限チェック（中央ゲート） ----
+  // /api/demo/* と /api/partner/* は、予約サイト（お客様）用に公開している一部を除き
+  // すべてログイン必須。権限（admin > manager > staff）もここでサーバー側判定する。
+  // フロント側の表示制御はUIの利便のためだけで、守りはすべてこのゲートと各処理内の検証。
+  {
+    const P = url.pathname, isGet = req.method === "GET" || req.method === "HEAD";
+    let need = null; // null = 公開（ログイン不要）
+    if (P.startsWith("/api/demo/") || P.startsWith("/api/partner/")) {
+      if (P === "/api/demo/settings" && isGet) need = null;               // 未ログインには freeMessage のみ返す（下で制限）
+      else if ((P === "/api/demo/course-photo" || P === "/api/demo/staff-photo") && isGet) need = null; // 公開画像
+      else if (P === "/api/demo/accounts") need = "admin";                // アカウント管理は管理者のみ
+      else if (P === "/api/demo/report" || P === "/api/demo/mailtest") need = "manager";
+      else if (!isGet && (P === "/api/demo/settings" || P === "/api/demo/ticket-plans" ||
+        P === "/api/demo/courses" || P === "/api/demo/tickets" ||
+        P === "/api/demo/course-photo" || P === "/api/demo/staff-photo")) need = "manager";
+      else if (P === "/api/partner/hotpepper" && !isGet) need = null;     // 連携通知（下でループバック限定）
+      else need = "staff";                                                // それ以外の管理APIはログイン必須
+    }
+    if (need && !roleAtLeast(req, need)) {
+      const a = sessionAccount(req);
+      authLogPush({ kind: "api", user: a ? a.user : "", ok: false, path: P, ip: req.socket.remoteAddress || "" });
+      denyApi(req, res);
+      return true;
+    }
+  }
+
+  // ログイン中のアカウント情報（自分のもののみ。UIの表示出し分けに使う）
+  if (url.pathname === "/api/demo/whoami" && (req.method === "GET" || req.method === "HEAD")) {
+    const a = sessionAccount(req);
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify(a
+      ? { user: a.user, name: a.name, role: a.role, roleLabel: ROLE_LABEL[a.role] }
+      : { user: null }));
+    return true;
+  }
+
+  // アカウント管理（管理者のみ。上のゲートで検証済み）
+  if (url.pathname === "/api/demo/accounts") {
+    const list = () => [...state.accounts.values()].map((a) => ({
+      user: a.user, name: a.name, role: a.role, roleLabel: ROLE_LABEL[a.role],
+      active: !!a.active, createdAt: a.createdAt,
+    }));
+    if (req.method === "GET" || req.method === "HEAD") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({
+        accounts: list(),
+        authLog: state.authLog.slice(-50).reverse(), // 直近の認証イベント（機密なし）
+      }));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+      req.on("end", () => {
+        const bad = (msg) => { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: msg })); };
+        let b = {};
+        try { b = JSON.parse(raw || "{}"); } catch { return bad("invalid"); }
+        const me = sessionAccount(req);
+        // 「有効な管理者が最後の1人」になる変更（停止・降格・削除）は拒否する
+        const adminCountWithout = (user) =>
+          [...state.accounts.values()].filter((a) => a.active && a.role === "admin" && a.user !== user).length;
+        if (b.action === "add") {
+          const user = String(b.user || "").trim();
+          if (!/^[a-zA-Z0-9_-]{4,20}$/.test(user)) return bad("badUser");
+          if (state.accounts.has(user)) return bad("userExists");
+          if (String(b.pass || "").length < 8) return bad("shortPass");
+          if (!ROLE_LV[b.role]) return bad("badRole");
+          state.accounts.set(user, {
+            user, name: String(b.name || user).slice(0, 40), role: b.role,
+            active: true, pass: hashPass(String(b.pass)), createdAt: Date.now(),
+          });
+          authLogPush({ kind: "account", by: me.user, op: "add", target: user, role: b.role });
+        } else if (b.action === "update") {
+          const acc = state.accounts.get(String(b.user || ""));
+          if (!acc) return bad("notFound");
+          if ("role" in b) {
+            if (!ROLE_LV[b.role]) return bad("badRole");
+            if (acc.role === "admin" && b.role !== "admin" && adminCountWithout(acc.user) === 0) return bad("lastAdmin");
+            acc.role = b.role;
+          }
+          if ("active" in b) {
+            const on = b.active === true;
+            if (!on && acc.role === "admin" && adminCountWithout(acc.user) === 0) return bad("lastAdmin");
+            acc.active = on;
+          }
+          if ("name" in b) acc.name = String(b.name || acc.user).slice(0, 40);
+          if ("pass" in b && b.pass) {
+            if (String(b.pass).length < 8) return bad("shortPass");
+            acc.pass = hashPass(String(b.pass));
+          }
+          authLogPush({ kind: "account", by: me.user, op: "update", target: acc.user });
+        } else if (b.action === "delete") {
+          const acc = state.accounts.get(String(b.user || ""));
+          if (!acc) return bad("notFound");
+          if (acc.role === "admin" && adminCountWithout(acc.user) === 0) return bad("lastAdmin");
+          state.accounts.delete(acc.user);
+          for (const [t, s] of adminSessions) if (s.user === acc.user) adminSessions.delete(t); // 既存セッションも失効
+          authLogPush({ kind: "account", by: me.user, op: "delete", target: acc.user });
+        } else return bad("badAction");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, accounts: list() }));
+      });
+      return true;
+    }
+    res.writeHead(405);
+    res.end();
     return true;
   }
 
@@ -2037,8 +2202,11 @@ function handleDemoApi(req, res, url) {
   // フリーメッセージ欄などの設定（管理画面から変更し、予約サイトに即時反映）
   if (url.pathname === "/api/demo/settings") {
     if (req.method === "GET" || req.method === "HEAD") {
+      // 未ログイン（予約サイト）にはフォーム表示に必要な freeMessage のみ返す。
+      // 店舗マスタ・業務設定の中身はログイン済みの管理画面だけが取得できる
+      const body = isAdminSession(req) ? state.settings : { freeMessage: state.settings.freeMessage };
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(req.method === "HEAD" ? undefined : JSON.stringify(state.settings));
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(body));
       return true;
     }
     if (req.method === "POST") {
@@ -2123,10 +2291,18 @@ function handleDemoApi(req, res, url) {
     }
     if (req.method !== "POST") { res.writeHead(405); res.end(); return true; }
     if (url.searchParams.get("poll") === "1") {
+      // メール取込の手動実行は管理画面の操作（ログイン必須）
+      if (!roleAtLeast(req, "staff")) { denyApi(req, res); return true; }
       imapPollHotpepper((e2, r2) => {
         if (e2) { res.writeHead(409, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: e2.message })); }
         else { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, ...r2 })); }
       });
+      return true;
+    }
+    // 連携通知の受け口は、このパソコン上（メール取込・連携シミュレーション）からのみ。
+    // LANの他端末や外部からは予約を書き込めない（本番では連携先のAPIキー検証に相当）
+    if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || "")) {
+      denyApi(req, res);
       return true;
     }
     let raw = "";
@@ -2479,7 +2655,16 @@ function handleDemoApi(req, res, url) {
     req.on("data", (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
     req.on("end", () => {
       try {
-        const result = postSchedule(JSON.parse(raw || "{}"));
+        const body = JSON.parse(raw || "{}");
+        // スタッフマスタの編集（登録・削除）はマネージャー以上のみ。
+        // 予約・シフト・受付停止などの日常操作はスタッフ権限でも可能
+        if ((body.action === "staff" || body.action === "staffDelete") && !roleAtLeast(req, "manager")) {
+          const a = sessionAccount(req);
+          authLogPush({ kind: "api", user: a ? a.user : "", ok: false, path: "/api/demo/schedule#" + body.action, ip: req.socket.remoteAddress || "" });
+          denyApi(req, res);
+          return;
+        }
+        const result = postSchedule(body);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (e) {

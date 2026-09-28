@@ -113,31 +113,43 @@ function send404(res, head) {
 }
 
 // ---- セキュリティ ----
-// ・サーバーは 127.0.0.1 のみで待ち受けるため、同じネットワークの他の端末や
-//   インターネットからは一切接続できません（予約・顧客・会社情報は外に出ません）
-// ・データはこのパソコンのメモリ上のみ。メールも実際には送信しません
-// ・下の2つの検査で、悪意あるWebサイト経由のアクセス（DNSリバインディング・CSRF）も遮断します
-// 数字なしのURL用ホスト名（「〜.localhost」はブラウザが自動で自分のPCに解決する）
+// ・接続を受け付けるのは「このパソコン」と「同じネットワーク（Wi-Fi/LAN）のプライベートIP」のみ。
+//   インターネット側のアドレスからの接続は下の検査で全て拒否します
+// ・LANに開いても、管理画面と管理APIはすべてサーバー側でログイン・権限を検証します
+//   （URLを知っているだけでは、ページも内部データも一切見えません）
+// ・データはこのパソコンのメモリ上のみ（Single Source of Truth）。どの端末から
+//   開いても、このサーバーが返す同じ最新データが表示されます
+// ・下のHost/Origin検査で、悪意あるWebサイト経由のアクセス（DNSリバインディング・CSRF）も遮断します
+// 数字なしのURL用ホスト名（「〜.localhost」はブラウザが自分のPCに解決、
+// 「〜.local」はmDNS(Bonjour)配信により同じネットワークの他の端末から届く）
 const NAME_HOSTS = {
   "cn-ueno-health-and-beauty.localhost": "/",
   "cnsalon-board.localhost": "/admin/login",
+  // 他の端末（iPhone・iPad・別のPC）用のmDNS名
+  "cn-ueno-health-and-beauty.local": "/",
+  "cnsalon-board.local": "/admin/login",
   // 「.localhost」なしの短い名前（Macのhostsに登録すると使える）
   "cn-ueno-health-and-beauty": "/",
   "cnsalon-board": "/admin/login",
 };
-// 許可するホスト名は正式URLの2つ＋localhost/127.0.0.1のみ（旧別名・その他の名前は拒否＝URLを統一）
-const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty(\.localhost)?|cnsalon-board(\.localhost)?)(:\d+)?$/i;
-const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty(\.localhost)?|cnsalon-board(\.localhost)?)(:\d+)?$/i;
+// 許可するホスト名は正式URL＋mDNS名＋localhost/プライベートIPのみ（その他の名前は拒否）
+const HOST_NAMES = "cn-ueno-health-and-beauty(\\.localhost|\\.local)?|cnsalon-board(\\.localhost|\\.local)?";
+const PRIVATE_IPS = "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3}";
+const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
+const LOCAL_ORIGIN_RE = new RegExp(`^http:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
 
 const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const head = req.method === "HEAD";
 
-  // 接続元がこのパソコン（ループバック）以外なら即拒否。
-  // 数字なしURL用のポート80は全インターフェイスで待つ必要があるため、
-  // ここで外部からの接続を確実に遮断する（LAN・インターネットからは使えない）
-  const ra = req.socket.remoteAddress || "";
-  if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(ra)) {
+  // 接続元の検査：このパソコン（ループバック）と、同じネットワークのプライベートIP
+  // （Wi-Fi/LAN上のスタッフ端末）だけを許可し、インターネット側からの接続は全て拒否する。
+  // ※LANの端末にも、管理画面・管理APIはログインと権限のサーバー側検証が必ずかかる
+  const ra = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+  const raOk = ra === "127.0.0.1" || ra === "::1" ||
+    /^(10\.|192\.168\.|169\.254\.)/.test(ra) || /^172\.(1[6-9]|2\d|3[01])\./.test(ra) ||
+    /^(fe80:|fd)/i.test(ra);
+  if (!raOk) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
     return res.end("Forbidden");
   }
@@ -274,6 +286,29 @@ server.on("listening", () => {
   server80.on("listening", () => {
     console.log(`  予約サイト【${BOOKING_BRAND}】 : http://cn-ueno-health-and-beauty.localhost/`);
     console.log(`  管理画面 【${ADMIN_BRAND}】 : http://cnsalon-board.localhost/`);
+    // 同じWi-Fi/LANの他の端末（iPhone・iPad・別のPC・別のブラウザ）向けに、
+    // mDNS(Bonjour)で「〜.local」の名前を配信する（macOS標準のdns-sdを使用。失敗しても本体は動く）
+    try {
+      const os = require("os");
+      const { spawn, execFileSync } = require("child_process");
+      if (process.platform === "darwin") {
+        const ip = Object.values(os.networkInterfaces()).flat()
+          .find((i) => i && i.family === "IPv4" && !i.internal)?.address;
+        if (ip) {
+          // 前回起動の配信プロセスが残っていれば止める（IP変更後の古い配信を防ぐ）
+          try { execFileSync("/usr/bin/pkill", ["-f", "dns-sd -P (cn-ueno-health-and-beauty|cnsalon-board)"]); } catch {}
+          for (const h of ["cn-ueno-health-and-beauty", "cnsalon-board"]) {
+            const c = spawn("/usr/bin/dns-sd", ["-P", h, "_http._tcp", "local", "80", `${h}.local`, ip], { stdio: "ignore" });
+            c.on("error", () => {});
+            process.on("exit", () => { try { c.kill(); } catch {} });
+          }
+          console.log("  ほかの端末（同じWi-Fi）から:");
+          console.log(`    予約サイト : http://cn-ueno-health-and-beauty.local/`);
+          console.log(`    管理画面   : http://cnsalon-board.local/`);
+          console.log(`    名前で開けない端末は : http://${ip}/ （管理画面は http://${ip}/cnsalon-board ）`);
+        }
+      }
+    } catch {}
   });
   // macOSは 127.0.0.1 指定だと80番を開けないため全体で待ち、上のループバック検査で守る
   if (port === 5520) server80.listen(80);
