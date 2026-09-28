@@ -82,6 +82,18 @@
   </div>
 
   <div class="card">
+    <h2>サロンボードへの反映（自社予約 → ホットペッパー側の枠を塞ぐ）</h2>
+    <p style="font-size:13px;color:#555;margin:0 0 10px;line-height:1.8">
+      当システムに予約が入ると、ここに<b>転記待ち</b>として並びます。「コピー」でお客様情報を写し、
+      <a href="https://salonboard.com/login/" target="_blank" rel="noopener" style="color:#b08d4f;font-weight:700">サロンボード</a>
+      に予約（またはネット予約停止枠）として登録したら「反映済み」を押してください。
+      <b>変更・取消があった予約は自動でこのリストに戻ります。</b><br/>
+      <span style="color:#888;font-size:12px">※サロンボードには公開APIが無く、ID/パスワードでの自動書き込みは利用規約違反（アカウント停止リスク）となるため行いません。完全自動の双方向連携が必要な場合は、リクルート認定の連携サービス（かんざし・BeautyMerit等）のご契約が正規ルートです。</span>
+    </p>
+    <div id="sb-list"><p class="empty">読み込み中…</p></div>
+  </div>
+
+  <div class="card">
     <h2>受信履歴（最新50件）</h2>
     <div id="hp-log"><p class="empty">読み込み中…</p></div>
   </div>
@@ -157,6 +169,49 @@
   });
   loadLog();
   setInterval(loadLog, 3000);
+
+  // ---- サロンボード転記リスト ----
+  function renderSb(items) {
+    var box = document.getElementById("sb-list");
+    if (!items || !items.length) {
+      box.innerHTML = '<p class="empty">転記待ちの予約はありません。すべてサロンボードに反映済みです。</p>';
+      return;
+    }
+    var rows = items.map(function (it) {
+      var kc = it.kind === "取消" ? "res-ng" : it.kind === "変更" ? "res-cx" : "res-ok";
+      return "<tr><td class='" + kc + "'>" + esc(it.kind) + "</td>" +
+        "<td>" + esc(it.date) + " " + esc(it.time) + "</td>" +
+        "<td>" + esc(it.name) + (it.people > 1 ? "（" + it.people + "名）" : "") + "</td>" +
+        '<td class="menu">' + esc(it.menu) + "</td>" +
+        "<td>" + esc(it.staff) + "</td>" +
+        '<td><button type="button" class="sb-copy" data-copy="' + esc(it.date + " " + it.time + "／" + it.name + " 様／" + it.phone + "／" + it.menu + "／担当:" + it.staff + "／予約ID:" + it.ref) + '">コピー</button> ' +
+        '<button type="button" class="sb-done" data-done="' + esc(it.id) + '">反映済み</button></td></tr>';
+    }).join("");
+    box.innerHTML = "<table><thead><tr><th>種別</th><th>日時</th><th>お客様</th><th>メニュー</th><th>担当</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>";
+  }
+  function loadSb() {
+    fetch("/api/demo/sbsync", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { renderSb(j.items); })
+      .catch(function () {});
+  }
+  loadSb();
+  setInterval(loadSb, 5000);
+  document.addEventListener("click", function (e) {
+    var cp = e.target.closest(".sb-copy");
+    if (cp) {
+      var txt = cp.getAttribute("data-copy");
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+        .then(function () { cp.textContent = "コピー済"; setTimeout(function () { cp.textContent = "コピー"; }, 1500); })
+        .catch(function () { window.prompt("この内容をサロンボードに転記してください", txt); });
+      return;
+    }
+    var dn = e.target.closest(".sb-done");
+    if (dn) {
+      fetch("/api/demo/sbsync", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: dn.getAttribute("data-done") }) }).then(loadSb);
+    }
+  });
 
   document.getElementById("hp-form").addEventListener("submit", function (ev) {
     ev.preventDefault();

@@ -528,6 +528,7 @@ function postSchedule(body) {
       bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
       ev.assignments = ev.assignments.filter((a) => a.booking_id !== id);
       for (const sid of [staffId, ...others]) ev.assignments.push({ booking_id: id, staff_id: sid });
+      if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
       queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
       bump();
       return { ok: true };
@@ -564,6 +565,7 @@ function postSchedule(body) {
         total: c.price * n + (start >= 1320 ? 2000 * n : 0), base_price: c.price,
         nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
         staff: "none", customer_token: null,
+        sb_done: false, // サロンボードへの転記状態
       });
       state.bookingIndex.set(id, date);
       for (const sid of [staffId, ...cbOthers]) ev.assignments.push({ booking_id: id, staff_id: sid });
@@ -1574,6 +1576,7 @@ function createPublicBooking(body) {
     booth: "新規1(" + ((state.bookingSerial % 9) + 1) + ")",
     customer_gender: gpref === "female" ? "f" : gpref === "male" ? "m" : "",
     is_new: isRepeatEmail(String(body.email)) ? 0 : 1,
+    sb_done: false, // サロンボードへの転記状態（自社予約はHP側の枠も塞ぐ必要がある）
   });
   // 複数名の予約は、対応可能で空いているスタッフを人数分確保する（空き判定と同じ条件）
   const coAssignees = free.filter((sid) => sid !== assignee).slice(0, people - 1);
@@ -2093,6 +2096,62 @@ function handleDemoApi(req, res, url) {
       }
     });
     return true;
+  }
+
+  // ---- サロンボード転記（自社予約→ホットペッパー側の枠を塞ぐ運用サポート） ----
+  // サロンボードには公開APIが無く自動書込は規約違反になるため、
+  // 「転記待ちリスト＋ワンクリックコピー＋反映済みチェック」で確実に手動反映できるようにする
+  if (url.pathname === "/api/demo/sbsync") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      const today = todayJst();
+      const items = [];
+      for (let i = 0; i <= 62; i++) {
+        const d = addDays(today, i);
+        if (!state.events.has(d)) continue;
+        const ev2 = state.events.get(d);
+        for (const bk of ev2.bookings) {
+          if (bk.source === "hotpepper") continue; // HP発の予約は元がサロンボードなので転記不要
+          const staffNames = ev2.assignments.filter((a) => a.booking_id === bk.id)
+            .map((a) => state.staff.find((st) => st.id === a.staff_id)?.name).filter(Boolean);
+          const base = {
+            id: bk.id, ref: String(displayId(bk)), date: d,
+            time: fmtTime(d, bk.start_at) + "〜" + fmtTime(d, bk.end_at),
+            name: bk.name || "", phone: bk.phone || "", menu: bk.course_name || "",
+            people: bk.people || 1, staff: staffNames.join("・"),
+          };
+          if (bk.status === "confirmed" && !bk.sb_done) {
+            items.push({ ...base, kind: bk.sb_changed ? "変更" : "新規" });
+          } else if (bk.status !== "confirmed" && bk.sb_done) {
+            items.push({ ...base, kind: "取消" });
+          }
+        }
+      }
+      items.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ items }));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}");
+          const d = state.bookingIndex.get(String(b.id || ""));
+          const bk = d && ensureEvents(d).bookings.find((x) => x.id === b.id);
+          if (!bk) throw err(404, "notFound");
+          if (bk.status === "confirmed") { bk.sb_done = true; bk.sb_changed = false; }
+          else bk.sb_done = false; // 取消の反映を確認 → リストから消す
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (e) {
+          res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405); res.end(); return true;
   }
 
   // ---- 回数券：お客様向け ----
