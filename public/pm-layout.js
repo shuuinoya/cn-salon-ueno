@@ -616,6 +616,33 @@
     });
   }
 
+  // レールの「閉じる」は、どの状態のパネル（空き枠・予約詳細・休憩/業務フォーム）でも閉じられるようにする
+  // （元の実装は顧客検索パネルしか閉じないため、先にフォームの「戻る」を押してから閉じる）
+  if (!window.__pmRailClose) {
+    window.__pmRailClose = true;
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest && e.target.closest(".ledger-rail button");
+      if (!btn || btn.querySelector("small")?.textContent !== "閉じる") return;
+      const form = document.querySelector(".ledger-side .ledger-side-form");
+      if (!form) return; // 検索パネルはReact標準の切り替えで閉じる
+      // フォーム系パネル（空き枠・予約詳細・休憩/業務）は正規の×/戻るで閉じ、
+      // Reactの検索パネル切り替えは走らせない（走ると検索パネルが開いてしまう）
+      e.preventDefault();
+      e.stopPropagation();
+      const sidePanel = document.querySelector(".ledger-side");
+      const back = [...sidePanel.querySelectorAll("button")]
+        .find((b) => ["戻る", "×", "X"].includes(b.textContent.trim()) && !b.closest("#pm-np"));
+      back?.click();
+      // それでもパネルが残っていた場合（検索状態が重なっていた等）はもう一度閉じる
+      setTimeout(() => {
+        if (!document.querySelector(".ledger-side")) return;
+        const b2 = [...document.querySelectorAll(".ledger-rail button")]
+          .find((x) => x.querySelector("small")?.textContent === "閉じる");
+        if (b2 && !document.querySelector(".ledger-side .ledger-side-form")) b2.click();
+      }, 400);
+    }, true);
+  }
+
   // 店舗マスタ（業務設定）を定期取得し、営業時間外を台帳グリッドにグレー表示する
   async function refreshShop(force) {
     if (!force && window.__pmShopAt && Date.now() - window.__pmShopAt < 3000) return window.__pmShop;
@@ -650,14 +677,17 @@
   // 左上のロゴ：元サイトの5枚花びらは見せず、最初からログイン画面と同じ4枚花びら（白）にする
   // （文字の✿は環境によって色付き絵文字で表示されてしまうため、SVGで描く）
   function decorateLogo() {
-    const logo = document.querySelector(".ledger-logo");
-    if (!logo || logo.dataset.pmFlower) return;
-    logo.dataset.pmFlower = "1";
-    logo.textContent = "";
-    logo.innerHTML =
-      '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">' +
-      '<path fill="#fff" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/>' +
-      "</svg>";
+    // どの画面・どの操作の後でも必ずクローバーにする。
+    // Reactが中身を描き直して元の桜マークに戻っても、次の描画サイクルで即置き換える
+    document.querySelectorAll(".ledger-logo").forEach((logo) => {
+      if (logo.querySelector("svg.pm-clover")) return;
+      logo.dataset.pmFlower = "1";
+      logo.textContent = "";
+      logo.innerHTML =
+        '<svg class="pm-clover" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">' +
+        '<path fill="#fff" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/>' +
+        "</svg>";
+    });
   }
 
   // 表示中の日付のスケジュール全体（予約・業務・担当）を取得して共有する

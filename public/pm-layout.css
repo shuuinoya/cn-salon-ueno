@@ -140,8 +140,9 @@ main.ledger-app .ledger-logo {
   justify-content: center;
 }
 main.ledger-app .ledger-logo svg { display: block; }
-/* 置き換え前の元マーク（5枚花びら）は一瞬も見せない */
-main.ledger-app .ledger-logo:not([data-pm-flower]) > * { visibility: hidden; }
+/* 元の桜マークはどの画面・どの瞬間も見せない（クローバー以外のロゴ中身は非表示） */
+.ledger-logo svg:not(.pm-clover),
+.ledger-logo img { display: none !important; }
 
 /* ---- ヘッダー右：警告バッジ＋ユーザー表示 ---- */
 .pm-alert {
