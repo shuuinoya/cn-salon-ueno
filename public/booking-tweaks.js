@@ -124,6 +124,7 @@
   const usableTickets = () => (myTickets || []).filter((t) => t.status === "有効" && t.uses_left > 0);
 
   // メニュー選択ページ：会員にはメニュー一覧の一番上に回数券の案内を出す（非会員には出さない）
+  // 見た目は他のメニューセクションとまったく同じ（list-card＋menu-row構造をそのまま使う）
   async function decorateTicketBanner() {
     if (location.pathname !== "/book") return;
     if (!isMember()) return;
@@ -131,35 +132,29 @@
     if (!firstCard || document.getElementById("fm-tkbanner")) return;
     await loadMyTickets();
     const use = usableTickets();
-    let planRows = "";
+    let plans = [];
     try {
-      const plans = (await (await origFetch("/api/tickets/plans", { cache: "no-store" })).json()).plans || [];
-      planRows = plans.map((pl) => '<div class="fm-tk-plan"><span>' + esc2(pl.name) + "（" + pl.uses + "回分・有効期限は購入日から1年間）</span><b>" +
-        pl.price.toLocaleString("ja-JP") + "円</b></div>").join("");
+      plans = (await (await origFetch("/api/tickets/plans", { cache: "no-store" })).json()).plans || [];
     } catch {}
+    if (!plans.length && !use.length) return;
     const box = document.createElement("section");
     box.id = "fm-tkbanner";
     box.className = "list-card";
-    box.innerHTML =
-      '<div class="fm-tk-in">' +
-      '<b>会員様向け 回数券</b>' +
-      (use.length
-        ? "<p>保有中：" + use.map((t) => esc2(t.plan_name) + "（残り " + t.uses_left + "回）").join("、") +
-          "<br/>ご予約の最終画面で「回数券を使用する」を選ぶと、コース料金が回数券でのお支払いになります。</p>"
-        : "<p>お得な回数券をご用意しています。マイページからご購入いただけます。</p>") +
-      planRows +
-      '<a class="fm-tk-link" href="/mypage#tickets">回数券の確認・購入はこちら</a>' +
-      "</div>";
+    const rows = plans.map((pl) =>
+      '<a href="/mypage#tickets" class="menu-row">' +
+      '<img class="course-thumb" src="/fm-favicon.svg" alt="' + esc2(pl.name) + '"/>' +
+      '<span class="menu-row-copy"><b>' + esc2(pl.name) + "（" + pl.uses + "回分・有効期限は購入日から1年間）" +
+      (use.some((t) => t.plan_name === pl.name)
+        ? "　現在の残り回数 " + use.filter((t) => t.plan_name === pl.name).reduce((a, t) => a + t.uses_left, 0) + "回"
+        : "") +
+      "</b><small>" + pl.price.toLocaleString("ja-JP") + "円</small></span>" +
+      '<i aria-hidden="true">›</i></a>').join("");
+    box.innerHTML = "<h2>会員様向け 回数券</h2>" + '<div class="list-body">' + rows + "</div>";
     firstCard.parentElement.insertBefore(box, firstCard);
     if (!document.getElementById("fm-tk-style")) {
       const st = document.createElement("style");
       st.id = "fm-tk-style";
       st.textContent =
-        "#fm-tkbanner .fm-tk-in{padding:16px 20px}" +
-        "#fm-tkbanner b{color:#8a6a33;font-size:15px}" +
-        "#fm-tkbanner p{margin:8px 0;font-size:13px;line-height:1.8;color:#555}" +
-        "#fm-tkbanner .fm-tk-link{color:#b08d4f;font-weight:700;text-decoration:none;font-size:13px}" +
-        "#fm-tkbanner .fm-tk-plan{display:flex;justify-content:space-between;font-size:13px;padding:6px 2px;border-top:1px dashed #e5d9c8;color:#555}" +
         "#fm-ticket-pick{margin:18px 0 6px}" +
         "#fm-ticket-pick .fm-h{font-size:15px;font-weight:700;margin:0 0 12px}" +
         "#fm-ticket-pick .fm-box{background:#f6ecd9;border-radius:8px;padding:14px 18px;font-size:14px;line-height:1.9}" +
