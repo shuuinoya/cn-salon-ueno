@@ -120,10 +120,13 @@ function send404(res, head) {
 const NAME_HOSTS = {
   "cn-ueno-health-and-beauty.localhost": "/",
   "cnsalon-board.localhost": "/admin/login",
+  // 「.localhost」なしの短い名前（Macのhostsに登録すると使える）
+  "cn-ueno-health-and-beauty": "/",
+  "cnsalon-board": "/admin/login",
 };
 // 許可するホスト名は正式URLの2つ＋localhost/127.0.0.1のみ（旧別名・その他の名前は拒否＝URLを統一）
-const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty\.localhost|cnsalon-board\.localhost)(:\d+)?$/i;
-const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty\.localhost|cnsalon-board\.localhost)(:\d+)?$/i;
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty(\.localhost)?|cnsalon-board(\.localhost)?)(:\d+)?$/i;
+const LOCAL_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost|cn-ueno-health-and-beauty(\.localhost)?|cnsalon-board(\.localhost)?)(:\d+)?$/i;
 
 const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
