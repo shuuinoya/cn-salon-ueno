@@ -123,6 +123,7 @@
     <a href="#home" id="tab-home">ホーム</a>
     <a href="#resv" id="tab-resv">予約情報</a>
     <a href="#member" id="tab-member">会員情報</a>
+    <a href="#tickets" id="tab-tickets">回数券</a>
   </div>
   <main id="main"></main>
 
@@ -164,6 +165,10 @@
   const MYKEY = "cn-mypage";
   const store = () => { try { return JSON.parse(localStorage.getItem(MYKEY) || "[]"); } catch { return []; } };
   const saveStore = (list) => { try { localStorage.setItem(MYKEY, JSON.stringify(list.slice(-20))); } catch {} };
+  // 回数券（購入時に発行されるid+tokenの組。表示内容は毎回サーバーから取得する）
+  const TKKEY = "cn-tickets";
+  const tkStore = () => { try { return JSON.parse(localStorage.getItem(TKKEY) || "[]"); } catch { return []; } };
+  const tkSave = (list) => { try { localStorage.setItem(TKKEY, JSON.stringify(list.slice(-30))); } catch {} };
 
   // メールの取消リンク（/mypage?id=..&token=..）から来た場合は登録して表示
   if (q.get("id") && q.get("token")) {
@@ -179,7 +184,24 @@
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   let rows = []; // {entry, bk}
+  let myTickets = [];
+  let ticketPlans = [];
+  async function loadTickets() {
+    myTickets = [];
+    try {
+      const items = tkStore();
+      if (items.length) {
+        const r = await fetch("/api/tickets/mine", { method: "POST",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }), cache: "no-store" });
+        myTickets = (await r.json()).tickets || [];
+      }
+    } catch {}
+    try {
+      ticketPlans = (await (await fetch("/api/tickets/plans", { cache: "no-store" })).json()).plans || [];
+    } catch {}
+  }
   async function loadAll() {
+    await loadTickets();
     const list = store();
     rows = [];
     for (const entry of list) {
@@ -203,6 +225,9 @@
       '<span class="when">' + t.date(row.bk.serviceDate, hm(row.bk.start)) + "</span></div>" +
       '<div class="rowline"><span class="k">' + t.menu + "</span><span>" + esc(row.bk.courseName) + "</span></div>" +
       '<div class="rowline"><span class="k">' + t.total + "</span><span>" + t.yen(row.bk.total) + "</span></div>" +
+      (row.bk.ticket_name
+        ? '<div class="rowline"><span class="k">回数券</span><span>' + esc(row.bk.ticket_name) + "（残り " + (row.bk.ticket_left_after ?? "-") + "回）</span></div>"
+        : "") +
       (withButtons && !cancelled && row.bk.start > Date.now()
         ? '<div class="btnrow"><button type="button" class="cancel" data-cancel="' + esc(row.entry.id) + '">' + t.cancelBtn + "</button></div>"
         : "") +
@@ -215,12 +240,17 @@
     document.getElementById("tab-resv").textContent = t.resv;
     document.getElementById("tab-member").textContent = t.member;
     document.getElementById("nav-home").textContent = t.home;
+    document.getElementById("tab-tickets").textContent = pageLang === "en" ? "Tickets" : "回数券";
     const tab = (location.hash || "#home").slice(1);
-    for (const id of ["home", "resv", "member"]) {
+    for (const id of ["home", "resv", "member", "tickets"]) {
       document.getElementById("tab-" + id).classList.toggle("active", tab === id);
     }
     const main = document.getElementById("main");
     const name = store().map((x) => x.name).filter(Boolean).pop() || "";
+    if (tab === "tickets") {
+      main.innerHTML = ticketsView();
+      return;
+    }
     if (!rows.length && tab !== "member") {
       main.innerHTML = '<div class="card"><p class="empty">' + t.empty + "</p></div>";
       return;
@@ -236,7 +266,12 @@
         "</div>" +
         '<div class="card"><h2>' + t.member + "</h2>" +
         '<div class="rowline"><span class="k">' + t.name + "</span><span>" + esc(name) + "</span></div>" +
-        '<div class="btnrow"><a class="gold" href="#member">' + t.member + "</a></div></div>";
+        '<div class="btnrow"><a class="gold" href="#member">' + t.member + "</a></div></div>" +
+        '<div class="card"><h2>回数券</h2>' +
+        (myTickets.length
+          ? myTickets.map((tk) => '<div class="rowline"><span class="k">' + esc(tk.plan_name) + '</span><span>残り ' + tk.uses_left + "回</span></div>").join("")
+          : '<p class="empty">お得な回数券をご用意しています。</p>') +
+        '<div class="btnrow"><a class="gold" href="#tickets">回数券を見る</a></div></div>';
     } else if (tab === "resv") {
       main.innerHTML = rows.map((r) => bookingCard(r, true)).join("");
     } else {
@@ -246,7 +281,56 @@
     }
   }
 
+  const jd = (iso) => String(iso || "").slice(0, 10);
+  function ticketsView() {
+    const own = myTickets.map((tk) => {
+      const stCls = tk.status === "有効" ? "" : " gray";
+      return '<div class="card">' +
+        '<div class="rowline"><span class="badge' + stCls + '">' + esc(tk.status) + '</span><span class="when">' + esc(tk.plan_name) + "</span></div>" +
+        '<div class="rowline"><span class="k">購入日</span><span>' + jd(tk.purchased_at) + "</span></div>" +
+        '<div class="rowline"><span class="k">利用可能回数</span><span>' + tk.uses_total + "回</span></div>" +
+        '<div class="rowline"><span class="k">残り回数</span><span><b style="font-size:16px">' + tk.uses_left + '回</b>（利用済み ' + tk.used + "回）</span></div>" +
+        '<div class="rowline"><span class="k">有効期限</span><span>' + jd(new Date(tk.expires_at + 9 * 3600e3).toISOString()) + "</span></div>" +
+        "</div>";
+    }).join("");
+    const plans = ticketPlans.map((pl) =>
+      '<div class="card">' +
+      '<div class="rowline"><span class="when">' + esc(pl.name) + '</span><span><b>' + pl.price.toLocaleString("ja-JP") + "円</b></span></div>" +
+      '<div class="rowline"><span class="k">' + pl.uses + "回分／購入から" + pl.validDays + "日間有効</span></div>" +
+      '<p class="empty" style="margin:6px 0">' + esc(pl.description || "") + "</p>" +
+      '<div class="btnrow"><button type="button" class="gold" style="border:0;cursor:pointer" data-buy="' + esc(pl.id) + '">この回数券を購入</button></div>' +
+      "</div>").join("");
+    return '<div class="card"><h2>保有中の回数券</h2>' +
+      (own || '<p class="empty">保有中の回数券はありません。</p>') + "</div>" +
+      '<div class="card"><h2>回数券のご購入</h2>' +
+      '<p class="empty" style="margin:0 0 8px">お支払いは店頭にて承ります。ご予約時に「回数券を使用する」を選ぶと、1回のご予約で1回分を使用します。</p>' +
+      (plans || '<p class="empty">現在販売中の回数券はありません。</p>') + "</div>";
+  }
+
   document.addEventListener("click", async (e) => {
+    const buyId = e.target.closest("[data-buy]")?.dataset.buy;
+    if (buyId) {
+      const defName = store().map((x) => x.name).filter(Boolean).pop() || "";
+      const nm = window.prompt("お名前を入力してください", defName);
+      if (!nm) return;
+      const em = window.prompt("メールアドレスを入力してください（ご予約時と同じアドレス）", "");
+      if (!em) return;
+      try {
+        const r = await fetch("/api/tickets/purchase", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId: buyId, name: nm.trim(), email: em.trim() }) });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "purchase");
+        tkSave([...tkStore(), { id: j.ticket.id, token: j.ticket.token }]);
+        window.alert("回数券を購入しました。お支払いは店頭にて承ります。\n残り回数：" + j.ticket.uses_left + "回");
+      } catch {
+        window.alert("購入できませんでした。入力内容をご確認ください。");
+        return;
+      }
+      await loadTickets();
+      render();
+      return;
+    }
     const id = e.target.closest("[data-cancel]")?.dataset.cancel;
     if (!id) return;
     const row = rows.find((r) => r.entry.id === id);

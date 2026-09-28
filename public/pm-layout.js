@@ -264,6 +264,7 @@
         ["店舗情報", openShopSettings],
         ["スタッフ情報", () => staffBtn?.click()],
         ["メニュー一覧", openMenuList],
+        ["回数券管理", openTicketAdmin],
         ["ホットペッパー連携", () => { location.href = "/admin/hotpepper"; }],
         ["ブース情報", null],
         ["経費マスタ", null],
@@ -803,6 +804,7 @@
         el.classList.add("pm-ev", "pm-ev-" + col);
         let l1 = "";
         if (bk.source === "hotpepper") l1 += badge("hp", "HP");
+        if (bk.ticket_id) l1 += badge("tk", "券");
         if (!nominated && bk.staff === "male") l1 += badge("m", "男");
         if (!nominated && bk.staff === "female") l1 += badge("f", "女");
         if (bk.multi || (bk.people || 1) > 1) l1 += badge("multi", "複");
@@ -852,6 +854,7 @@
       ["施術コメント", bk.comment || ""],
       ["備考1", ""],
       ["備考2", ""],
+      ...(bk.ticket_id ? [["回数券", (bk.ticket_name || "") + "（残り" + (bk.ticket_left_after ?? "-") + "回）"]] : []),
       ["会計情報", bk.paid_amount ? "会計済み（" + bk.paid_amount.toLocaleString("ja-JP") + "円）" : "未会計"],
     ];
     let tip = document.getElementById("pm-evtip");
@@ -1028,7 +1031,9 @@
         '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="edit">編集</button><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
         '<table class="pm-table"><tbody>' +
           [["時間", hh + ":" + mm], ["ブース", esc(bkRow?.booth || "新規1(1)")], ["スタッフ", esc(staffName) + ' <span class="pm-star">★</span>'],
-           ["コース", esc((bkRow?.course_label || menu).slice(0, 24))], ["オプション", ""], ["こだわり", ""],
+           ["コース", esc((bkRow?.course_label || menu).slice(0, 24))], ["オプション", ""],
+           ...(bkRow?.ticket_id ? [["回数券", esc(bkRow.ticket_name || "") + "（残り" + (bkRow.ticket_left_after ?? "-") + "回）"]] : []),
+           ["こだわり", ""],
            ["予約タグ", "TORICOM"], ["施術タグ", ""], ["施術コメント", ""]]
             .map(([k, v]) => "<tr><th>" + k + "</th><td>" + v + "</td></tr>").join("") +
         "</tbody></table>" +
@@ -1781,6 +1786,150 @@
         window.alert("保存しました。予約サイトのフリーメッセージ欄に反映されます。");
       } catch {
         window.alert("保存できませんでした。接続を確認して再度お試しください。");
+      }
+    });
+  }
+
+  // 店舗情報：回数券管理（プランの作成・編集・公開と、顧客保有券の残数・履歴・調整）
+  async function openTicketAdmin() {
+    document.getElementById("pm-ticket-modal")?.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "pm-ticket-modal";
+    wrap.innerHTML =
+      '<section role="dialog" aria-modal="true">' +
+      "<h2>店舗マスタ｜回数券管理</h2>" +
+      '<p class="pm-shop-sub">回数券の作成・編集・公開/非公開と、お客様が保有する回数券の残り回数・利用履歴の確認ができます。残数の手動変更は必ず履歴に残ります。</p>' +
+      "<h3 class=\"pm-tk-h\">回数券プラン</h3>" +
+      '<div class="pm-menu-new">' +
+      '<input type="text" id="pm-tk-name" placeholder="回数券の名称（例：回数券 5回券）" maxlength="120">' +
+      '<input type="number" id="pm-tk-price" placeholder="価格(円)" min="0" step="100">' +
+      '<input type="number" id="pm-tk-uses" placeholder="回数" min="1" max="200">' +
+      '<input type="number" id="pm-tk-days" placeholder="有効日数" min="1" max="3650">' +
+      '<button type="button" class="pm-red" id="pm-tk-add">追加</button>' +
+      "</div>" +
+      '<div class="pm-tk-plans">読み込み中…</div>' +
+      "<h3 class=\"pm-tk-h\">お客様の保有回数券</h3>" +
+      '<div class="pm-tk-list">読み込み中…</div>' +
+      '<div class="pm-shop-actions"><button type="button" id="pm-tk-close">閉じる</button></div>' +
+      "</section>";
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.querySelector("#pm-tk-close").addEventListener("click", close);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const jd = (v) => {
+      if (!v) return "";
+      const ms = typeof v === "number" ? v : Date.parse(v);
+      return new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
+    };
+
+    async function loadPlans() {
+      const box = wrap.querySelector(".pm-tk-plans");
+      try {
+        const plans = (await (await fetch("/api/demo/ticket-plans", { cache: "no-store" })).json()).plans || [];
+        box.innerHTML = plans.length ? plans.map((p2) =>
+          '<div class="pm-menu-item" data-plan="' + esc(p2.id) + '">' +
+          '<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120">' +
+          '<input type="number" class="tk-price" value="' + p2.price + '" min="0" step="100">' +
+          '<input type="number" class="tk-uses" value="' + p2.uses + '" min="1" max="200" title="回数">' +
+          '<input type="number" class="tk-days" value="' + p2.validDays + '" min="1" max="3650" title="有効日数">' +
+          '<span class="pm-tk-cap">' + p2.uses + "回／" + p2.validDays + "日間有効</span>" +
+          '<label class="pm-tk-pub"><input type="checkbox" class="tk-active"' + (p2.active ? " checked" : "") + "> 公開</label>" +
+          '<button type="button" class="pm-red tk-save">変更</button>' +
+          '<button type="button" class="tk-del">削除</button>' +
+          "</div>").join("") : '<p class="pm-tk-empty">プランがありません。上の欄から追加してください。</p>';
+      } catch { box.textContent = "読み込みに失敗しました"; }
+    }
+    async function loadTickets() {
+      const box = wrap.querySelector(".pm-tk-list");
+      try {
+        const tks = (await (await fetch("/api/demo/tickets", { cache: "no-store" })).json()).tickets || [];
+        if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; return; }
+        box.innerHTML =
+          '<table class="pm-tk-table"><thead><tr><th>顧客名</th><th>回数券</th><th>購入日</th><th>初期</th><th>利用済</th><th>残り</th><th>有効期限</th><th>状態</th><th></th></tr></thead><tbody>' +
+          tks.map((t) =>
+            '<tr data-tk="' + esc(t.id) + '"><td>' + esc(t.buyer_name) + "<br><small>" + esc(t.buyer_email) + "</small></td>" +
+            "<td>" + esc(t.plan_name) + "</td><td>" + jd(t.purchased_at) + "</td>" +
+            "<td>" + t.uses_total + "回</td><td>" + t.used + "回</td><td><b>" + t.uses_left + "回</b></td>" +
+            "<td>" + jd(t.expires_at) + "</td><td>" + esc(t.status) + "</td>" +
+            '<td><button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-adj">調整</button></td></tr>' +
+            '<tr class="pm-tk-histrow" hidden><td colspan="9">' +
+            t.history.map((h) =>
+              esc(String(h.at).replace("T", " ").slice(0, 16)) + "　" +
+              ({ purchase: "購入", use: "利用", refund: "返却", adjust: "残数調整", extend: "期限変更" }[h.type] || h.type) +
+              (h.ref ? "（予約ID " + esc(h.ref) + "）" : "") +
+              "　" + (h.delta > 0 ? "+" : "") + h.delta + "回 → 残り" + h.left_after + "回" +
+              (h.note ? "　※" + esc(h.note) : "")).join("<br>") +
+            "</td></tr>").join("") +
+          "</tbody></table>";
+      } catch { box.textContent = "読み込みに失敗しました"; }
+    }
+    loadPlans();
+    loadTickets();
+
+    wrap.addEventListener("click", async (e) => {
+      const planRow = e.target.closest("[data-plan]");
+      if (e.target.id === "pm-tk-add") {
+        const body = {
+          action: "add",
+          name: wrap.querySelector("#pm-tk-name").value.trim(),
+          price: Number(wrap.querySelector("#pm-tk-price").value),
+          uses: Number(wrap.querySelector("#pm-tk-uses").value),
+          validDays: Number(wrap.querySelector("#pm-tk-days").value),
+        };
+        const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!r.ok) { window.alert("名称・価格・回数（1〜200）・有効日数（1〜3650）を確認してください。"); return; }
+        wrap.querySelector("#pm-tk-name").value = "";
+        loadPlans();
+        return;
+      }
+      if (planRow && e.target.classList.contains("tk-save")) {
+        const body = {
+          action: "update", id: planRow.dataset.plan,
+          name: planRow.querySelector(".tk-name").value.trim(),
+          price: Number(planRow.querySelector(".tk-price").value),
+          uses: Number(planRow.querySelector(".tk-uses").value),
+          validDays: Number(planRow.querySelector(".tk-days").value),
+        };
+        const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!r.ok) { window.alert("入力値を確認してください。"); return; }
+        loadPlans();
+        return;
+      }
+      if (planRow && e.target.classList.contains("tk-active")) {
+        await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "toggle", id: planRow.dataset.plan, active: e.target.checked }) });
+        return;
+      }
+      if (planRow && e.target.classList.contains("tk-del")) {
+        if (!window.confirm("この回数券プランを削除しますか？（販売済みの回数券はそのまま利用できます）")) return;
+        await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", id: planRow.dataset.plan }) });
+        loadPlans();
+        return;
+      }
+      const tkRow = e.target.closest("[data-tk]");
+      if (tkRow && e.target.classList.contains("tk-hist")) {
+        const hist = tkRow.nextElementSibling;
+        if (hist) hist.hidden = !hist.hidden;
+        return;
+      }
+      if (tkRow && e.target.classList.contains("tk-adj")) {
+        const d = window.prompt("残り回数の増減を入力してください（例：-1、+2。期限だけ変える場合は0）", "0");
+        if (d === null) return;
+        const ext = window.prompt("有効期限の延長日数を入力してください（例：30。変えない場合は0）", "0");
+        if (ext === null) return;
+        const note = window.prompt("調整理由（必須・履歴に残ります）", "");
+        if (!note) { window.alert("調整理由は必須です。"); return; }
+        const r = await fetch("/api/demo/tickets", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "adjust", id: tkRow.dataset.tk, usesDelta: Number(d) || 0, extendDays: Number(ext) || 0, note }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          window.alert(j.error === "outOfRange" ? "残り回数は0〜初期回数の範囲でしか変更できません。" : "調整できませんでした。");
+          return;
+        }
+        loadTickets();
+        return;
       }
     });
   }

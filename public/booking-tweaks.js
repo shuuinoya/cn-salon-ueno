@@ -65,9 +65,27 @@
   const saveStore = (list) => { try { localStorage.setItem(MYKEY, JSON.stringify(list.slice(-20))); } catch {} };
   const origFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
+    // 予約送信時：回数券が選択されていれば、リクエストに券IDとトークンを付与する
+    // （残数の判定・減算はすべてサーバー側。ここは選択内容を渡すだけ）
+    try {
+      const u0 = typeof input === "string" ? input : input?.url || "";
+      if (u0.includes("/api/bookings") && !u0.includes("cancel") && init?.method === "POST" && window.__fmTicketSel) {
+        const b0 = JSON.parse(init.body || "{}");
+        b0.ticketId = window.__fmTicketSel.id;
+        b0.ticketToken = window.__fmTicketSel.token;
+        init = { ...init, body: JSON.stringify(b0) };
+      }
+    } catch {}
     const res = await origFetch(input, init);
     try {
       const u = typeof input === "string" ? input : input?.url || "";
+      if (u.includes("/api/bookings") && !u.includes("cancel") && init?.method === "POST" && !res.ok) {
+        const j2 = await res.clone().json().catch(() => ({}));
+        const msg = { ticketEmpty: "回数券の残り回数が0のため、ご予約いただけません。",
+          ticketExpired: "回数券の有効期限が切れているため、ご予約いただけません。",
+          ticketInvalid: "回数券の情報を確認できませんでした（ご予約時のメールアドレスが購入時と一致している必要があります）。" }[j2.error];
+        if (msg) window.alert(msg);
+      }
       if (u.includes("/api/bookings") && !u.includes("cancel") && init?.method === "POST" && res.ok) {
         const j = await res.clone().json();
         const body = JSON.parse(init.body || "{}");
@@ -77,10 +95,109 @@
           saveStore(list);
           try { localStorage.setItem("fm-lang", body.language || "ja"); } catch {}
         }
+        if (j.ticketLeft !== undefined && window.__fmTicketSel) {
+          try { sessionStorage.setItem("fm-ticket-used",
+            JSON.stringify({ name: window.__fmTicketSel.name, left: j.ticketLeft })); } catch {}
+        }
       }
     } catch {}
     return res;
   };
+
+  // ---- 回数券（会員向け）：保有券の取得・メニュー最上部の案内・予約時の選択 ----
+  const tkItems = () => { try { return JSON.parse(localStorage.getItem("cn-tickets") || "[]"); } catch { return []; } };
+  const isMember = () => store().length > 0 || tkItems().length > 0; // 会員＝マイページ登録済み（表示の出し分けのみ。判定処理はすべてサーバー側）
+  let myTickets = null;
+  async function loadMyTickets() {
+    if (myTickets !== null) return myTickets;
+    myTickets = [];
+    const items = tkItems();
+    if (items.length) {
+      try {
+        const r = await origFetch("/api/tickets/mine", { method: "POST",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }), cache: "no-store" });
+        myTickets = (await r.json()).tickets || [];
+      } catch {}
+    }
+    return myTickets;
+  }
+  const usableTickets = () => (myTickets || []).filter((t) => t.status === "有効" && t.uses_left > 0);
+
+  // メニュー選択ページ：会員にはメニュー一覧の一番上に回数券の案内を出す（非会員には出さない）
+  async function decorateTicketBanner() {
+    if (location.pathname !== "/book") return;
+    if (!isMember()) return;
+    const firstCard = document.querySelector(".list-card");
+    if (!firstCard || document.getElementById("fm-tkbanner")) return;
+    await loadMyTickets();
+    const use = usableTickets();
+    const box = document.createElement("section");
+    box.id = "fm-tkbanner";
+    box.className = "list-card";
+    box.innerHTML =
+      '<div class="fm-tk-in">' +
+      '<b>会員様向け 回数券</b>' +
+      (use.length
+        ? "<p>保有中：" + use.map((t) => esc2(t.plan_name) + "（残り " + t.uses_left + "回）").join("、") +
+          "<br/>ご予約の最終画面で「回数券を使用する」を選ぶと、コース料金が回数券でのお支払いになります。</p>"
+        : "<p>お得な回数券をご用意しています。マイページからご購入いただけます。</p>") +
+      '<a class="fm-tk-link" href="/mypage#tickets">回数券の確認・購入はこちら</a>' +
+      "</div>";
+    firstCard.parentElement.insertBefore(box, firstCard);
+    if (!document.getElementById("fm-tk-style")) {
+      const st = document.createElement("style");
+      st.id = "fm-tk-style";
+      st.textContent =
+        "#fm-tkbanner .fm-tk-in{padding:16px 20px}" +
+        "#fm-tkbanner b{color:#8a6a33;font-size:15px}" +
+        "#fm-tkbanner p{margin:8px 0;font-size:13px;line-height:1.8;color:#555}" +
+        "#fm-tkbanner .fm-tk-link{color:#b08d4f;font-weight:700;text-decoration:none;font-size:13px}" +
+        "#fm-ticket-pick{margin:18px 0 6px}" +
+        "#fm-ticket-pick .fm-h{font-size:15px;font-weight:700;margin:0 0 12px}" +
+        "#fm-ticket-pick .fm-box{background:#f6ecd9;border-radius:8px;padding:14px 18px;font-size:14px;line-height:1.9}" +
+        "#fm-ticket-pick label{display:block;font-weight:400;margin:2px 0}" +
+        "#fm-ticket-pick .fm-tk-note{font-size:12px;color:#8a6a33;margin:6px 0 0}";
+      document.head.appendChild(st);
+    }
+  }
+  const esc2 = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+  // 予約フォーム：使用する回数券を選べるようにする（選択内容と残数を明示）
+  async function decorateTicketPick() {
+    const form = document.querySelector("form.booking-form");
+    if (!form || document.getElementById("fm-ticket-pick")) return;
+    if (!isMember()) return;
+    const anchor = document.getElementById("fm-notice") || form.querySelector('button[type="submit"]');
+    if (!anchor) return;
+    await loadMyTickets();
+    const use = usableTickets();
+    if (!use.length) return;
+    const sec = document.createElement("section");
+    sec.id = "fm-ticket-pick";
+    const jd2 = (ms2) => new Date(ms2 + 9 * 3600e3).toISOString().slice(0, 10);
+    sec.innerHTML =
+      '<h2 class="fm-h">回数券</h2>' +
+      '<div class="fm-box">' +
+      '<label><input type="radio" name="fm-tk" value="" checked> 使用しない</label>' +
+      use.map((t, i) => '<label><input type="radio" name="fm-tk" value="' + i + '"> ' +
+        esc2(t.plan_name) + "（残り " + t.uses_left + "回・有効期限 " + jd2(t.expires_at) + "）</label>").join("") +
+      '<p class="fm-tk-note" id="fm-tk-note"></p>' +
+      "</div>";
+    anchor.before(sec);
+    sec.addEventListener("change", () => {
+      const v = sec.querySelector('input[name="fm-tk"]:checked')?.value;
+      const note = document.getElementById("fm-tk-note");
+      if (v === "" || v === undefined) {
+        window.__fmTicketSel = null;
+        note.textContent = "";
+        return;
+      }
+      const t = use[Number(v)];
+      const item = tkItems().find((x) => x.id === t.id);
+      window.__fmTicketSel = { id: t.id, token: item?.token || "", name: t.plan_name };
+      note.textContent = "この予約で1回分を使用します（ご予約後の残り " + (t.uses_left - 1) + "回）。コース料金は回数券でのお支払いになります。";
+    });
+  }
 
   // ---- 同意部分：本物と同じ「ご来店に際しての注意事項＋確認しました＋同意して予約する」に ----
   function decorateConsent() {
@@ -407,6 +524,22 @@
   }
 
   load().then(apply);
-  setInterval(() => { apply(); decorateConsent(); decorateComplete(); }, 700);
+  function decorateTicketComplete() {
+    if (!location.pathname.includes("/book/complete")) return;
+    let used = null;
+    try { used = JSON.parse(sessionStorage.getItem("fm-ticket-used") || "null"); } catch {}
+    if (!used) return;
+    const dl = document.querySelector(".booking-receipt dl");
+    if (!dl || dl.dataset.fmTicket) return;
+    dl.dataset.fmTicket = "1";
+    const dt = document.createElement("dt");
+    dt.textContent = "回数券";
+    const dd = document.createElement("dd");
+    dd.textContent = (used.name ? used.name + "を" : "") + "1回使用（残り " + used.left + "回）";
+    dl.appendChild(dt);
+    dl.appendChild(dd);
+  }
+
+  setInterval(() => { apply(); decorateConsent(); decorateComplete(); decorateTicketBanner(); decorateTicketPick(); decorateTicketComplete(); }, 700);
   setInterval(() => { load(); }, 15000);
 })();

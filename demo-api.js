@@ -306,6 +306,16 @@ const state = {
   bookingIndex: new Map(), // 予約ID -> 日付
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
   hpKeys: new Map(),       // ホットペッパー連携の予約番号 -> 予約ID（重複受信を防ぐ）
+  // 回数券：プラン（管理画面で作成・編集・公開）と発行済み回数券（顧客に紐付く）
+  ticketPlans: new Map([
+    ["tp-5", { id: "tp-5", name: "回数券 5回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 30000, uses: 5, validDays: 90, active: 1 }],
+    ["tp-10", { id: "tp-10", name: "回数券 10回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 55000, uses: 10, validDays: 180, active: 1 }],
+    ["tp-20", { id: "tp-20", name: "回数券 20回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 100000, uses: 20, validDays: 365, active: 1 }],
+  ]),
+  ticketPlanSerial: 0,
+  tickets: new Map(),            // ticketId -> 回数券（残数・履歴つき）
+  ticketSerial: 0,
+  ticketUseByBooking: new Map(), // 予約ID -> ticketId（同じ予約での二重消費を防ぐ）
   hpSeenUids: new Set(),   // メール取込で走査済みのメール番号（毎分の再解析を避ける）
   hpLog: [],               // ホットペッパー連携の受信履歴（管理画面の連携ページに表示）
   reports: new Map(),      // 営業実績（日報）の入力内容 date -> {weather, ...}
@@ -569,6 +579,7 @@ function postSchedule(body) {
       bk.status = "cancelled";
       // 担当割当をすべて外して枠を空ける（複数名予約は全担当分）
       ev.assignments = ev.assignments.filter((a) => a.booking_id !== bk.id);
+      maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
       queueCancelMails(bk); // 取消通知（双方）＋未送信リマインドの破棄
       bump();
       return { ok: true };
@@ -812,6 +823,94 @@ function displayId(bk) {
   return bk.display_id || bk.reference;
 }
 // 予約内容ブロック（-----で挟む部分。改行も画像どおり）
+// ---- 回数券（チケット） ---------------------------------------------------
+// 残数の増減はすべてこのファイル内の同期処理で行う（Nodeは1リクエストずつ処理する
+// ため、検証→減算の間に他のリクエストが割り込むことはなく、二重減算・負の残数は
+// 起きない）。同じ予約での二重消費は ticketUseByBooking と履歴で冪等に防ぐ。
+
+function ticketStatus(t) {
+  if (t.uses_left <= 0) return "使い切り";
+  if (Date.now() > t.expires_at) return "期限切れ";
+  return "有効";
+}
+
+function ticketPublicJson(t) {
+  return {
+    id: t.id,
+    plan_name: t.plan_name,
+    purchased_at: t.purchased_at,
+    uses_total: t.uses_total,
+    uses_left: t.uses_left,
+    used: t.uses_total - t.uses_left,
+    expires_at: t.expires_at,
+    valid_days: t.valid_days,
+    status: ticketStatus(t),
+  };
+}
+
+// 予約で使う回数券の事前検証（所有者・残数・期限）。減算はしない
+function ticketForUse(ticketId, token, email) {
+  const t = state.tickets.get(String(ticketId || ""));
+  if (!t || t.token !== String(token || "")) throw err(409, "ticketInvalid");
+  if (String(email || "").toLowerCase() !== t.buyer_email) throw err(409, "ticketInvalid");
+  if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
+  if (t.uses_left <= 0) throw err(409, "ticketEmpty");
+  return t;
+}
+
+// 予約確定の直前に1回分を消費する（同期・冪等）。失敗したら予約は作られない
+function consumeTicket(t, bookingId, ref) {
+  if (state.ticketUseByBooking.has(bookingId)) return t.uses_left; // 同じ予約では1回だけ
+  if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
+  if (t.uses_left <= 0) throw err(409, "ticketEmpty");
+  t.uses_left -= 1;
+  t.history.push({ at: new Date().toISOString(), type: "use", booking_id: bookingId, ref, delta: -1, left_after: t.uses_left });
+  state.ticketUseByBooking.set(bookingId, t.id);
+  return t.uses_left;
+}
+
+// キャンセル時の返却。規定：予約開始前の正規キャンセルに限り1回分を戻す。
+// 1つの予約につき返却は1回まで（履歴で冪等）。開始後の取消では戻さない
+function maybeRefundTicket(bk) {
+  if (!bk || !bk.ticket_id) return false;
+  const t = state.tickets.get(bk.ticket_id);
+  if (!t) return false;
+  if (bk.start_at <= Date.now()) return false; // 開始後は返却しない（既存キャンセル規定に合わせる）
+  if (!t.history.some((h) => h.type === "use" && h.booking_id === bk.id)) return false;
+  if (t.history.some((h) => h.type === "refund" && h.booking_id === bk.id)) return false;
+  t.uses_left = Math.min(t.uses_total, t.uses_left + 1);
+  t.history.push({ at: new Date().toISOString(), type: "refund", booking_id: bk.id, ref: bk.reference, delta: 1, left_after: t.uses_left });
+  state.ticketUseByBooking.delete(bk.id);
+  bk.ticket_refunded = true;
+  bk.ticket_left_after = t.uses_left;
+  return true;
+}
+
+// 回数券利用予約のメール追記行（未使用の予約では空＝既存メールを一切変えない）
+function ticketMailLinesCustomer(bk) {
+  if (!bk.ticket_id) return [];
+  if (bk.ticket_refunded) {
+    return [
+      `回数券「${bk.ticket_name}」を1回分お戻ししました。`,
+      `現在の残り回数：${bk.ticket_left_after}回`,
+      "",
+    ];
+  }
+  return [
+    "今回のご予約で回数券を1回使用します。",
+    `ご予約後の残り回数：${bk.ticket_left_after}回`,
+    `（ご利用の回数券：${bk.ticket_name}）`,
+    "",
+  ];
+}
+function ticketMailLinesStore(bk) {
+  if (!bk.ticket_id) return [];
+  if (bk.ticket_refunded) {
+    return [`回数券を1回分返却：${bk.ticket_name}（返却後の残り ${bk.ticket_left_after}回）`, ""];
+  }
+  return [`回数券利用：${bk.ticket_name}（ご予約後の残り ${bk.ticket_left_after}回）`, ""];
+}
+
 function mailBlock(bk) {
   const d = bk.service_date;
   return [
@@ -872,6 +971,7 @@ function queueBookingMails(bk) {
     "今回のご予約内容は以下のとおりです。",
     "",
     mailBlock(bk),
+    ...ticketMailLinesCustomer(bk),
     "ご来店を心よりお待ちしております。",
     "",
     "■開始時間に遅れる場合は、お電話にてご連絡ください。",
@@ -897,6 +997,7 @@ function queueBookingMails(bk) {
     "ご予約内容は以下のとおりです。",
     "",
     mailBlockStore(bk),
+    ...ticketMailLinesStore(bk),
   ].join("\n") + MAIL_COMMON;
   queueMail("store", "notify", STORE_MAIL,
     `${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
@@ -963,6 +1064,7 @@ function queueCancelMails(bk) {
         "この度、以下のご予約を取り消しましたのでご案内いたします。",
         "",
         mailBlock(bk),
+        ...ticketMailLinesCustomer(bk),
         "またのご利用を心よりお待ちしております。",
         `${origin()}/cn-ueno-health-and-beauty`,
       ].join("\n") + MAIL_COMMON,
@@ -970,7 +1072,7 @@ function queueCancelMails(bk) {
   }
   queueMail("store", "cancel", STORE_MAIL,
     `${MAIL_STORE} ご予約キャンセルのお知らせ（予約ID ${displayId(bk)}）`,
-    [`「${MAIL_STORE}」のご予約がキャンセルされました。`, "取り消したご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
+    [`「${MAIL_STORE}」のご予約がキャンセルされました。`, "取り消したご予約内容は以下のとおりです。", "", mailBlockStore(bk), ...ticketMailLinesStore(bk)].join("\n") + MAIL_COMMON,
     now, bk.id);
   deliverDueMails();
 }
@@ -1427,20 +1529,37 @@ function createPublicBooking(body) {
   if (free.length < people || (staffId && !free.includes(staffId))) throw err(409, "soldOut");
 
   const assignee = staffId || free[0];
+
+  // 回数券の利用（任意）。検証→予約成立の直前に消費、の順で行い、
+  // 消費に失敗した場合は予約自体を作らない（フロントの残数表示は一切信用しない）
+  let useTicket = null;
+  if (body.ticketId) {
+    if (people !== 1) throw err(400, "invalid"); // 回数券は1名予約のみ
+    useTicket = ticketForUse(body.ticketId, body.ticketToken, body.email);
+  }
+
   state.bookingSerial++;
   const id = "web-" + state.bookingSerial + "-" + Math.random().toString(16).slice(2, 8);
   const token = Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
   const late = m >= 1320 ? 2000 * people : 0;
   const fee = nominated ? nominated.nominationFee : 0;
+  const reference = "2472" + String(state.bookingSerial).padStart(5, "0");
+  // ここで1回分を消費（同期処理なので同時リクエストでも残数は正確。残1で同時2件なら後の1件はここで拒否）
+  const ticketLeft = useTicket ? consumeTicket(useTicket, id, reference) : null;
   const ev = ensureEvents(date);
   ev.bookings.push({
-    id, reference: "2472" + String(state.bookingSerial).padStart(5, "0"),
+    id, reference,
     service_date: date, status: "confirmed",
     start_at: minToMs(date, m), end_at: minToMs(date, m + dur),
     people, course: body.course, course_name: course.name,
     name: String(body.name).slice(0, 120), email: String(body.email).slice(0, 254),
     phone: String(body.phone).slice(0, 40), comment,
-    total: course.price * people + late + fee, base_price: course.price,
+    // 回数券利用時はコース料金を回数券でまかなう（深夜料金・指名料は通常どおり）
+    total: (useTicket ? 0 : course.price * people) + late + fee,
+    base_price: useTicket ? 0 : course.price,
+    ticket_id: useTicket ? useTicket.id : null,
+    ticket_name: useTicket ? useTicket.plan_name : null,
+    ticket_left_after: ticketLeft,
     nomination_fee: fee, nominated_staff_id: nominated ? nominated.id : null,
     nominated_staff_name: nominated ? nominated.name : null,
     staff: pref, customer_token: token, language: String(body.language || "ja"),
@@ -1459,7 +1578,7 @@ function createPublicBooking(body) {
   state.bookingIndex.set(id, date);
   queueBookingMails(ev.bookings.find((b) => b.id === id)); // 完了メール＋通知＋双方のリマインド
   ensureDay(date).version++;
-  const result = { id, token };
+  const result = useTicket ? { id, token, ticketLeft } : { id, token };
   if (rk) state.requestKeys.set(rk, result);
   return result;
 }
@@ -1472,6 +1591,7 @@ function getPublicBooking(id, token) {
   return {
     booking: {
       id: bk.id, reference: bk.reference, displayId: String(displayId(bk)), status: bk.status,
+      ticket_name: bk.ticket_name || null, ticket_left_after: bk.ticket_left_after ?? null,
       language: bk.language || "ja", serviceDate: bk.service_date,
       start: bk.start_at, courseId: bk.course, courseName: bk.course_name,
       name: bk.name, people: bk.people, staff: bk.staff || "none",
@@ -1667,10 +1787,12 @@ function handleDemoApi(req, res, url) {
         if (bk.start_at <= Date.now()) throw err(409, "tooLate"); // 開始後は店舗にお電話で
         bk.status = "cancelled";
         ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
+        maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
         queueCancelMails(bk);
         ensureDay(date).version++;
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, status: "cancelled" }));
+        res.end(JSON.stringify({ ok: true, status: "cancelled",
+          ticketLeft: bk.ticket_id ? state.tickets.get(bk.ticket_id)?.uses_left : undefined }));
       } catch (e) {
         res.writeHead(e.status || 500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
@@ -1968,6 +2090,184 @@ function handleDemoApi(req, res, url) {
       }
     });
     return true;
+  }
+
+  // ---- 回数券：お客様向け ----
+  // 公開中のプラン一覧（予約サイト・マイページの購入導線）
+  if (url.pathname === "/api/tickets/plans" && (req.method === "GET" || req.method === "HEAD")) {
+    const plans = [...state.ticketPlans.values()].filter((p2) => p2.active === 1)
+      .map((p2) => ({ id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses, validDays: p2.validDays }));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ plans }));
+    return true;
+  }
+  // 購入（デモ：支払いは店頭。購入と同時に顧客アカウント＝メール＋トークンに紐付く）
+  if (url.pathname === "/api/tickets/purchase" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(raw || "{}");
+        const plan = state.ticketPlans.get(String(b.planId || ""));
+        const name = String(b.name || "").trim().slice(0, 120);
+        const email = String(b.email || "").trim().toLowerCase().slice(0, 254);
+        if (!plan || plan.active !== 1 || !name || !email.includes("@")) throw err(400, "invalid");
+        state.ticketSerial++;
+        const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
+        const ttoken = Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+        const now = Date.now();
+        const t = {
+          id: tid, token: ttoken, plan_id: plan.id, plan_name: plan.name,
+          price: plan.price, uses_total: plan.uses, uses_left: plan.uses,
+          valid_days: plan.validDays,
+          buyer_name: name, buyer_email: email, buyer_phone: String(b.phone || "").slice(0, 40),
+          purchased_at: new Date(now).toISOString(),
+          expires_at: now + plan.validDays * 86400e3,
+          history: [{ at: new Date(now).toISOString(), type: "purchase", delta: plan.uses, left_after: plan.uses }],
+        };
+        state.tickets.set(tid, t);
+        // 購入メール（既存メールと同じ書式・実送信はallowToのみ）
+        const expJa = new Date(t.expires_at + 9 * 3600e3).toISOString().slice(0, 10);
+        queueMail("customer", "ticket", email,
+          `${MAIL_STORE} 回数券ご購入のご案内`,
+          [
+            `この度は「${MAIL_STORE}」の回数券をご購入いただきありがとうございます。`,
+            "ご購入内容は以下のとおりです。",
+            "",
+            SEP,
+            `　${plan.name}`,
+            `ご利用可能回数 ${plan.uses}回`,
+            `有効期限 ${expJa}（購入から${plan.validDays}日間）`,
+            `料金 ${plan.price.toLocaleString("ja-JP")} 円（店頭でのお支払い）`,
+            SEP,
+            "ご予約の際に「回数券を使用する」をお選びいただくと、1回のご予約につき1回分を使用します。",
+            "残り回数はマイページからいつでもご確認いただけます。",
+          ].join("\n") + MAIL_COMMON,
+          now, tid);
+        deliverDueMails();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, ticket: { ...ticketPublicJson(t), token: ttoken } }));
+      } catch (e) {
+        res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+      }
+    });
+    return true;
+  }
+  // 自分の回数券一覧（id+tokenの組だけを受け付け、他人の券は見えない）
+  if (url.pathname === "/api/tickets/mine" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const items = (JSON.parse(raw || "{}").items || []).slice(0, 50);
+        const tickets = [];
+        for (const it of items) {
+          const t = state.tickets.get(String(it.id || ""));
+          if (t && t.token === String(it.token || "")) tickets.push(ticketPublicJson(t));
+        }
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ tickets }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid" }));
+      }
+    });
+    return true;
+  }
+
+  // ---- 回数券：管理画面向け ----
+  if (url.pathname === "/api/demo/ticket-plans") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ plans: [...state.ticketPlans.values()] }));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}");
+          const norm = (p2) => {
+            const name = String(b.name ?? p2?.name ?? "").trim().slice(0, 120);
+            const price = Math.round(Number(b.price ?? p2?.price));
+            const uses = Math.round(Number(b.uses ?? p2?.uses));
+            const validDays = Math.round(Number(b.validDays ?? p2?.validDays));
+            if (!name || !(price >= 0) || !(uses >= 1 && uses <= 200) || !(validDays >= 1 && validDays <= 3650)) throw err(400, "invalid");
+            return { name, price, uses, validDays, description: String(b.description ?? p2?.description ?? "").slice(0, 300) };
+          };
+          if (b.action === "add") {
+            state.ticketPlanSerial++;
+            const id2 = "tp-c" + state.ticketPlanSerial;
+            state.ticketPlans.set(id2, { id: id2, active: 1, ...norm(null) });
+          } else if (b.action === "update") {
+            const p2 = state.ticketPlans.get(String(b.id || ""));
+            if (!p2) throw err(404, "notFound");
+            Object.assign(p2, norm(p2));
+          } else if (b.action === "toggle") {
+            const p2 = state.ticketPlans.get(String(b.id || ""));
+            if (!p2) throw err(404, "notFound");
+            p2.active = b.active ? 1 : 0;
+          } else if (b.action === "delete") {
+            if (!state.ticketPlans.delete(String(b.id || ""))) throw err(404, "notFound");
+          } else throw err(400, "invalid");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, plans: [...state.ticketPlans.values()] }));
+        } catch (e) {
+          res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405); res.end(); return true;
+  }
+  // 発行済み回数券の一覧・履歴・調整（調整は必ず履歴に残す）
+  if (url.pathname === "/api/demo/tickets") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      const list = [...state.tickets.values()].map((t) => ({
+        ...ticketPublicJson(t),
+        buyer_name: t.buyer_name, buyer_email: t.buyer_email, buyer_phone: t.buyer_phone,
+        price: t.price, history: t.history,
+      }));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ tickets: list }));
+      return true;
+    }
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", (c) => { raw += c; if (raw.length > 1e5) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw || "{}");
+          if (b.action !== "adjust") throw err(400, "invalid");
+          const t = state.tickets.get(String(b.id || ""));
+          if (!t) throw err(404, "notFound");
+          const note = String(b.note || "").slice(0, 200);
+          if (!note) throw err(400, "noteRequired"); // 誤操作防止：理由の記録を必須にする
+          const usesDelta = Math.round(Number(b.usesDelta || 0));
+          const extendDays = Math.round(Number(b.extendDays || 0));
+          if (usesDelta) {
+            const next = t.uses_left + usesDelta;
+            if (next < 0 || next > t.uses_total) throw err(400, "outOfRange");
+            t.uses_left = next;
+            t.history.push({ at: new Date().toISOString(), type: "adjust", delta: usesDelta, left_after: t.uses_left, note });
+          }
+          if (extendDays) {
+            t.expires_at += extendDays * 86400e3;
+            t.history.push({ at: new Date().toISOString(), type: "extend", delta: 0, left_after: t.uses_left, note: `${note}（期限${extendDays > 0 ? "+" : ""}${extendDays}日）` });
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, ticket: { ...ticketPublicJson(t), history: t.history } }));
+        } catch (e) {
+          res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+        }
+      });
+      return true;
+    }
+    res.writeHead(405); res.end(); return true;
   }
 
   // 検証用：allowToに載っている宛先へ任意メールを送る（HP通知メールの疑似投函など）

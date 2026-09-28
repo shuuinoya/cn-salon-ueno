@@ -1464,6 +1464,34 @@ main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
 .pm-bg-nom { background: #e8514d; }
 .pm-bg-mi { background: #8e8e8e; float: right; margin-right: 0; }
 .pm-bg-hp { background: #f4511e; }
+.pm-bg-tk { background: #7a5ea8; }
+
+/* 回数券管理モーダル */
+#pm-ticket-modal { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+#pm-ticket-modal section {
+  background: #fff; border-radius: 6px; width: min(1000px, calc(100vw - 32px));
+  max-height: calc(100vh - 60px); overflow: auto; padding: 22px 24px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); font-size: 13px; color: #292929;
+}
+#pm-ticket-modal h2 { margin: 0 0 6px; font-size: 20px; }
+#pm-ticket-modal .pm-shop-sub { color: #6b5b4b; border-bottom: 1px solid #e5d9cd; padding-bottom: 10px; margin: 0 0 14px; }
+#pm-ticket-modal .pm-tk-h { font-size: 14px; color: #8a6a33; margin: 16px 0 8px; }
+#pm-ticket-modal .pm-menu-new { display: flex; gap: 8px; margin-bottom: 10px; }
+#pm-ticket-modal .pm-menu-new input[type="text"] { flex: 1; }
+#pm-ticket-modal input { font: inherit; padding: 7px 9px; border: 1px solid #cfc6b8; border-radius: 4px; }
+#pm-ticket-modal input[type="number"] { width: 92px; }
+#pm-ticket-modal .pm-menu-item { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid #eee3d5; }
+#pm-ticket-modal .pm-menu-item .tk-name { flex: 1; }
+#pm-ticket-modal .pm-tk-cap { color: #8a7a68; font-size: 12px; white-space: nowrap; }
+#pm-ticket-modal .pm-tk-pub { white-space: nowrap; font-weight: 700; }
+#pm-ticket-modal button { font: inherit; padding: 7px 14px; border-radius: 4px; border: 1px solid #cfc6b8; background: #fff; cursor: pointer; }
+#pm-ticket-modal button.pm-red { background: #e8514d; border-color: #d8443f; color: #fff; font-weight: 700; }
+#pm-ticket-modal .pm-tk-table { width: 100%; border-collapse: collapse; }
+#pm-ticket-modal .pm-tk-table th, #pm-ticket-modal .pm-tk-table td { border: 1px solid #e5d9c8; padding: 7px 9px; text-align: left; }
+#pm-ticket-modal .pm-tk-table th { background: #f4ecdf; color: #6b4f2a; }
+#pm-ticket-modal .pm-tk-histrow td { background: #faf6ef; color: #555; font-size: 12px; line-height: 1.9; }
+#pm-ticket-modal .pm-tk-empty { color: #999; }
+#pm-ticket-modal .pm-shop-actions { margin-top: 14px; text-align: right; }
 /* お客様の枠は最初から最終の色で表示する（描画後に色が切り替わって見えないよう、
    色分け前の枠はごく短時間だけ描画を保留し、色分けが済んだ瞬間にその色で現れる） */
 main.ledger-app .ledger-event:not(.pm-ev):not(.activity) {
