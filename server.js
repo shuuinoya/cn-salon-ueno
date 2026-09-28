@@ -160,6 +160,19 @@ const handler = (req, res) => {
   res.setHeader("Referrer-Policy", "no-referrer");
   // 名前ホスト（数字なしURL）のトップは、それぞれの入口ページを表示する
   const hostName = (req.headers.host || "").toLowerCase().replace(/:\d+$/, "");
+
+  // ファビコンはホスト名で実体ごと出し分ける（リンク差し替えに加え、
+  // 古いURL（/favicon.svg・/favicon.ico）を直接キャッシュしているブラウザにも効かせる）
+  if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
+    const isAdminHost = hostName.startsWith("cnsalon-board");
+    const isBookingHost = hostName.startsWith("cn-ueno");
+    if (isAdminHost || isBookingHost || url.pathname === "/favicon.ico") {
+      const fav = isAdminHost ? "pm-clover.svg" : "fm-favicon.svg";
+      res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store" });
+      if (!head) return fs.createReadStream(path.join(__dirname, "public", fav)).pipe(res);
+      return res.end();
+    }
+  }
   if (NAME_HOSTS[hostName] && url.pathname === "/") {
     url.pathname = NAME_HOSTS[hostName];
   }
