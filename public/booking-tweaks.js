@@ -131,6 +131,12 @@
     if (!firstCard || document.getElementById("fm-tkbanner")) return;
     await loadMyTickets();
     const use = usableTickets();
+    let planRows = "";
+    try {
+      const plans = (await (await origFetch("/api/tickets/plans", { cache: "no-store" })).json()).plans || [];
+      planRows = plans.map((pl) => '<div class="fm-tk-plan"><span>' + esc2(pl.name) + "（" + pl.uses + "回分・有効期限は購入日から1年間）</span><b>" +
+        pl.price.toLocaleString("ja-JP") + "円</b></div>").join("");
+    } catch {}
     const box = document.createElement("section");
     box.id = "fm-tkbanner";
     box.className = "list-card";
@@ -141,6 +147,7 @@
         ? "<p>保有中：" + use.map((t) => esc2(t.plan_name) + "（残り " + t.uses_left + "回）").join("、") +
           "<br/>ご予約の最終画面で「回数券を使用する」を選ぶと、コース料金が回数券でのお支払いになります。</p>"
         : "<p>お得な回数券をご用意しています。マイページからご購入いただけます。</p>") +
+      planRows +
       '<a class="fm-tk-link" href="/mypage#tickets">回数券の確認・購入はこちら</a>' +
       "</div>";
     firstCard.parentElement.insertBefore(box, firstCard);
@@ -152,6 +159,7 @@
         "#fm-tkbanner b{color:#8a6a33;font-size:15px}" +
         "#fm-tkbanner p{margin:8px 0;font-size:13px;line-height:1.8;color:#555}" +
         "#fm-tkbanner .fm-tk-link{color:#b08d4f;font-weight:700;text-decoration:none;font-size:13px}" +
+        "#fm-tkbanner .fm-tk-plan{display:flex;justify-content:space-between;font-size:13px;padding:6px 2px;border-top:1px dashed #e5d9c8;color:#555}" +
         "#fm-ticket-pick{margin:18px 0 6px}" +
         "#fm-ticket-pick .fm-h{font-size:15px;font-weight:700;margin:0 0 12px}" +
         "#fm-ticket-pick .fm-box{background:#f6ecd9;border-radius:8px;padding:14px 18px;font-size:14px;line-height:1.9}" +

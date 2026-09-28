@@ -1484,6 +1484,7 @@ main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
 #pm-ticket-modal .pm-menu-item .tk-name { flex: 1; }
 #pm-ticket-modal .pm-tk-cap { color: #8a7a68; font-size: 12px; white-space: nowrap; }
 #pm-ticket-modal .pm-tk-pub { white-space: nowrap; font-weight: 700; }
+#pm-ticket-modal .pm-tk-fixed { white-space: nowrap; color: #8a6a33; font-size: 12px; align-self: center; }
 #pm-ticket-modal button { font: inherit; padding: 7px 14px; border-radius: 4px; border: 1px solid #cfc6b8; background: #fff; cursor: pointer; }
 #pm-ticket-modal button.pm-red { background: #e8514d; border-color: #d8443f; color: #fff; font-weight: 700; }
 #pm-ticket-modal .pm-tk-table { width: 100%; border-collapse: collapse; }

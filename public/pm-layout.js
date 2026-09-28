@@ -1804,7 +1804,7 @@
       '<input type="text" id="pm-tk-name" placeholder="回数券の名称（例：回数券 5回券）" maxlength="120">' +
       '<input type="number" id="pm-tk-price" placeholder="価格(円)" min="0" step="100">' +
       '<input type="number" id="pm-tk-uses" placeholder="回数" min="1" max="200">' +
-      '<input type="number" id="pm-tk-days" placeholder="有効日数" min="1" max="3650">' +
+      '<span class="pm-tk-fixed">有効期限：購入日から1年間（自動）</span>' +
       '<button type="button" class="pm-red" id="pm-tk-add">追加</button>' +
       "</div>" +
       '<div class="pm-tk-plans">読み込み中…</div>' +
@@ -1832,8 +1832,7 @@
           '<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120">' +
           '<input type="number" class="tk-price" value="' + p2.price + '" min="0" step="100">' +
           '<input type="number" class="tk-uses" value="' + p2.uses + '" min="1" max="200" title="回数">' +
-          '<input type="number" class="tk-days" value="' + p2.validDays + '" min="1" max="3650" title="有効日数">' +
-          '<span class="pm-tk-cap">' + p2.uses + "回／" + p2.validDays + "日間有効</span>" +
+          '<span class="pm-tk-cap">' + p2.uses + "回／有効期限：購入日から1年間</span>" +
           '<label class="pm-tk-pub"><input type="checkbox" class="tk-active"' + (p2.active ? " checked" : "") + "> 公開</label>" +
           '<button type="button" class="pm-red tk-save">変更</button>' +
           '<button type="button" class="tk-del">削除</button>' +
@@ -1846,14 +1845,14 @@
         const tks = (await (await fetch("/api/demo/tickets", { cache: "no-store" })).json()).tickets || [];
         if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; return; }
         box.innerHTML =
-          '<table class="pm-tk-table"><thead><tr><th>顧客名</th><th>回数券</th><th>購入日</th><th>初期</th><th>利用済</th><th>残り</th><th>有効期限</th><th>状態</th><th></th></tr></thead><tbody>' +
+          '<table class="pm-tk-table"><thead><tr><th>顧客名</th><th>回数券</th><th>購入日</th><th>初期</th><th>利用済</th><th>残り</th><th>有効期限</th><th>期限リマインド</th><th>状態</th><th></th></tr></thead><tbody>' +
           tks.map((t) =>
             '<tr data-tk="' + esc(t.id) + '"><td>' + esc(t.buyer_name) + "<br><small>" + esc(t.buyer_email) + "</small></td>" +
             "<td>" + esc(t.plan_name) + "</td><td>" + jd(t.purchased_at) + "</td>" +
             "<td>" + t.uses_total + "回</td><td>" + t.used + "回</td><td><b>" + t.uses_left + "回</b></td>" +
-            "<td>" + jd(t.expires_at) + "</td><td>" + esc(t.status) + "</td>" +
+            "<td>" + jd(t.expires_at) + "</td><td>" + (t.remind_sent ? "送信済み" : "未送信") + "</td><td>" + esc(t.status) + "</td>" +
             '<td><button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-adj">調整</button></td></tr>' +
-            '<tr class="pm-tk-histrow" hidden><td colspan="9">' +
+            '<tr class="pm-tk-histrow" hidden><td colspan="10">' +
             t.history.map((h) =>
               esc(String(h.at).replace("T", " ").slice(0, 16)) + "　" +
               ({ purchase: "購入", use: "利用", refund: "返却", adjust: "残数調整", extend: "期限変更" }[h.type] || h.type) +
@@ -1875,10 +1874,9 @@
           name: wrap.querySelector("#pm-tk-name").value.trim(),
           price: Number(wrap.querySelector("#pm-tk-price").value),
           uses: Number(wrap.querySelector("#pm-tk-uses").value),
-          validDays: Number(wrap.querySelector("#pm-tk-days").value),
         };
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        if (!r.ok) { window.alert("名称・価格・回数（1〜200）・有効日数（1〜3650）を確認してください。"); return; }
+        if (!r.ok) { window.alert("名称・価格・回数（1〜200）を確認してください。"); return; }
         wrap.querySelector("#pm-tk-name").value = "";
         loadPlans();
         return;
@@ -1889,7 +1887,6 @@
           name: planRow.querySelector(".tk-name").value.trim(),
           price: Number(planRow.querySelector(".tk-price").value),
           uses: Number(planRow.querySelector(".tk-uses").value),
-          validDays: Number(planRow.querySelector(".tk-days").value),
         };
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { window.alert("入力値を確認してください。"); return; }
@@ -1915,14 +1912,12 @@
         return;
       }
       if (tkRow && e.target.classList.contains("tk-adj")) {
-        const d = window.prompt("残り回数の増減を入力してください（例：-1、+2。期限だけ変える場合は0）", "0");
+        const d = window.prompt("残り回数の増減を入力してください（例：-1、+2）\n※有効期限は「購入日から1年間」で固定のため変更できません", "0");
         if (d === null) return;
-        const ext = window.prompt("有効期限の延長日数を入力してください（例：30。変えない場合は0）", "0");
-        if (ext === null) return;
         const note = window.prompt("調整理由（必須・履歴に残ります）", "");
         if (!note) { window.alert("調整理由は必須です。"); return; }
         const r = await fetch("/api/demo/tickets", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "adjust", id: tkRow.dataset.tk, usesDelta: Number(d) || 0, extendDays: Number(ext) || 0, note }) });
+          body: JSON.stringify({ action: "adjust", id: tkRow.dataset.tk, usesDelta: Number(d) || 0, note }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
           window.alert(j.error === "outOfRange" ? "残り回数は0〜初期回数の範囲でしか変更できません。" : "調整できませんでした。");

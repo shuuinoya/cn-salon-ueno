@@ -307,10 +307,11 @@ const state = {
   requestKeys: new Map(),  // 予約サイトの多重送信防止キー -> 結果
   hpKeys: new Map(),       // ホットペッパー連携の予約番号 -> 予約ID（重複受信を防ぐ）
   // 回数券：プラン（管理画面で作成・編集・公開）と発行済み回数券（顧客に紐付く）
+  // 有効期限は全券共通で「購入日から1年間」（プランごとの日数設定は持たない）
   ticketPlans: new Map([
-    ["tp-5", { id: "tp-5", name: "回数券 5回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 30000, uses: 5, validDays: 90, active: 1 }],
-    ["tp-10", { id: "tp-10", name: "回数券 10回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 55000, uses: 10, validDays: 180, active: 1 }],
-    ["tp-20", { id: "tp-20", name: "回数券 20回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 100000, uses: 20, validDays: 365, active: 1 }],
+    ["tp-5", { id: "tp-5", name: "回数券 5回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 30000, uses: 5, active: 1 }],
+    ["tp-10", { id: "tp-10", name: "回数券 10回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 55000, uses: 10, active: 1 }],
+    ["tp-20", { id: "tp-20", name: "回数券 20回券", description: "全メニューでご利用いただけます（1回のご予約で1回分を使用）", price: 100000, uses: 20, active: 1 }],
   ]),
   ticketPlanSerial: 0,
   tickets: new Map(),            // ticketId -> 回数券（残数・履歴つき）
@@ -775,6 +776,7 @@ function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
 // 「送信済み」への遷移は配信サービスの成功応答を確認してから行い、
 // 一度 sent／failed になったメールは二度と再送しない（二重送信防止）。
 function deliverDueMails() {
+  ticketRemindSweep(); // 期限1か月前の自動リマインド（冪等）
   const now = Date.now();
   for (const m of state.mails) {
     if (m.status !== "pending" || m.scheduledAt > now) continue;
@@ -830,6 +832,51 @@ function displayId(bk) {
 // ため、検証→減算の間に他のリクエストが割り込むことはなく、二重減算・負の残数は
 // 起きない）。同じ予約での二重消費は ticketUseByBooking と履歴で冪等に防ぐ。
 
+// 日本時間で「購入日からちょうど1年後」の23:59:59を有効期限にする。
+// 翌年に同じ日が無い場合（2/29購入など）は、その月の末日に丸める
+function ticketExpiryMs(purchaseMs) {
+  const d = new Date(purchaseMs + 9 * 3600e3);
+  const y = d.getUTCFullYear() + 1;
+  const m = d.getUTCMonth() + 1;
+  const dim = new Date(Date.UTC(y, m, 0)).getUTCDate(); // 翌年その月の日数
+  const dd = Math.min(d.getUTCDate(), dim);
+  return Date.parse(`${y}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}T23:59:59+09:00`);
+}
+function jstDateStr(ms) {
+  const d = new Date(ms + 9 * 3600e3);
+  return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
+}
+
+// 有効期限の1か月前になったら自動でリマインドメールを1通だけ送る。
+// 送信済みフラグを先に立てるため、この処理が何度実行されても同じ券に重複送信しない
+function ticketRemindSweep() {
+  const now = Date.now();
+  for (const t of state.tickets.values()) {
+    if (t.remind_sent) continue;
+    if (t.uses_left <= 0) continue;          // 使い切りは対象外
+    if (now > t.expires_at) continue;        // 期限切れは対象外
+    if (now < t.expires_at - 30 * 86400e3) continue; // 1か月前になるまで待つ
+    t.remind_sent = true;
+    queueMail("customer", "ticketRemind", t.buyer_email,
+      `${MAIL_STORE} 回数券の有効期限が近づいています`,
+      [
+        `${t.buyer_name} 様`,
+        "",
+        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+        `お持ちの「${t.plan_name}」の有効期限が近づいています。`,
+        "",
+        SEP,
+        `　${t.plan_name}`,
+        `残り回数：${t.uses_left}回`,
+        `有効期限：${jstDateStr(t.expires_at)}`,
+        SEP,
+        "有効期限を過ぎるとご利用いただけなくなります。お早めのご予約をお待ちしております。",
+        `${origin()}/book`,
+      ].join("\n") + MAIL_COMMON,
+      now, t.id);
+  }
+}
+
 function ticketStatus(t) {
   if (t.uses_left <= 0) return "使い切り";
   if (Date.now() > t.expires_at) return "期限切れ";
@@ -845,7 +892,7 @@ function ticketPublicJson(t) {
     uses_left: t.uses_left,
     used: t.uses_total - t.uses_left,
     expires_at: t.expires_at,
-    valid_days: t.valid_days,
+    expires_label: jstDateStr(t.expires_at),
     status: ticketStatus(t),
   };
 }
@@ -2158,7 +2205,7 @@ function handleDemoApi(req, res, url) {
   // 公開中のプラン一覧（予約サイト・マイページの購入導線）
   if (url.pathname === "/api/tickets/plans" && (req.method === "GET" || req.method === "HEAD")) {
     const plans = [...state.ticketPlans.values()].filter((p2) => p2.active === 1)
-      .map((p2) => ({ id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses, validDays: p2.validDays }));
+      .map((p2) => ({ id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses }));
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ plans }));
     return true;
@@ -2174,6 +2221,9 @@ function handleDemoApi(req, res, url) {
         const name = String(b.name || "").trim().slice(0, 120);
         const email = String(b.email || "").trim().toLowerCase().slice(0, 254);
         if (!plan || plan.active !== 1 || !name || !email.includes("@")) throw err(400, "invalid");
+        // 会員のみ購入可（このシステムの会員＝予約実績のあるメールアドレス）。
+        // 画面の表示制御だけに頼らず、サーバー側で必ず確認する
+        if (!isRepeatEmail(email)) throw err(403, "memberOnly");
         state.ticketSerial++;
         const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
         const ttoken = Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
@@ -2181,15 +2231,15 @@ function handleDemoApi(req, res, url) {
         const t = {
           id: tid, token: ttoken, plan_id: plan.id, plan_name: plan.name,
           price: plan.price, uses_total: plan.uses, uses_left: plan.uses,
-          valid_days: plan.validDays,
           buyer_name: name, buyer_email: email, buyer_phone: String(b.phone || "").slice(0, 40),
           purchased_at: new Date(now).toISOString(),
-          expires_at: now + plan.validDays * 86400e3,
+          expires_at: ticketExpiryMs(now), // 購入日から1年間（日本時間・自動確定して保存）
+          remind_sent: false,
           history: [{ at: new Date(now).toISOString(), type: "purchase", delta: plan.uses, left_after: plan.uses }],
         };
         state.tickets.set(tid, t);
         // 購入メール（既存メールと同じ書式・実送信はallowToのみ）
-        const expJa = new Date(t.expires_at + 9 * 3600e3).toISOString().slice(0, 10);
+        const expJa = jstDateStr(t.expires_at);
         queueMail("customer", "ticket", email,
           `${MAIL_STORE} 回数券ご購入のご案内`,
           [
@@ -2199,7 +2249,7 @@ function handleDemoApi(req, res, url) {
             SEP,
             `　${plan.name}`,
             `ご利用可能回数 ${plan.uses}回`,
-            `有効期限 ${expJa}（購入から${plan.validDays}日間）`,
+            `有効期限 ${expJa}（購入日から1年間）`,
             `料金 ${plan.price.toLocaleString("ja-JP")} 円（店頭でのお支払い）`,
             SEP,
             "ご予約の際に「回数券を使用する」をお選びいただくと、1回のご予約につき1回分を使用します。",
@@ -2255,9 +2305,9 @@ function handleDemoApi(req, res, url) {
             const name = String(b.name ?? p2?.name ?? "").trim().slice(0, 120);
             const price = Math.round(Number(b.price ?? p2?.price));
             const uses = Math.round(Number(b.uses ?? p2?.uses));
-            const validDays = Math.round(Number(b.validDays ?? p2?.validDays));
-            if (!name || !(price >= 0) || !(uses >= 1 && uses <= 200) || !(validDays >= 1 && validDays <= 3650)) throw err(400, "invalid");
-            return { name, price, uses, validDays, description: String(b.description ?? p2?.description ?? "").slice(0, 300) };
+            if (!name || !(price >= 0) || !(uses >= 1 && uses <= 200)) throw err(400, "invalid");
+            // 有効期限は全券「購入日から1年間」固定（プランごとの設定は持たない）
+            return { name, price, uses, description: String(b.description ?? p2?.description ?? "").slice(0, 300) };
           };
           if (b.action === "add") {
             state.ticketPlanSerial++;
@@ -2291,7 +2341,7 @@ function handleDemoApi(req, res, url) {
       const list = [...state.tickets.values()].map((t) => ({
         ...ticketPublicJson(t),
         buyer_name: t.buyer_name, buyer_email: t.buyer_email, buyer_phone: t.buyer_phone,
-        price: t.price, history: t.history,
+        price: t.price, remind_sent: !!t.remind_sent, history: t.history,
       }));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(req.method === "HEAD" ? undefined : JSON.stringify({ tickets: list }));
