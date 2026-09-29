@@ -19,7 +19,10 @@ const IS_CLOUD = require("./persist").isCloud();
 const COOKIE_FLAGS = "Path=/; HttpOnly; SameSite=Lax" + (IS_CLOUD ? "; Secure" : "");
 const hashPass = (p) => crypto.createHash("sha256").update(String(p)).digest("hex");
 const ADMIN_ID = "kudaka1228";
-const ADMIN_PASS_HASH = "83cd05b641499627e43bd8a389cf712e2b3cf75bcda25c8e0b76593c848949de"; // 初期管理者
+// 初期管理者のパスワードハッシュ。本番ホスティングでは環境変数 ADMIN_PASS_HASH で
+// 必ず上書きする（コードを公開リポジトリに置いても、本番のパスワードは漏れない）
+const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH ||
+  "83cd05b641499627e43bd8a389cf712e2b3cf75bcda25c8e0b76593c848949de";
 const SESSION_MAX_AGE = 7 * 86400000; // セッション有効期間（7日）
 const adminSessions = new Map(); // token -> { user, created }（メモリ上のみ）
 const ROLE_LV = { staff: 1, manager: 2, admin: 3 };
@@ -407,6 +410,10 @@ const persistReady = (() => {
       for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
       fillDefaults(state.settings, defaultSettings);
       for (const [t, s2] of loaded.data.sessions || []) adminSessions.set(t, s2);
+      // 環境変数でパスワードが指定されている場合は、保存済みアカウントにも常に適用する
+      if (process.env.ADMIN_PASS_HASH && state.accounts.has(ADMIN_ID)) {
+        state.accounts.get(ADMIN_ID).pass = process.env.ADMIN_PASS_HASH;
+      }
       console.log("保存データを読み込みました（予約・設定・回数券・アカウントを復元）");
     } else if (persist.persistenceEnabled()) {
       console.log("データ保存が有効です: " + persist.dataFile() +
