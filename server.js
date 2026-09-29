@@ -62,11 +62,30 @@ function routeKey(url) {
   return url.pathname;
 }
 
-function sendFile(res, file, status, type, head, url) {
+function sendFile(res, file, status, type, head, url, req) {
   fs.readFile(file, (err, data) => {
     if (err) return send404(res, head);
     let body = data;
     const isHtml = type.startsWith("text/html");
+    // 静的ファイル（HTML以外）はキャッシュを効かせる：
+    // ・Last-Modified＋304で、変わっていないファイルは再ダウンロードさせない
+    // ・ハッシュつき（/assets/・/_next/）や ?v= つきは1日、その他は1時間の再利用を許可
+    // （HTMLはリクエストごとにURL注入があるため従来どおり毎回検証）
+    if (!isHtml && status === 200) {
+      let mtime = 0;
+      try { mtime = Math.floor(fs.statSync(file).mtimeMs / 1000) * 1000; } catch {}
+      if (mtime) {
+        const ims = Date.parse(req?.headers?.["if-modified-since"] || "");
+        const long = /\/(assets|_next)\//.test(file) || (url && url.searchParams?.has("v"));
+        const cache = { "Cache-Control": long ? "public, max-age=86400" : "public, max-age=3600", "Last-Modified": new Date(mtime).toUTCString() };
+        if (ims && ims >= mtime) {
+          res.writeHead(304, cache);
+          return res.end();
+        }
+        res.setHeader("Cache-Control", cache["Cache-Control"]);
+        res.setHeader("Last-Modified", cache["Last-Modified"]);
+      }
+    }
     if (isHtml || type.startsWith("text/javascript")) {
       let text = data.toString("utf8");
       // 保存HTMLにはルーターの初期URL（searchParams）が保存時の値のまま埋め込まれている。
@@ -102,7 +121,9 @@ function sendFile(res, file, status, type, head, url) {
       if (text.includes(OLD_BRAND)) text = text.split(OLD_BRAND).join(brandFor(file, url));
       body = Buffer.from(text);
     }
-    res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-cache" });
+    if (!res.getHeader("Cache-Control")) res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Type", type);
+    res.writeHead(status);
     res.end(head ? undefined : body);
   });
 }
@@ -253,13 +274,20 @@ const handler = (req, res) => {
   }
 
   // ---- 流量制限（公開に耐えるための防御。このパソコン自身は対象外） ----
-  // ・全体：1つのIPにつき30秒で300リクエストまで（通常閲覧では届かない量）
+  // ・画像・JS・CSS等の静的ファイル：1つのIPにつき30秒で2000まで
+  //   （ページ1枚で数十ファイル読むため別枠。キャッシュ配信で通常はすぐ減る）
+  // ・ページ・APIなどそれ以外：1つのIPにつき30秒で300まで
   // ・予約・回数券などの書き込みとログイン試行：1つのIPにつき5分で40回まで
   if (!raLoopback) {
     const p = url.pathname;
+    const isStatic = (req.method === "GET" || head) &&
+      /\.(js|css|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|otf|map|txt|webmanifest)$/i.test(p);
     const isWriteTarget = req.method === "POST" && (p === "/api/bookings" || p === "/api/bookings/cancel" ||
       p.startsWith("/api/tickets/") || p === "/api/demo/login");
-    if (rateLimited("g:" + ra, 300, 30000) || (isWriteTarget && rateLimited("w:" + ra, 40, 300000))) {
+    const over = isStatic
+      ? rateLimited("s:" + ra, 2000, 30000)
+      : rateLimited("g:" + ra, 300, 30000) || (isWriteTarget && rateLimited("w:" + ra, 40, 300000));
+    if (over) {
       res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "30" });
       return res.end(JSON.stringify({ error: "tooManyRequests" }));
     }
@@ -364,7 +392,7 @@ const handler = (req, res) => {
 
   const file = path.normalize(path.join(PUBLIC, pathname));
   if (file.startsWith(PUBLIC + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-    return sendFile(res, file, 200, TYPES[path.extname(file).toLowerCase()] || "application/octet-stream", head);
+    return sendFile(res, file, 200, TYPES[path.extname(file).toLowerCase()] || "application/octet-stream", head, url, req);
   }
 
   // 末尾が「/」のURLは元サイトと同じく「/」なしへ転送
