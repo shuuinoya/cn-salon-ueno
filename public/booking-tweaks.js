@@ -511,14 +511,17 @@
       if (h.textContent.trim() === "予約が完了しました") h.textContent = "ご予約ありがとうございました。";
       if (h.textContent.trim() === "Booking complete") h.textContent = "Thank you for your booking.";
     });
-    // 印刷ボタン → マイページへ
-    const pr = [...document.querySelectorAll("button, a")].find((b) => /予約内容を印刷・保存|Print/.test(b.textContent));
+    // 印刷ボタン → マイページへ（全言語の印刷ボタン文言に対応）
+    const pr = [...document.querySelectorAll("button, a")].find((b) =>
+      /予約内容を印刷・保存|Print|打印|인쇄|Imprimer|Imprimir|Stampa|drucken/.test(b.textContent));
     if (pr && !document.getElementById("fm-mypage-btn")) {
       pr.style.display = "none";
       const a = document.createElement("a");
       a.id = "fm-mypage-btn";
       a.href = "/mypage";
-      a.textContent = en ? "My page" : "マイページへ";
+      const mpLang = (() => { try { return localStorage.getItem("cn-salon-language") || "ja"; } catch { return "ja"; } })();
+      a.textContent = { ja: "マイページへ", en: "My page", zh: "我的页面", ko: "마이페이지",
+        fr: "Ma page", es: "Mi página", it: "La mia pagina", de: "Meine Seite" }[mpLang] || "マイページへ";
       a.style.cssText = "display:inline-block;background:#c5a15e;color:#fff;font-weight:700;border-radius:6px;padding:13px 34px;text-decoration:none;font-size:14px;";
       pr.before(a);
       const wrap = a.parentElement;

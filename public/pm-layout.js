@@ -2334,6 +2334,37 @@
   // 下部の集計バー（赤・黒・青の3段）
   setInterval(ensure, 600);
 
+  // リアルタイム同期（SSE）：予約・シフト等の変更がサーバーに保存された瞬間、
+  // 開いている台帳へ push 通知が届き、リロードなしで最新表示に更新する。
+  // ・通知は合図だけで、データは必ずサーバーから取り直す（同じ通知が重複しても冪等）
+  // ・編集パネルを開いている間は台帳の再取得を保留し、閉じた時点で追いつく
+  // ・切断時はEventSourceが自動再接続し、再接続時・タブ復帰時に必ず再同期する
+  if (!window.__pmSse && location.pathname === "/admin") {
+    window.__pmSse = 1;
+    let pendingSync = false, syncTimer = 0;
+    const doSync = () => {
+      const rb = document.querySelector(".ledger-refresh");
+      // 編集・詳細パネルを開いている間は自動更新を保留（勝手に閉じない）
+      const editing = !!document.querySelector(".ledger-side");
+      if (rb && !rb.disabled && !editing) {
+        pendingSync = false;
+        rb.click(); // 本物の再読込（React側がサーバーの最新データを取得して描画）
+      } else {
+        pendingSync = true; // 編集中は保留（閉じたら下のintervalが追いつく）
+      }
+      refreshSched(true).then(decorateEvents);
+      prefetchCalendar();
+    };
+    const kick = () => { clearTimeout(syncTimer); syncTimer = setTimeout(doSync, 250); };
+    setInterval(() => { if (pendingSync) doSync(); }, 2000);
+    try {
+      const es = new EventSource("/api/demo/events");
+      es.onmessage = kick;
+      es.onopen = kick; // 再接続時は必ず最新へ再同期（切断中の変更を取りこぼさない）
+    } catch {}
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) kick(); });
+  }
+
   // セッション切れの番人：サーバー再起動・アカウント停止・期限切れでセッションが
   // 無効になったら、画面を無反応のまま放置せずログイン画面へ案内する
   if (!window.__pmSessWatch) {

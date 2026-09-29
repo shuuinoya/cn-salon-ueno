@@ -156,8 +156,32 @@
       empty: "표시할 예약이 없습니다. 예약 완료 페이지의 '마이페이지'에서 이 브라우저에 저장됩니다.",
       yen: (n) => "¥" + n.toLocaleString("ko-KR"),
       date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }) + "  " + hm },
+    fr: { home: "Accueil", resv: "Réservations", member: "Infos membre", booked: "Réservé", cancelled: "Annulé",
+      menu: "Soin", total: "Total", cancelBtn: "Annuler la réservation", name: "Nom",
+      confirm: "Annuler cette réservation ?", done: "Votre réservation a été annulée.", fail: "Échec de l'annulation. Réessayez plus tard.",
+      empty: "Aucune réservation à afficher. Les réservations sont enregistrées dans ce navigateur depuis la page de confirmation.",
+      yen: (n) => "¥" + n.toLocaleString("fr-FR"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("fr-FR", { weekday: "short", year: "numeric", month: "long", day: "numeric" }) + "  " + hm },
+    es: { home: "Inicio", resv: "Reservas", member: "Datos de socio", booked: "Reservado", cancelled: "Cancelado",
+      menu: "Tratamiento", total: "Total", cancelBtn: "Cancelar la reserva", name: "Nombre",
+      confirm: "¿Cancelar esta reserva?", done: "Su reserva ha sido cancelada.", fail: "No se pudo cancelar. Inténtelo más tarde.",
+      empty: "No hay reservas que mostrar. Las reservas se guardan en este navegador desde la página de confirmación.",
+      yen: (n) => "¥" + n.toLocaleString("es-ES"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("es-ES", { weekday: "short", year: "numeric", month: "long", day: "numeric" }) + "  " + hm },
+    it: { home: "Home", resv: "Prenotazioni", member: "Dati socio", booked: "Prenotato", cancelled: "Annullato",
+      menu: "Trattamento", total: "Totale", cancelBtn: "Annulla la prenotazione", name: "Nome",
+      confirm: "Annullare questa prenotazione?", done: "La prenotazione è stata annullata.", fail: "Impossibile annullare. Riprova più tardi.",
+      empty: "Nessuna prenotazione da mostrare. Le prenotazioni vengono salvate in questo browser dalla pagina di conferma.",
+      yen: (n) => "¥" + n.toLocaleString("it-IT"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("it-IT", { weekday: "short", year: "numeric", month: "long", day: "numeric" }) + "  " + hm },
+    de: { home: "Start", resv: "Reservierungen", member: "Mitgliedsdaten", booked: "Reserviert", cancelled: "Storniert",
+      menu: "Behandlung", total: "Gesamt", cancelBtn: "Reservierung stornieren", name: "Name",
+      confirm: "Diese Reservierung stornieren?", done: "Ihre Reservierung wurde storniert.", fail: "Stornierung fehlgeschlagen. Bitte später erneut versuchen.",
+      empty: "Keine Reservierungen vorhanden. Reservierungen werden über die Bestätigungsseite in diesem Browser gespeichert.",
+      yen: (n) => "¥" + n.toLocaleString("de-DE"),
+      date: (d, hm) => new Date(d + "T00:00:00+09:00").toLocaleDateString("de-DE", { weekday: "short", year: "numeric", month: "long", day: "numeric" }) + "  " + hm },
   };
-  const norm = (l) => (String(l || "").toLowerCase().startsWith("zh") ? "zh" : ["en", "ko", "zh", "ja"].includes(String(l || "").slice(0, 2)) ? String(l).slice(0, 2) : "ja");
+  const norm = (l) => (String(l || "").toLowerCase().startsWith("zh") ? "zh" : ["en", "ko", "zh", "ja", "fr", "es", "it", "de"].includes(String(l || "").slice(0, 2)) ? String(l).slice(0, 2) : "ja");
   const q = new URLSearchParams(location.search);
   let pageLang = norm(q.get("lang") || localStorage.getItem("fm-lang") || "ja");
   const T = () => L[pageLang] || L.ja;

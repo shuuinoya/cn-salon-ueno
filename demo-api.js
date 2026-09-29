@@ -58,6 +58,27 @@ function authLogPush(entry) {
   if (state.authLog.length > 200) state.authLog.splice(0, state.authLog.length - 200);
 }
 
+// ---- リアルタイム配信（SSE） -----------------------------------------------
+// 予約・シフト・受付停止などの変更（＝日付versionの更新）が「DBに保存された後」に、
+// ログイン中の管理画面へ push 通知する。通知は「変わった」という合図だけで、
+// 中身は受信側が必ずサーバーの最新データを取り直す（DB＝Single Source of Truth。
+// 同じ通知が複数回届いても再取得するだけなので冪等）。
+// 接続が切れてもEventSourceが自動再接続し、再接続時に受信側が再同期する。
+let sseSeq = 0;
+const sseClients = new Set(); // 認証済み管理画面の接続（res オブジェクト）
+function sseTouch() {
+  sseSeq++;
+  for (const res of sseClients) {
+    try { res.write(`data: ${sseSeq}\n\n`); } catch { sseClients.delete(res); }
+  }
+}
+const sseKeepAlive = setInterval(() => {
+  for (const res of sseClients) {
+    try { res.write(":ka\n\n"); } catch { sseClients.delete(res); }
+  }
+}, 20000);
+sseKeepAlive.unref?.();
+
 // ---- 実送信の設定（任意） -------------------------------------------------
 // プロジェクト直下に mail-config.json（mail-config.example.json 参照）を置くと、
 // allowTo に書いた宛先にだけ、SMTP（例：Gmailのアプリパスワード）で実際に送信する。
@@ -485,7 +506,7 @@ function postSchedule(body) {
   if (!action || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw err(400, "invalid");
   const day = ensureDay(date);
   const checkRevision = () => { if (body.revision !== day.version) throw err(409, "scheduleConflict"); };
-  const bump = (d = date) => { ensureDay(d).version++; };
+  const bump = (d = date) => { ensureDay(d).version++; sseTouch(); };
 
   switch (action) {
     case "shift": {
@@ -1299,7 +1320,7 @@ function hpNotify(b, via) {
     if (bk0.status === "confirmed") {
       bk0.status = "cancelled";
       bk0.cancelled = true;
-      ensureDay(d0).version++;
+      ensureDay(d0).version++; sseTouch();
     }
     hpLogIt({ via, result: "取消", rid, date: d0 });
     return { status: 200, json: { ok: true, cancelled: true } };
@@ -1363,7 +1384,7 @@ function hpNotify(b, via) {
   ev.assignments.push({ booking_id: id, staff_id: assignee.id });
   state.bookingIndex.set(id, date);
   state.hpKeys.set(rid, id);
-  ensureDay(date).version++;
+  ensureDay(date).version++; sseTouch();
   hpLogIt({ via, result: "受信", rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu, price, name, staff: assignee.name });
   return { status: 200, json: { ok: true, id, staff: assignee.name } };
 }
@@ -1699,7 +1720,7 @@ function createPublicBooking(body) {
   for (const sid of [assignee, ...coAssignees]) ev.assignments.push({ booking_id: id, staff_id: sid });
   state.bookingIndex.set(id, date);
   queueBookingMails(ev.bookings.find((b) => b.id === id)); // 完了メール＋通知＋双方のリマインド
-  ensureDay(date).version++;
+  ensureDay(date).version++; sseTouch();
   const result = useTicket ? { id, token, ticketLeft } : { id, token };
   if (rk) state.requestKeys.set(rk, result);
   return result;
@@ -1882,6 +1903,21 @@ function handleDemoApi(req, res, url) {
     }
   }
 
+  // リアルタイム配信（SSE）。ログイン中の管理画面が購読し、予約・シフト等の
+  // 変更がDBに保存された直後に「変わった」通知を受け取る（中身は必ず再取得する）
+  if (url.pathname === "/api/demo/events" && req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-store",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write(`retry: 2000\ndata: ${sseSeq}\n\n`); // 接続直後に現在の版を知らせる
+    sseClients.add(res);
+    req.on("close", () => sseClients.delete(res));
+    return true;
+  }
+
   // ログイン中のアカウント情報（自分のもののみ。UIの表示出し分けに使う）
   if (url.pathname === "/api/demo/whoami" && (req.method === "GET" || req.method === "HEAD")) {
     const a = sessionAccount(req);
@@ -2037,7 +2073,7 @@ function handleDemoApi(req, res, url) {
         ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
         maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
         queueCancelMails(bk);
-        ensureDay(date).version++;
+        ensureDay(date).version++; sseTouch();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, status: "cancelled",
           ticketLeft: bk.ticket_id ? state.tickets.get(bk.ticket_id)?.uses_left : undefined }));
@@ -2150,7 +2186,7 @@ function handleDemoApi(req, res, url) {
           } else {
             throw err(400, "invalid");
           }
-          ensureDay(todayJst()).version++;
+          ensureDay(todayJst()).version++; sseTouch();
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, courses: courseListJson() }));
         } catch (e) {
@@ -2277,6 +2313,7 @@ function handleDemoApi(req, res, url) {
               if (Number.isFinite(d2) && d2 >= 24 && d2 <= 30) sm.daySwitch = Math.round(d2);
             }
           }
+          sseTouch(); // 業務時間などの変更を開いている管理画面へ即時配信
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify(state.settings));
         } catch {
