@@ -1794,7 +1794,7 @@ function handleDemoApi(req, res, url) {
       if (lock && lock.until > Date.now()) {
         authLogPush({ kind: "login", user, ok: false, reason: "locked", ip });
         res.writeHead(429, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify({ error: "tooManyAttempts" }));
+        return res.end(JSON.stringify({ error: "tooManyAttempts", retry: Math.ceil((lock.until - Date.now()) / 1000) }));
       }
       const acc = state.accounts.get(user);
       // 停止中アカウントも「存在しない」と同じ応答にする（存在の推測をさせない）

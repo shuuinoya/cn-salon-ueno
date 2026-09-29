@@ -2333,5 +2333,18 @@
 
   // 下部の集計バー（赤・黒・青の3段）
   setInterval(ensure, 600);
+
+  // セッション切れの番人：サーバー再起動・アカウント停止・期限切れでセッションが
+  // 無効になったら、画面を無反応のまま放置せずログイン画面へ案内する
+  if (!window.__pmSessWatch) {
+    window.__pmSessWatch = 1;
+    setInterval(async () => {
+      if (!location.pathname.startsWith("/admin") || location.pathname === "/admin/login") return;
+      try {
+        const r = await fetch("/api/demo/whoami", { cache: "no-store" });
+        if (r.status === 401) location.href = "/admin/login?exp=1";
+      } catch {}
+    }, 8000);
+  }
   document.addEventListener("DOMContentLoaded", ensure);
 })();

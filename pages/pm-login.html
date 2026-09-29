@@ -137,11 +137,21 @@
     if (new URLSearchParams(location.search).get("out") === "1") {
       document.getElementById("logout-msg").classList.add("show");
     }
+    // セッション切れ（サーバー再起動など）で戻されたときの案内
+    if (new URLSearchParams(location.search).get("exp") === "1") {
+      const m = document.getElementById("logout-msg");
+      m.textContent = "接続が切れました（サーバー再起動など）。もう一度ログインしてください。";
+      m.classList.add("show");
+    }
     // ログイン（ID・パスワードが一致したときだけ管理画面が開く）
+    // 失敗の理由ごとに正しいメッセージを出す：
+    // ・401＝ID/パスワード違い ・429＝連続失敗による一時ロック（正しい入力でも待ちが必要）
     document.getElementById("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const user = document.getElementById("pm-user").value.trim();
       const pass = document.getElementById("pm-pass").value;
+      const errEl = document.getElementById("login-error");
+      let msg = "IDまたはパスワードが違います。";
       try {
         const r = await fetch("/api/demo/login", {
           method: "POST",
@@ -149,9 +159,17 @@
           body: JSON.stringify({ user, pass }),
         });
         if (r.ok) { location.href = "/admin"; return; }
-      } catch {}
+        if (r.status === 429) {
+          const j = await r.json().catch(() => ({}));
+          const sec = Number(j.retry) > 0 ? Number(j.retry) : 60;
+          msg = "安全のため一時的にロックしています。約" + sec + "秒後にもう一度お試しください。";
+        }
+      } catch {
+        msg = "サーバーに接続できませんでした。サイトの起動を確認してください。";
+      }
       document.getElementById("logout-msg").classList.remove("show");
-      document.getElementById("login-error").classList.add("show");
+      errEl.textContent = msg;
+      errEl.classList.add("show");
     });
   </script>
 </body>
