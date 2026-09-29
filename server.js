@@ -423,8 +423,17 @@ const HOST = "127.0.0.1";
 let port = Number(process.env.PORT) || 5520;
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
-    port += 1;
-    server.listen(port, HOST);
+    // このプロセスからの保存を止める（終了時フックが本物のデータを上書きしないように）
+    try { require("./persist").abortSaves(); } catch {}
+    // 二重起動は中止する。以前は空いている番号へ自動でずらしていたが、
+    // データ保存が有効になった今は、2つのサーバーが同じ保存ファイルを
+    // 書き合って予約データを壊す危険があるため、はっきり止めて案内する
+    console.log("すでにこのサイトのサーバーが起動しています（二重起動はデータ保護のため中止しました）。");
+    console.log("起動済みのサーバーをそのままお使いください：");
+    console.log(`  予約サイト : http://cn-ueno-health-and-beauty.localhost/`);
+    console.log(`  管理画面   : http://cnsalon-board.localhost/`);
+    console.log("（作り直したい場合は、先に既存のサーバーを停止してから F5 を押してください）");
+    process.exit(0);
   } else {
     throw e;
   }
@@ -449,14 +458,35 @@ server.on("listening", () => {
       if (process.platform === "darwin") {
         const ip = Object.values(os.networkInterfaces()).flat()
           .find((i) => i && i.family === "IPv4" && !i.internal)?.address;
-        if (ip) {
-          // 前回起動の配信プロセスが残っていれば止める（IP変更後の古い配信を防ぐ）
+        // mDNS配信（IPが変わったら自動で配信し直す。Wi-Fiの切替に自動追従）
+        const lanIp = () => Object.values(os.networkInterfaces()).flat()
+          .find((i) => i && i.family === "IPv4" && !i.internal)?.address || "";
+        let mdnsKids = [];
+        const registerMdns = (ip2) => {
+          for (const c of mdnsKids) { try { c.kill(); } catch {} }
+          mdnsKids = [];
+          // 前回起動の配信プロセスが残っていれば止める（古いIPの配信を防ぐ）
           try { execFileSync("/usr/bin/pkill", ["-f", "dns-sd -P (cn-ueno-health-and-beauty|cnsalon-board)"]); } catch {}
           for (const h of ["cn-ueno-health-and-beauty", "cnsalon-board"]) {
-            const c = spawn("/usr/bin/dns-sd", ["-P", h, "_http._tcp", "local", "80", `${h}.local`, ip], { stdio: "ignore" });
+            const c = spawn("/usr/bin/dns-sd", ["-P", h, "_http._tcp", "local", "80", `${h}.local`, ip2], { stdio: "ignore" });
             c.on("error", () => {});
-            process.on("exit", () => { try { c.kill(); } catch {} });
+            mdnsKids.push(c);
           }
+        };
+        process.on("exit", () => { for (const c of mdnsKids) { try { c.kill(); } catch {} } });
+        let curIp = ip;
+        const ipWatch = setInterval(() => {
+          const now2 = lanIp();
+          if (now2 && now2 !== curIp) {
+            curIp = now2;
+            registerMdns(now2);
+            console.log(`（ネットワーク変更を検知）他の端末用の名前を新しいIP ${now2} で配信し直しました。`);
+            console.log("  ※鍵マーク（HTTPS）のIP直アクセスも使う場合は F5 で再起動すると証明書が追従します");
+          }
+        }, 60000);
+        ipWatch.unref?.();
+        if (ip) {
+          registerMdns(ip);
           console.log("  ほかの端末（同じWi-Fi）から:");
           console.log(`    予約サイト : http://cn-ueno-health-and-beauty.local/`);
           console.log(`    管理画面   : http://cnsalon-board.local/`);

@@ -68,6 +68,12 @@ function loadSnapshot() {
   return { enabled: true, data: null, file };
 }
 
+// 二重起動を検知して終了する場合など、「このプロセスは所有者ではない」と
+// 分かったときに呼ぶ。以後この プロセスからは一切保存しない
+// （終了時フックが古いスナップショットで本物のデータを上書きするのを防ぐ）
+let savesAborted = false;
+function abortSaves() { savesAborted = true; }
+
 // 定期保存を開始する。getSnapshot() が返すオブジェクトを丸ごと保存する。
 function startSaver(getSnapshot) {
   if (!persistenceEnabled()) return () => {};
@@ -77,6 +83,7 @@ function startSaver(getSnapshot) {
   try { lastWritten = fs.readFileSync(file, "utf8"); } catch {}
 
   const saveNow = () => {
+    if (savesAborted) return;
     let json;
     try {
       json = JSON.stringify(getSnapshot(), replacer);
@@ -107,4 +114,4 @@ function startSaver(getSnapshot) {
   return saveNow;
 }
 
-module.exports = { persistenceEnabled, loadSnapshot, startSaver, dataFile };
+module.exports = { persistenceEnabled, loadSnapshot, startSaver, dataFile, abortSaves };
