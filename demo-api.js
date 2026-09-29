@@ -361,6 +361,36 @@ const state = {
   loginFails: new Map(),   // ユーザー名 -> {n, until}（連続失敗によるロック）
 };
 
+// ---- 永続化（persist.js＝このシステムのデータベース層） ----
+// 予約・顧客・シフト・回数券・メニュー・設定・アカウント・ログイン中セッションを
+// ディスクへ保存し、起動時に復元する。サーバーを再起動しても・PCを再起動しても、
+// どの端末からアクセスしても、ここに保存された同じ最新データが正となる。
+// テスト・開発用のPORT指定起動では初期データで動き、本番データとは混ざらない。
+{
+  const persist = require("./persist");
+  // 将来コード側に設定項目が増えても、古い保存データで欠けないよう初期値を控えておく
+  const defaultSettings = JSON.parse(JSON.stringify(state.settings));
+  const fillDefaults = (dst, src) => {
+    for (const k of Object.keys(src)) {
+      if (!(k in dst)) dst[k] = src[k];
+      else if (src[k] && typeof src[k] === "object" && !Array.isArray(src[k]) &&
+        dst[k] && typeof dst[k] === "object" && !(dst[k] instanceof Map) && !(dst[k] instanceof Set)) {
+        fillDefaults(dst[k], src[k]);
+      }
+    }
+  };
+  const loaded = persist.loadSnapshot();
+  if (loaded.data) {
+    for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
+    fillDefaults(state.settings, defaultSettings);
+    for (const [t, s] of loaded.data.sessions || []) adminSessions.set(t, s);
+    console.log("保存データを読み込みました（予約・設定・回数券・アカウントを復元）: " + persist.dataFile());
+  } else if (persist.persistenceEnabled()) {
+    console.log("データ保存が有効です: " + persist.dataFile());
+  }
+  persist.startSaver(() => ({ savedAt: Date.now(), state, sessions: [...adminSessions.entries()] }));
+}
+
 function ensureDay(date) {
   // version は 0 始まりにする。管理画面は未取得の日付の revision を 0 とみなして
   // 送ってくるため、1 始まりだと遠い将来の日付の一括シフト登録が必ず競合になってしまう。
