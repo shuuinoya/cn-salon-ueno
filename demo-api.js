@@ -2367,8 +2367,9 @@ function handleDemoApi(req, res, url) {
       return true;
     }
     // 連携通知の受け口は、このパソコン上（メール取込・連携シミュレーション）からのみ。
-    // LANの他端末や外部からは予約を書き込めない（本番では連携先のAPIキー検証に相当）
-    if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || "")) {
+    // LANの他端末・外部・トンネル経由（転送ヘッダつき）からは予約を書き込めない
+    if (req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] ||
+      !/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || "")) {
       denyApi(req, res);
       return true;
     }

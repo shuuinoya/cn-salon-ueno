@@ -158,8 +158,9 @@ const NAME_HOSTS = {
 // 許可するホスト名は正式URL＋mDNS名＋localhost/プライベートIPのみ（その他の名前は拒否）
 const HOST_NAMES = "cn-ueno-health-and-beauty(\\.localhost|\\.local)?|cnsalon-board(\\.localhost|\\.local)?";
 const PRIVATE_IPS = "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3}";
-const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
-const LOCAL_ORIGIN_RE = new RegExp(`^https?:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS})(:\\d+)?$`, "i");
+const TUNNEL_HOST = "[a-z0-9-]+\\.trycloudflare\\.com";
+const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST})(:\\d+)?$`, "i");
+const LOCAL_ORIGIN_RE = new RegExp(`^https?:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST})(:\\d+)?$`, "i");
 
 // ---- HTTPS用のローカル証明書（このMac専用の小さな認証局） ----
 // ブラウザの「保護されていない通信」表示を消すため、443番でHTTPSでも配信する。
@@ -255,10 +256,15 @@ const handler = (req, res) => {
   //   同じネットワーク（店内Wi-Fi/LAN）のプライベートIPからのみ。さらにログインと
   //   権限のサーバー側検証が必ずかかる（IP制限は多重防御の1枚目にすぎない）
   const ra = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
-  const raLoopback = ra === "127.0.0.1" || ra === "::1";
-  const raPrivate = raLoopback ||
+  // トンネル（Cloudflare）経由はソケット上ループバックでも「インターネットのお客様」。
+  // 実IPは転送ヘッダから取り、管理系の遮断・流量制限はその実IPで判定する
+  const fwd = String(req.headers["cf-connecting-ip"] ||
+    String(req.headers["x-forwarded-for"] || "").split(",")[0] || "").trim();
+  const raLoopback = !fwd && (ra === "127.0.0.1" || ra === "::1");
+  const raPrivate = raLoopback || (!fwd && (
     /^(10\.|192\.168\.|169\.254\.)/.test(ra) || /^172\.(1[6-9]|2\d|3[01])\./.test(ra) ||
-    /^(fe80:|fd)/i.test(ra);
+    /^(fe80:|fd)/i.test(ra)));
+  const srcIp = fwd || ra;
   {
     const p = url.pathname;
     // 予約サイト側でも使う公開GET（フォーム設定・メニュー/スタッフ写真）だけは例外
@@ -285,8 +291,8 @@ const handler = (req, res) => {
     const isWriteTarget = req.method === "POST" && (p === "/api/bookings" || p === "/api/bookings/cancel" ||
       p.startsWith("/api/tickets/") || p === "/api/demo/login");
     const over = isStatic
-      ? rateLimited("s:" + ra, 2000, 30000)
-      : rateLimited("g:" + ra, 300, 30000) || (isWriteTarget && rateLimited("w:" + ra, 40, 300000));
+      ? rateLimited("s:" + srcIp, 2000, 30000)
+      : rateLimited("g:" + srcIp, 300, 30000) || (isWriteTarget && rateLimited("w:" + srcIp, 40, 300000));
     if (over) {
       res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "30" });
       return res.end(JSON.stringify({ error: "tooManyRequests" }));
@@ -485,6 +491,35 @@ server.on("listening", () => {
           }
         }, 60000);
         ipWatch.unref?.();
+        // インターネット公開（Cloudflareトンネル）。tools/bin/cloudflared があれば自動起動し、
+        // どのネットワークからでも開ける予約サイトの公開URLを発行する。
+        // 管理画面・管理APIは転送ヘッダで「インターネット扱い」になり公開されない。
+        // DEMO_TUNNEL=0 で無効化できる。公開URLは再起動ごとに変わる（data/tunnel-url.txt にも保存）
+        try {
+          const cfBin = path.join(__dirname, "tools", "bin", "cloudflared");
+          if (fs.existsSync(cfBin) && process.env.DEMO_TUNNEL !== "0") {
+            try { execFileSync("/usr/bin/pkill", ["-f", "cloudflared tunnel --url"]); } catch {}
+            const t = spawn(cfBin, ["tunnel", "--url", "http://127.0.0.1:80", "--no-autoupdate"], { stdio: ["ignore", "pipe", "pipe"] });
+            let announced = false;
+            const onData = (b) => {
+              const m = String(b).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+              if (m && !announced) {
+                announced = true;
+                console.log("  インターネット公開（どのネットワークのお客様でも・鍵マークつき）:");
+                console.log(`    予約サイト : ${m[0]}`);
+                console.log("    ※このURLは再起動のたびに変わります。管理画面はインターネットには公開されません");
+                try {
+                  fs.mkdirSync(path.join(__dirname, "data"), { recursive: true });
+                  fs.writeFileSync(path.join(__dirname, "data", "tunnel-url.txt"), m[0] + "\n");
+                } catch {}
+              }
+            };
+            t.stdout.on("data", onData);
+            t.stderr.on("data", onData);
+            t.on("error", () => {});
+            process.on("exit", () => { try { t.kill(); } catch {} });
+          }
+        } catch {}
         if (ip) {
           registerMdns(ip);
           console.log("  ほかの端末（同じWi-Fi）から:");
