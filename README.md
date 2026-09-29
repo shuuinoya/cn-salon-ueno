@@ -65,7 +65,17 @@
 - 予約・設定・回数券などのデータは**ホスティングの永続ディスク**（`DEMO_DATA=/var/data/state.json`）に保存され、再起動・再デプロイでも消えません
 - Cookieは自動でSecure化（常時HTTPS前提）。メール送信・Gmail取込も `mail-config.json` をディスクに置けばクラウドから動作します
 
-**デプロイ手順（Render の例・約10分）**
+**完全無料でのデプロイ手順（クレジットカード不要・約15分）**
+無料構成では、予約データは**GitHubの非公開リポジトリへ自動保存**されます（無料ホスティングのディスクは再起動で消えるため。停止時にも送りきり、起動時に自動復元。検証済み）。
+1. https://github.com で無料アカウント作成
+2. GitHubで**非公開リポジトリを2つ**作成：①このフォルダ一式を置く `cn-salon-ueno` ②データ保存用の空リポジトリ `cn-salon-data`
+3. GitHubの Settings → Developer settings → **Fine-grained personal access tokens** で、対象を `cn-salon-data` だけに絞り **Contents: Read and write** のトークンを発行（これが `GH_TOKEN`）
+4. https://render.com で「Sign in with GitHub」→「New + → Blueprint」→ `cn-salon-ueno` を選択 → 環境変数 `GH_REPO`（例 `あなたのID/cn-salon-data`）と `GH_TOKEN` を入力 → デプロイ
+5. 発行された `https://cn-salon-ueno.onrender.com` が固定URL（予約サイト＝`/`、管理画面＝`/cnsalon-board`）
+6. （推奨）https://uptimerobot.com （無料）で5分おきにこのURLを監視登録 → 無料枠の自動スリープを防ぎ、常時即応答になります
+※無料枠の注意：スリープ設定のままだと、しばらくアクセスがない後の最初の1人だけ表示に30〜60秒かかります（手順6で回避可能）。
+
+**デプロイ手順（Render 有料版・月$7・約10分）**
 1. https://render.com で無料アカウント作成（GitHub連携が簡単）
 2. このフォルダをGitHubのプライベートリポジトリへpush（`data/`・`tls/`・`mail-config.json` は除外済み）
 3. Renderで「New + → Blueprint」→ リポジトリを選択 → `render.yaml` が自動で読まれてデプロイ完了

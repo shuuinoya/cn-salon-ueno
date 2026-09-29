@@ -387,12 +387,10 @@ const state = {
 
 // ---- 永続化（persist.js＝このシステムのデータベース層） ----
 // 予約・顧客・シフト・回数券・メニュー・設定・アカウント・ログイン中セッションを
-// ディスクへ保存し、起動時に復元する。サーバーを再起動しても・PCを再起動しても、
-// どの端末からアクセスしても、ここに保存された同じ最新データが正となる。
-// テスト・開発用のPORT指定起動では初期データで動き、本番データとは混ざらない。
-{
+// ディスク（およびGH_TOKEN設定時はGitHubの非公開リポジトリ）へ保存し、起動時に復元する。
+// 復元が終わるまでサーバーは受付を開始しない（server.js が ready を待つ）。
+const persistReady = (() => {
   const persist = require("./persist");
-  // 将来コード側に設定項目が増えても、古い保存データで欠けないよう初期値を控えておく
   const defaultSettings = JSON.parse(JSON.stringify(state.settings));
   const fillDefaults = (dst, src) => {
     for (const k of Object.keys(src)) {
@@ -403,17 +401,20 @@ const state = {
       }
     }
   };
-  const loaded = persist.loadSnapshot();
-  if (loaded.data) {
-    for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
-    fillDefaults(state.settings, defaultSettings);
-    for (const [t, s] of loaded.data.sessions || []) adminSessions.set(t, s);
-    console.log("保存データを読み込みました（予約・設定・回数券・アカウントを復元）: " + persist.dataFile());
-  } else if (persist.persistenceEnabled()) {
-    console.log("データ保存が有効です: " + persist.dataFile());
-  }
-  persist.startSaver(() => ({ savedAt: Date.now(), state, sessions: [...adminSessions.entries()] }));
-}
+  return (async () => {
+    const loaded = await persist.loadSnapshotWithRemote();
+    if (loaded.data) {
+      for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
+      fillDefaults(state.settings, defaultSettings);
+      for (const [t, s2] of loaded.data.sessions || []) adminSessions.set(t, s2);
+      console.log("保存データを読み込みました（予約・設定・回数券・アカウントを復元）");
+    } else if (persist.persistenceEnabled()) {
+      console.log("データ保存が有効です: " + persist.dataFile() +
+        (persist.remoteEnabled() ? "（GitHub同期あり）" : ""));
+    }
+    persist.startSaver(() => ({ savedAt: Date.now(), state, sessions: [...adminSessions.entries()] }));
+  })();
+})();
 
 function ensureDay(date) {
   // version は 0 始まりにする。管理画面は未取得の日付の revision を 0 とみなして
@@ -2751,4 +2752,4 @@ function handleDemoApi(req, res, url) {
   return true;
 }
 
-module.exports = { handleDemoApi, isAdminSession, clearSession };
+module.exports = { handleDemoApi, isAdminSession, clearSession, ready: persistReady };

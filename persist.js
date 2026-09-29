@@ -75,6 +75,85 @@ function loadSnapshot() {
   return { enabled: true, data: null, file };
 }
 
+// ---- GitHubリモート保存（完全無料の永続化） ---------------------------------
+// 無料ホスティング（Render無料枠など）はディスクが再起動で消えるため、
+// GH_TOKEN と GH_REPO（例 "owner/repo"）を設定すると、保存データを
+// GitHubの非公開リポジトリへも自動同期する。起動時はローカルとGitHubの
+// 新しい方（savedAt比較）を採用する。トークンはログに出さない。
+const GH = {
+  api: () => process.env.GH_API || "https://api.github.com",
+  repo: () => process.env.GH_REPO || "",
+  path: () => process.env.GH_PATH || "salon-data/state.json",
+  branch: () => process.env.GH_BRANCH || "main",
+  token: () => process.env.GH_TOKEN || "",
+  enabled: () => !!(process.env.GH_TOKEN && process.env.GH_REPO),
+};
+const ghHeaders = () => ({
+  "Authorization": "Bearer " + GH.token(),
+  "User-Agent": "cn-salon-persist",
+  "X-GitHub-Api-Version": "2022-11-28",
+});
+const ghUrl = () => `${GH.api()}/repos/${GH.repo()}/contents/${GH.path()}`;
+
+// GitHub上の現在のsha（ファイル未作成ならnull）
+async function ghSha() {
+  const r = await fetch(`${ghUrl()}?ref=${GH.branch()}`, {
+    headers: { ...ghHeaders(), Accept: "application/vnd.github.object+json" },
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error("GitHub参照に失敗: HTTP " + r.status);
+  return (await r.json()).sha || null;
+}
+// GitHub上の保存データ本文（未作成ならnull）
+async function ghFetch() {
+  const r = await fetch(`${ghUrl()}?ref=${GH.branch()}`, {
+    headers: { ...ghHeaders(), Accept: "application/vnd.github.raw" },
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error("GitHub取得に失敗: HTTP " + r.status);
+  return await r.text();
+}
+// GitHubへ保存（sha競合は一度だけ取り直して再試行）
+async function ghPut(json, sha, retry = true) {
+  const r = await fetch(ghUrl(), {
+    method: "PUT",
+    headers: { ...ghHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: "予約データ自動保存 " + new Date().toISOString(),
+      content: Buffer.from(json).toString("base64"),
+      branch: GH.branch(),
+      ...(sha ? { sha } : {}),
+    }),
+  });
+  if ((r.status === 409 || r.status === 422) && retry) {
+    return ghPut(json, await ghSha(), false);
+  }
+  if (!r.ok) throw new Error("GitHub保存に失敗: HTTP " + r.status);
+  return (await r.json()).content?.sha || null;
+}
+
+// 起動時：GitHub側とローカルの新しい方を返す（リモート無効ならローカルのみ）
+async function loadSnapshotWithRemote() {
+  const local = loadSnapshot();
+  if (!local.enabled || !GH.enabled()) return local;
+  try {
+    const text = await ghFetch();
+    if (text) {
+      const remote = JSON.parse(text, reviver);
+      if (remote && remote.state &&
+        (!local.data || (remote.savedAt || 0) >= (local.data.savedAt || 0))) {
+        console.log("GitHubから保存データを復元しました（" + GH.repo() + "）");
+        return { ...local, data: remote };
+      }
+    } else {
+      console.log("GitHub保存は有効です（初回保存でファイルが作られます）: " + GH.repo());
+    }
+  } catch (e) {
+    console.log("（警告）GitHubからの復元に失敗（ローカルの保存データで起動します）: " + e.message);
+  }
+  return local;
+}
+
 // 二重起動を検知して終了する場合など、「このプロセスは所有者ではない」と
 // 分かったときに呼ぶ。以後この プロセスからは一切保存しない
 // （終了時フックが古いスナップショットで本物のデータを上書きするのを防ぐ）
@@ -111,14 +190,53 @@ function startSaver(getSnapshot) {
     }
   };
 
+  // GitHubへの同期（有効時のみ）。30秒間隔で変化があれば送る。多重送信は防ぐ
+  let ghLastPushed = "";
+  let ghKnownSha; // undefined=未取得, null=リモート未作成
+  let ghBusy = false;
+  const ghPush = async () => {
+    if (!GH.enabled() || savesAborted || ghBusy) return;
+    const json = lastWritten;
+    if (!json || json === ghLastPushed) return;
+    ghBusy = true;
+    try {
+      if (ghKnownSha === undefined) ghKnownSha = await ghSha();
+      ghKnownSha = await ghPut(json, ghKnownSha);
+      ghLastPushed = json;
+    } catch (e) {
+      console.log("（警告）GitHubへの保存に失敗（次回再試行します）: " + e.message);
+      ghKnownSha = undefined; // 次回shaを取り直す
+    } finally {
+      ghBusy = false;
+    }
+  };
+  if (GH.enabled()) {
+    const ghTimer = setInterval(ghPush, 30000);
+    ghTimer.unref?.();
+  }
+
   const timer = setInterval(saveNow, 3000);
   timer.unref?.(); // 保存タイマーだけでプロセスを生かし続けない
   // 正常終了・停止シグナル時は即時保存してから終わる
   process.on("exit", saveNow);
   for (const sig of ["SIGINT", "SIGTERM"]) {
-    process.on(sig, () => { saveNow(); process.exit(0); });
+    process.on(sig, () => {
+      saveNow();
+      if (GH.enabled() && lastWritten !== ghLastPushed) {
+        // 停止前にGitHubへ送りきる（無料ホスティングのスリープ・再デプロイ対策。
+        // 猶予内に終わるよう最大4秒だけ待つ）
+        let done = false;
+        ghPush().then(() => { done = true; process.exit(0); });
+        setTimeout(() => { if (!done) process.exit(0); }, 4000);
+      } else {
+        process.exit(0);
+      }
+    });
   }
   return saveNow;
 }
 
-module.exports = { persistenceEnabled, loadSnapshot, startSaver, dataFile, abortSaves, isCloud };
+module.exports = {
+  persistenceEnabled, loadSnapshot, loadSnapshotWithRemote, startSaver,
+  dataFile, abortSaves, isCloud, remoteEnabled: GH.enabled,
+};

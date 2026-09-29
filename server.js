@@ -5,7 +5,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const { handleDemoApi, isAdminSession, clearSession } = require("./demo-api");
+const { handleDemoApi, isAdminSession, clearSession, ready: demoReady } = require("./demo-api");
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
@@ -578,4 +578,5 @@ server.on("listening", () => {
     console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/cnsalon-board`);
   }
 });
-server.listen(port, HOST);
+// 保存データ（ローカル／GitHub）の復元が終わってから受付を開始する
+demoReady.then(() => server.listen(port, HOST));
