@@ -58,6 +58,22 @@
 元サイト https://cn-salon-ueno.cnsalon2021.chatgpt.site を、2026年9月24日時点のまま保存したものです。
 `pages/` と `public/` の中身は基本的に元サイトのままです。例外は、追加したページ（demo-admin.html・pm-login.html・not-found.html）と、予約確認・完了ページのラベル折り返しバグを直すために最小修正した3ファイル（BookingText-*.js・page-WafCof8Y.js・page-ChO0-Npx.js）です。
 
+## 本番ホスティング（24時間・固定URL・Macの電源オフでも動く）
+このフォルダは**そのままクラウドへデプロイできる**構成になっています（Dockerfile・render.yaml・fly.toml同梱）。デプロイすると：
+- **固定URL**（例 `https://cn-salon-ueno.onrender.com`、独自ドメイン `cn-salon.com` も設定可）で、**お客様は24時間いつでも**予約サイトを開けます
+- **管理画面も同じURLの `/cnsalon-board`** から、スタッフがどこからでも利用できます（守りはIP制限ではなく、ログイン＋権限＋連続失敗ロック＋流量制限。すべてサーバー側で強制）
+- 予約・設定・回数券などのデータは**ホスティングの永続ディスク**（`DEMO_DATA=/var/data/state.json`）に保存され、再起動・再デプロイでも消えません
+- Cookieは自動でSecure化（常時HTTPS前提）。メール送信・Gmail取込も `mail-config.json` をディスクに置けばクラウドから動作します
+
+**デプロイ手順（Render の例・約10分）**
+1. https://render.com で無料アカウント作成（GitHub連携が簡単）
+2. このフォルダをGitHubのプライベートリポジトリへpush（`data/`・`tls/`・`mail-config.json` は除外済み）
+3. Renderで「New + → Blueprint」→ リポジトリを選択 → `render.yaml` が自動で読まれてデプロイ完了
+4. 発行されたURLが本番URL。独自ドメインは「Settings → Custom Domains」で追加（DNSのCNAMEを1件設定）
+※データ永続ディスクつきはStarterプラン（月$7程度）。Fly.io派は `fly.toml` を同梱済み（`flyctl launch --copy-config` → `fly volumes create salon_data --size 1` → `fly deploy`）
+
+**環境の切り分け**：クラウド上は `CLOUD=1`（または各社の環境変数）で自動判定され、ポート80/443・mDNS・トンネルなどローカル専用機能は起動しません。手元のF5起動（開発・店内利用）は従来どおり動き、本番とはデータも完全分離です。
+
 ## データの保存（永続化）と復旧
 - 予約・顧客・シフト・回数券・メニュー・店舗設定・アカウント・ログイン中セッションは、**`data/state.json` に自動保存**されます（3秒ごと・変化があったときだけ・原子的置換）。サーバー再起動・PC再起動・ブラウザ終了後も、どの端末から開いても同じ最新データが復元されます
 - 保存のたびに直前の版が `data/state.json.bak` として1世代残ります。ファイルが壊れていた場合は自動で `.bak` から復旧し、壊れたファイルは `.broken-日時` に退避します（システムは止まりません）

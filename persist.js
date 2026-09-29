@@ -35,9 +35,16 @@ function reviver(key, value) {
 // ・本番（PORT未指定＝5520で起動）は常に保存する
 // ・テスト・開発用に PORT を明示した起動は初期データで動く（本番データと混ざらない）
 // ・DEMO_PERSIST=1 で強制ON、DEMO_EPHEMERAL=1 で強制OFF（環境の明示的な切り替え）
+// クラウドホスティング上での実行か（Render / Fly.io / Railway、または CLOUD=1）
+function isCloud() {
+  return process.env.CLOUD === "1" || !!process.env.RENDER ||
+    !!process.env.FLY_APP_NAME || !!process.env.RAILWAY_ENVIRONMENT;
+}
+
 function persistenceEnabled() {
   if (process.env.DEMO_EPHEMERAL === "1") return false;
   if (process.env.DEMO_PERSIST === "1") return true;
+  if (isCloud()) return true; // 本番ホスティングでは常に保存（保存先はDEMO_DATAでボリュームへ）
   return !process.env.PORT || process.env.PORT === "5520";
 }
 
@@ -114,4 +121,4 @@ function startSaver(getSnapshot) {
   return saveNow;
 }
 
-module.exports = { persistenceEnabled, loadSnapshot, startSaver, dataFile, abortSaves };
+module.exports = { persistenceEnabled, loadSnapshot, startSaver, dataFile, abortSaves, isCloud };

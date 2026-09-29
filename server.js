@@ -158,9 +158,21 @@ const NAME_HOSTS = {
 // 許可するホスト名は正式URL＋mDNS名＋localhost/プライベートIPのみ（その他の名前は拒否）
 const HOST_NAMES = "cn-ueno-health-and-beauty(\\.localhost|\\.local)?|cnsalon-board(\\.localhost|\\.local)?";
 const PRIVATE_IPS = "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3}";
+// 本番ホスティング（Render/Fly/Railway等）での実行か。管理画面もインターネットから
+// 利用できるようになる（守りはIPではなく、ログイン＋権限＋ロック＋流量制限が担う）
+const CLOUD = require("./persist").isCloud();
+// 本番の公開ドメイン（PUBLIC_HOST=example.com,www.example.com のように指定。
+// ホスティング各社が自動設定するドメインも自動で許可する）
+const PUBLIC_HOSTS = [
+  ...(process.env.PUBLIC_HOST || "").split(",").map((h) => h.trim()).filter(Boolean),
+  process.env.RENDER_EXTERNAL_HOSTNAME || "",
+  process.env.FLY_APP_NAME ? process.env.FLY_APP_NAME + ".fly.dev" : "",
+  process.env.RAILWAY_PUBLIC_DOMAIN || "",
+].filter(Boolean);
+const PUBLIC_HOST_RE = PUBLIC_HOSTS.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 const TUNNEL_HOST = "[a-z0-9-]+\\.trycloudflare\\.com";
-const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST})(:\\d+)?$`, "i");
-const LOCAL_ORIGIN_RE = new RegExp(`^https?:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST})(:\\d+)?$`, "i");
+const LOCAL_HOST_RE = new RegExp(`^(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST}${PUBLIC_HOST_RE ? "|" + PUBLIC_HOST_RE : ""})(:\\d+)?$`, "i");
+const LOCAL_ORIGIN_RE = new RegExp(`^https?:\\/\\/(127\\.0\\.0\\.1|\\[::1\\]|localhost|${HOST_NAMES}|${PRIVATE_IPS}|${TUNNEL_HOST}${PUBLIC_HOST_RE ? "|" + PUBLIC_HOST_RE : ""})(:\\d+)?$`, "i");
 
 // ---- HTTPS用のローカル証明書（このMac専用の小さな認証局） ----
 // ブラウザの「保護されていない通信」表示を消すため、443番でHTTPSでも配信する。
@@ -273,7 +285,9 @@ const handler = (req, res) => {
     const adminSurface = p === "/admin" || p.startsWith("/admin/") || p === "/admin-original" ||
       p === "/demo/admin" || p.startsWith("/api/partner/") ||
       (p.startsWith("/api/demo/") && !publicDemoGet);
-    if (!raPrivate && adminSurface) {
+    // 本番ホスティングでは管理画面もインターネットから使う（IPではなく認証が守る）。
+    // ローカル運用（店のMac）では従来どおり店内ネットワーク限定
+    if (!CLOUD && !raPrivate && adminSurface) {
       res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end("Forbidden");
     }
@@ -425,7 +439,7 @@ const handler = (req, res) => {
 const server = http.createServer(handler);
 
 // ほかのサイト（localhost:3000 など）と混ざらないよう、専用の番号で起動する
-const HOST = "127.0.0.1";
+const HOST = process.env.BIND || (CLOUD ? "0.0.0.0" : "127.0.0.1");
 let port = Number(process.env.PORT) || 5520;
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
@@ -445,7 +459,15 @@ server.on("error", (e) => {
   }
 });
 server.on("listening", () => {
-  process.env.DEMO_ORIGIN = `http://${HOST}:${port}`; // メール内のリンク生成用
+  process.env.DEMO_ORIGIN = PUBLIC_HOSTS[0] ? `https://${PUBLIC_HOSTS[0]}` : `http://127.0.0.1:${port}`; // メール内のリンク生成用
+  if (CLOUD) {
+    console.log("本番ホスティングモードで起動しました。");
+    if (PUBLIC_HOSTS.length) {
+      console.log(`  予約サイト : https://${PUBLIC_HOSTS[0]}/`);
+      console.log(`  管理画面   : https://${PUBLIC_HOSTS[0]}/cnsalon-board （要ログイン）`);
+    }
+    return; // ポート80/443・mDNS・トンネルはローカル専用機能のため起動しない
+  }
   console.log("起動しました。");
   // 数字なしのURL（ポート80）。使用中などで開けない場合は番号つきURLを案内する
   const server80 = http.createServer(handler);
@@ -550,7 +572,7 @@ server.on("listening", () => {
     } catch {}
   });
   // macOSは 127.0.0.1 指定だと80番を開けないため全体で待ち、上のループバック検査で守る
-  if (port === 5520) server80.listen(80);
+  if (port === 5520 && !CLOUD) server80.listen(80);
   else {
     console.log(`  予約サイト【${BOOKING_BRAND}】 : http://${HOST}:${port}/cn-ueno-health-and-beauty`);
     console.log(`  管理画面 【${ADMIN_BRAND}】 : http://${HOST}:${port}/cnsalon-board`);

@@ -1,0 +1,20 @@
+# Render (https://render.com) 用ブループリント。
+# ダッシュボードで「New +」→「Blueprint」→このリポジトリを選ぶだけでデプロイされる。
+# Starterプラン（有料・月$7程度）の永続ディスクに予約データを保存する。
+services:
+  - type: web
+    name: cn-salon-ueno
+    runtime: docker
+    plan: starter
+    healthCheckPath: /
+    disk:
+      name: salon-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: CLOUD
+        value: "1"
+      - key: BIND
+        value: "0.0.0.0"
+      - key: DEMO_DATA
+        value: /var/data/state.json

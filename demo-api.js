@@ -14,6 +14,9 @@ const tls = require("tls");
 // ・権限は admin > manager > staff の3段階。すべての管理APIはサーバー側で
 //   ログインと権限を検証する（URLを知っているだけでは何も見えない・できない）
 const crypto = require("crypto");
+// 本番ホスティング（常時HTTPS）ではCookieにSecureを付け、暗号化された通信でしか送らない
+const IS_CLOUD = require("./persist").isCloud();
+const COOKIE_FLAGS = "Path=/; HttpOnly; SameSite=Lax" + (IS_CLOUD ? "; Secure" : "");
 const hashPass = (p) => crypto.createHash("sha256").update(String(p)).digest("hex");
 const ADMIN_ID = "kudaka1228";
 const ADMIN_PASS_HASH = "83cd05b641499627e43bd8a389cf712e2b3cf75bcda25c8e0b76593c848949de"; // 初期管理者
@@ -50,7 +53,7 @@ function denyApi(req, res) {
 }
 function clearSession(req, res) {
   adminSessions.delete(sessionTokenOf(req));
-  res.setHeader("Set-Cookie", "pm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  res.setHeader("Set-Cookie", "pm_session=; " + COOKIE_FLAGS + "; Max-Age=0");
 }
 // 認証イベントの記録（パスワード等の機密は残さない）
 function authLogPush(entry) {
@@ -1857,7 +1860,7 @@ function handleDemoApi(req, res, url) {
         authLogPush({ kind: "login", user, ok: true, ip });
         res.writeHead(200, {
           "Content-Type": "application/json",
-          "Set-Cookie": `pm_session=${token}; Path=/; HttpOnly; SameSite=Lax`,
+          "Set-Cookie": `pm_session=${token}; ${COOKIE_FLAGS}`,
         });
         res.end(JSON.stringify({ ok: true, role: acc.role, name: acc.name }));
       } else {
