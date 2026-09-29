@@ -113,10 +113,12 @@ function send404(res, head) {
 }
 
 // ---- セキュリティ ----
-// ・接続を受け付けるのは「このパソコン」と「同じネットワーク（Wi-Fi/LAN）のプライベートIP」のみ。
-//   インターネット側のアドレスからの接続は下の検査で全て拒否します
-// ・LANに開いても、管理画面と管理APIはすべてサーバー側でログイン・権限を検証します
+// ・お客様の予約サイトは誰でも開けます（ログイン不要。ただし下の流量制限つき）。
+//   管理系（/admin…・管理API）は「このパソコン」と「同じネットワークのプライベートIP」
+//   からのみ到達でき、さらにサーバー側でログイン・権限を必ず検証します
 //   （URLを知っているだけでは、ページも内部データも一切見えません）
+// ・インターネットに公開する場合も、外から届くのは予約サイトだけで、管理系には
+//   ネットワーク的に到達できません（多重防御）
 // ・データはこのパソコンのメモリ上のみ（Single Source of Truth）。どの端末から
 //   開いても、このサーバーが返す同じ最新データが表示されます
 // ・下のHost/Origin検査で、悪意あるWebサイト経由のアクセス（DNSリバインディング・CSRF）も遮断します
@@ -206,22 +208,62 @@ code{background:#eee3d5;padding:1px 6px;border-radius:4px}ol{padding-left:22px}s
 インストールしない端末でも、今までどおり http:// のURLでそのまま使えます。</small></p>
 </body></html>`;
 
+// 流量制限（IPごとの簡易スライディングウィンドウ。メモリ上のみ）
+const rateBuckets = new Map(); // key -> { n, t }
+function rateLimited(key, limit, windowMs) {
+  const now = Date.now();
+  let b = rateBuckets.get(key);
+  if (!b || now - b.t > windowMs) { b = { n: 0, t: now }; rateBuckets.set(key, b); }
+  b.n++;
+  if (rateBuckets.size > 5000) {
+    for (const [k, v] of rateBuckets) {
+      if (now - v.t > 600000) rateBuckets.delete(k);
+      if (rateBuckets.size <= 2500) break;
+    }
+  }
+  return b.n > limit;
+}
+
 const handler = (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const head = req.method === "HEAD";
 
-  // 接続元の検査：このパソコン（ループバック）と、同じネットワークのプライベートIP
-  // （Wi-Fi/LAN上のスタッフ端末）だけを許可し、インターネット側からの接続は全て拒否する。
-  // ※LANの端末にも、管理画面・管理APIはログインと権限のサーバー側検証が必ずかかる
+  // ---- 接続元の検査（二層構え） ----
+  // ・お客様の予約サイト（予約ページ・予約/回数券API・静的ファイル）は誰でも開ける
+  // ・管理系（/admin…・/api/demo/…・/api/partner/…）は、このパソコンと
+  //   同じネットワーク（店内Wi-Fi/LAN）のプライベートIPからのみ。さらにログインと
+  //   権限のサーバー側検証が必ずかかる（IP制限は多重防御の1枚目にすぎない）
   const ra = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
-  const raOk = ra === "127.0.0.1" || ra === "::1" ||
+  const raLoopback = ra === "127.0.0.1" || ra === "::1";
+  const raPrivate = raLoopback ||
     /^(10\.|192\.168\.|169\.254\.)/.test(ra) || /^172\.(1[6-9]|2\d|3[01])\./.test(ra) ||
     /^(fe80:|fd)/i.test(ra);
-  if (!raOk) {
-    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-    return res.end("Forbidden");
+  {
+    const p = url.pathname;
+    // 予約サイト側でも使う公開GET（フォーム設定・メニュー/スタッフ写真）だけは例外
+    const publicDemoGet = (req.method === "GET" || req.method === "HEAD") &&
+      (p === "/api/demo/settings" || p === "/api/demo/course-photo" || p === "/api/demo/staff-photo");
+    const adminSurface = p === "/admin" || p.startsWith("/admin/") || p === "/admin-original" ||
+      p === "/demo/admin" || p.startsWith("/api/partner/") ||
+      (p.startsWith("/api/demo/") && !publicDemoGet);
+    if (!raPrivate && adminSurface) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("Forbidden");
+    }
   }
 
+  // ---- 流量制限（公開に耐えるための防御。このパソコン自身は対象外） ----
+  // ・全体：1つのIPにつき30秒で300リクエストまで（通常閲覧では届かない量）
+  // ・予約・回数券などの書き込みとログイン試行：1つのIPにつき5分で40回まで
+  if (!raLoopback) {
+    const p = url.pathname;
+    const isWriteTarget = req.method === "POST" && (p === "/api/bookings" || p === "/api/bookings/cancel" ||
+      p.startsWith("/api/tickets/") || p === "/api/demo/login");
+    if (rateLimited("g:" + ra, 300, 30000) || (isWriteTarget && rateLimited("w:" + ra, 40, 300000))) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "30" });
+      return res.end(JSON.stringify({ error: "tooManyRequests" }));
+    }
+  }
 
   // Hostヘッダ検証：外部ドメイン名経由でローカルサーバーへ到達させる攻撃を遮断
   if (!LOCAL_HOST_RE.test(req.headers.host || "")) {
