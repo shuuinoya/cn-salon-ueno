@@ -2026,6 +2026,25 @@
           "</div>").join("") : '<p class="pm-tk-empty">プランがありません。上の欄から追加してください。</p>';
       } catch { box.textContent = "読み込みに失敗しました"; }
     }
+    // 回数券ごとのメール送信履歴：送信日時・種類・結果・送信時点の残り回数と有効期限・台帳との一致
+    function ticketMailsHtml(t) {
+      const mails = t.mails || [];
+      if (!mails.length) return '<span class="pm-tk-empty">この回数券に関するメールはまだありません。</span>';
+      const TYPE = { ticket: "回数券のお知らせ", ticketRemind: "期限リマインド", confirm: "予約完了", remind: "予約リマインド",
+        change: "予約変更", cancel: "予約取消", notify: "新規予約通知（店舗）" };
+      const ST = { sent: "送信済み", failed: "送信失敗", skipped: "送信中止", pending: "送信予定", sending: "送信処理中" };
+      const dt = (ms) => ms ? new Date(ms + 9 * 3600e3).toISOString().replace("T", " ").slice(0, 16) : "-";
+      return '<table class="pm-tk-mails"><thead><tr><th>送信日時</th><th>種類</th><th>宛先</th><th>結果</th><th>送信時点の残り</th><th>送信時点の有効期限</th><th>台帳との照合</th></tr></thead><tbody>' +
+        mails.map((m) =>
+          "<tr><td>" + dt(m.sentAt || m.renderedAt || m.scheduledAt) + "</td>" +
+          "<td>" + esc((TYPE[m.type] || m.type) + (m.kind === "store" ? "（店舗宛）" : "")) + "</td>" +
+          "<td>" + esc(m.to) + "</td>" +
+          "<td>" + esc(ST[m.status] || m.status) + (m.error ? "<br><small>" + esc(m.error) + "</small>" : "") + (m.skipReason ? "<br><small>" + esc(m.skipReason) + "</small>" : "") + "</td>" +
+          "<td>" + (m.snap ? m.snap.usesLeft + "回／" + m.snap.usesTotal + "回" : (m.status === "pending" ? "送信時に確定" : "-")) + "</td>" +
+          "<td>" + (m.snap ? esc(m.snap.expiresLabel) : "-") + "</td>" +
+          "<td>" + (m.match === true ? "一致" : m.match === false ? '<b style="color:#c0392b">不一致（台帳 残り' + m.ledger.usesLeft + "回）</b>" : "-") + "</td></tr>").join("") +
+        "</tbody></table>";
+    }
     async function loadTickets() {
       const box = wrap.querySelector(".pm-tk-list");
       try {
@@ -2038,7 +2057,7 @@
             "<td>" + esc(t.plan_name) + "</td><td>" + jd(t.purchased_at) + "</td>" +
             "<td>" + t.uses_total + "回</td><td>" + t.used + "回</td><td><b>" + t.uses_left + "回</b></td>" +
             "<td>" + jd(t.expires_at) + "</td><td>" + (t.remind_sent ? "送信済み" : "未送信") + "</td><td>" + esc(t.status) + "</td>" +
-            '<td><button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-adj">調整</button></td></tr>' +
+            '<td><button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-mail">メール</button> <button type="button" class="tk-adj">調整</button></td></tr>' +
             '<tr class="pm-tk-histrow" hidden><td colspan="10">' +
             t.history.map((h) =>
               esc(String(h.at).replace("T", " ").slice(0, 16)) + "　" +
@@ -2046,7 +2065,9 @@
               (h.ref ? "（予約ID " + esc(h.ref) + "）" : "") +
               "　" + (h.delta > 0 ? "+" : "") + h.delta + "回 → 残り" + h.left_after + "回" +
               (h.note ? "　※" + esc(h.note) : "")).join("<br>") +
-            "</td></tr>").join("") +
+            "</td></tr>" +
+            // この回数券について送ったメールと、送信時点の残り回数・有効期限（台帳と照合）
+            '<tr class="pm-tk-mailrow" hidden><td colspan="10">' + ticketMailsHtml(t) + "</td></tr>").join("") +
           "</tbody></table>";
       } catch { box.textContent = "読み込みに失敗しました"; }
     }
@@ -2096,6 +2117,11 @@
       if (tkRow && e.target.classList.contains("tk-hist")) {
         const hist = tkRow.nextElementSibling;
         if (hist) hist.hidden = !hist.hidden;
+        return;
+      }
+      if (tkRow && e.target.classList.contains("tk-mail")) {
+        const mailRow = tkRow.nextElementSibling?.nextElementSibling;
+        if (mailRow && mailRow.classList.contains("pm-tk-mailrow")) mailRow.hidden = !mailRow.hidden;
         return;
       }
       if (tkRow && e.target.classList.contains("tk-adj")) {

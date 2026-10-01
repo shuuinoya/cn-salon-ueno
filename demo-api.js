@@ -483,6 +483,28 @@ const persistReady = (() => {
         state.accounts.delete(LEGACY_ADMIN_ID);
         console.log(`管理者IDを ${LEGACY_ADMIN_ID} → ${ADMIN_ID} へ移行しました`);
       }
+      // 送信処理中のまま停止・再起動したメールは、届いたかどうか確認できない。
+      // 二重送信を防ぐため自動では再送せず、「送信結果不明」として管理画面に残す
+      for (const m of state.mails || []) {
+        if (m.status === "sending") {
+          m.status = "failed";
+          m.error = "送信処理中にサーバーが再起動したため、送信結果を確認できませんでした（二重送信防止のため自動再送はしていません）";
+        }
+      }
+      // 以前の版で本文を固定して積んだ「回数券を使った予約」の送信待ちリマインドは、
+      // 送信時に最新の残り回数・有効期限で作り直すよう指定を付け直す
+      for (const m of state.mails || []) {
+        if (m.tpl || m.status !== "pending" || m.type !== "remind" || !m.bookingId) continue;
+        const found = findBooking(m.bookingId);
+        if (!found || !found.bk.ticket_id) continue;
+        const variant = m.kind === "store" ? "storeRemind"
+          : String(m.body || "").includes("予約のキャンセルはこちら") ? "customerRemind" : "customerChangeRemind";
+        m.tpl = { name: "booking", variant, bookingId: m.bookingId };
+      }
+      // 期限リマインドの重複防止キーを「送った有効期限」に移行（従来の送信済みフラグを引き継ぐ）
+      for (const t of state.tickets.values()) {
+        if (t.remind_sent && t.remind_for_expiry === undefined) t.remind_for_expiry = t.expires_at;
+      }
       // 環境変数でパスワードが指定されている場合は、保存済みアカウントにも常に適用する
       if (process.env.ADMIN_PASS_HASH && state.accounts.has(ADMIN_ID)) {
         state.accounts.get(ADMIN_ID).pass = process.env.ADMIN_PASS_HASH;
@@ -929,31 +951,57 @@ function mailHtml(body) {
     "</td></tr></table></td></tr></table></body></html>";
 }
 
-function queueMail(kind, type, to, subject, body, scheduledAt, bookingId) {
+// tpl（任意）：回数券の情報を含むメールの「本文の作り方」。本文は文字列で固定せず、
+// 送信する直前に tpl から最新の回数券データ（state.tickets＝データベース）で作り直す。
+// キュー時点の本文は管理画面のプレビュー用（送信時に最新の内容へ置き換わる）
+function queueMail(kind, type, to, subject, body, scheduledAt, bookingId, tpl) {
   state.mailSerial++;
-  state.mails.push({
+  const m = {
     id: "mail-" + state.mailSerial,
     kind,                 // "customer" | "store"
-    type,                 // "confirm" | "notify" | "remind" | "change" | "cancel"
+    type,                 // "confirm" | "notify" | "remind" | "change" | "cancel" | "ticket" | "ticketRemind" | "member"
     to, subject, body,
     html: mailHtml(body), // 実際に届くHTMLメール（参考画像と同一の見た目）
     scheduledAt,          // この時刻になったら送信処理を行う
     createdAt: Date.now(),
     bookingId: bookingId || null,
-    status: "pending",    // pending（送信予定）→ sending（処理中）→ sent／failed
+    status: "pending",    // pending（送信予定）→ sending（処理中）→ sent／failed／skipped（送信中止）
     sentAt: null,
     error: null,
-  });
+  };
+  if (tpl) {
+    m.tpl = tpl;
+    applyMailTemplate(m, false); // プレビュー用に今の内容で一度作る（送信時に作り直す）
+  }
+  state.mails.push(m);
+  return m;
 }
 
 // 送信時刻を過ぎたメールを送信処理する（デモの配信サービスは即時に応答する）。
 // 「送信済み」への遷移は配信サービスの成功応答を確認してから行い、
-// 一度 sent／failed になったメールは二度と再送しない（二重送信防止）。
+// 一度 sent／failed／skipped になったメールは二度と再送しない（二重送信防止）。
+// 回数券を含むメールは、ここで（送信の直前に）最新の回数券データから本文を作り直し、
+// 送信時点の残り回数・有効期限を ticketSnap としてメール記録に残す。
 function deliverDueMails() {
   ticketRemindSweep(); // 期限1か月前の自動リマインド（冪等）
   const now = Date.now();
   for (const m of state.mails) {
     if (m.status !== "pending" || m.scheduledAt > now) continue;
+    if (m.tpl) {
+      try {
+        const r = applyMailTemplate(m, true);
+        if (r && r.skip) {
+          // 例：期限リマインドの送信時点で使い切り・期限切れ → 誤った案内を送らず中止して記録する
+          m.status = "skipped";
+          m.skipReason = r.skip;
+          continue;
+        }
+      } catch (e) {
+        m.status = "failed";
+        m.error = "本文の作成に失敗したため送信していません: " + e.message;
+        continue;
+      }
+    }
     m.status = "sending";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
       m.status = "failed";
@@ -1022,32 +1070,21 @@ function jstDateStr(ms) {
 }
 
 // 有効期限の1か月前になったら自動でリマインドメールを1通だけ送る。
-// 送信済みフラグを先に立てるため、この処理が何度実行されても同じ券に重複送信しない
+// 重複防止：「どの有効期限に対して送ったか」（remind_for_expiry）を先に記録するため、
+// この処理が何度・どの端末のアクセスから実行されても、同じ券・同じ期限には1通だけ。
+// （期限が延長された場合は、新しい期限に対して改めて1通送れる）
+// 本文は送信直前に最新の残り回数・有効期限で作る（ticketRemind テンプレート）
 function ticketRemindSweep() {
   const now = Date.now();
   for (const t of state.tickets.values()) {
-    if (t.remind_sent) continue;
-    if (t.uses_left <= 0) continue;          // 使い切りは対象外
-    if (now > t.expires_at) continue;        // 期限切れは対象外
+    if (t.remind_for_expiry === t.expires_at) continue;
+    if (!ticketUsable(t)) continue;                  // 使い切り・期限切れは対象外
     if (now < t.expires_at - 30 * 86400e3) continue; // 1か月前になるまで待つ
-    t.remind_sent = true;
+    t.remind_for_expiry = t.expires_at;
+    t.remind_sent = true; // 管理画面の「期限リマインド」表示用（従来の項目）
     queueMail("customer", "ticketRemind", t.buyer_email,
-      `${MAIL_STORE} 回数券の有効期限が近づいています`,
-      [
-        `${t.buyer_name} 様`,
-        "",
-        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
-        `お持ちの「${t.plan_name}」の有効期限が近づいています。`,
-        "",
-        SEP,
-        `　${t.plan_name}`,
-        `残り回数：${t.uses_left}回`,
-        `有効期限：${jstDateStr(t.expires_at)}`,
-        SEP,
-        "有効期限を過ぎるとご利用いただけなくなります。お早めのご予約をお待ちしております。",
-        `${origin()}/book`,
-      ].join("\n") + MAIL_COMMON,
-      now, t.id);
+      `${MAIL_STORE} 回数券の有効期限が近づいています`, "", now, null,
+      { name: "ticketRemind", ticketId: t.id, expiresAt: t.expires_at });
   }
 }
 
@@ -1055,6 +1092,198 @@ function ticketStatus(t) {
   if (t.uses_left <= 0) return "使い切り";
   if (Date.now() > t.expires_at) return "期限切れ";
   return "有効";
+}
+// 「今使える回数券か」の判定はすべてここに集約する（残り1回以上・期限内）
+function ticketUsable(t) {
+  return !!t && t.uses_left > 0 && Date.now() <= t.expires_at;
+}
+function ticketUsageLabel(t) {
+  if (t.uses_left <= 0) return "残り回数がないため、ご利用いただけません";
+  if (Date.now() > t.expires_at) return "有効期限を過ぎたため、ご利用いただけません";
+  return "ご利用いただけます";
+}
+// メール送信時点の回数券の状態（メール記録に保存して、後から管理画面で照合できるようにする）
+function ticketSnapshot(t) {
+  return {
+    ticketId: t.id, planName: t.plan_name, purchasedAt: t.purchased_at,
+    usesTotal: t.uses_total, usesLeft: t.uses_left,
+    expiresAt: t.expires_at, expiresLabel: jstDateStr(t.expires_at),
+    status: ticketStatus(t), usable: ticketUsable(t),
+  };
+}
+// 同じお客様（購入時のメール、または会員アカウント）が持っている回数券
+function customerTickets(email) {
+  const e = String(email || "").toLowerCase();
+  if (!e) return [];
+  return [...state.tickets.values()].filter((t) => t.buyer_email === e || t.member_email === e);
+}
+// メール本文に差し込む回数券情報（必ずその時点の state.tickets から作る）
+function ticketInfoBlock(t) {
+  return [
+    SEP,
+    `　${t.plan_name}`,
+    `購入日 ${jstDateStr(Date.parse(t.purchased_at))}`,
+    `残り回数 あと${t.uses_left}回（${t.uses_total}回のうち ${t.uses_total - t.uses_left}回ご利用済み）`,
+    `有効期限 ${jstDateStr(t.expires_at)}`,
+    `ご利用状況 ${ticketUsageLabel(t)}`,
+    SEP,
+  ];
+}
+// 同じお客様が他にも「今使える」回数券を持っていれば、取り違えないよう券ごとに並べる
+function otherUsableTickets(t) {
+  return customerTickets(t.buyer_email).concat(t.member_email ? customerTickets(t.member_email) : [])
+    .filter((x, i, a) => x.id !== t.id && ticketUsable(x) && a.findIndex((y) => y.id === x.id) === i)
+    .sort((a, b) => a.expires_at - b.expires_at);
+}
+function otherTicketLines(others) {
+  if (!others.length) return [];
+  return ["", "ほかにご利用いただける回数券", ...others.map((x) =>
+    `・${x.plan_name}　あと${x.uses_left}回（有効期限 ${jstDateStr(x.expires_at)}）`)];
+}
+const SNAP_NOTE = "※回数券の内容は、このメールを送信した時点の最新の状態です。";
+
+// ---- 回数券を含むメールのテンプレート（送信直前に呼ばれ、最新データで本文を作る） ----
+// 戻り値：{ subject, body, tickets:[本文に載せた券] } または { skip: "中止理由" }
+const MAIL_TPL = {
+  // 購入のご案内
+  ticketPurchase(p) {
+    const t = state.tickets.get(p.ticketId);
+    if (!t) throw new Error("回数券が見つかりません: " + p.ticketId);
+    const others = otherUsableTickets(t);
+    return {
+      subject: `${MAIL_STORE} 回数券ご購入のご案内`,
+      tickets: [t, ...others],
+      body: [
+        `この度は「${MAIL_STORE}」の回数券をご購入いただきありがとうございます。`,
+        "ご購入内容は以下のとおりです。",
+        "",
+        SEP,
+        `　${t.plan_name}`,
+        `購入日 ${jstDateStr(Date.parse(t.purchased_at))}`,
+        `ご利用可能回数 ${t.uses_total}回`,
+        `残り回数 あと${t.uses_left}回（${t.uses_total}回のうち ${t.uses_total - t.uses_left}回ご利用済み）`,
+        `有効期限 ${jstDateStr(t.expires_at)}（購入日から1年間）`,
+        `ご利用状況 ${ticketUsageLabel(t)}`,
+        `料金 ${t.price.toLocaleString("ja-JP")} 円（店頭でのお支払い）`,
+        SEP,
+        ...otherTicketLines(others),
+        "",
+        "ご予約の際に「回数券を使用する」をお選びいただくと、1回のご予約につき1回分を使用します。",
+        "残り回数はマイページからいつでもご確認いただけます。",
+        SNAP_NOTE,
+      ].join("\n") + MAIL_COMMON,
+    };
+  },
+  // 1回使用・1回返却のたびの残数お知らせ
+  ticketLeft(p) {
+    const t = state.tickets.get(p.ticketId);
+    if (!t) throw new Error("回数券が見つかりません: " + p.ticketId);
+    const left = t.uses_left;
+    const others = otherUsableTickets(t);
+    const head = p.kind === "refund"
+      ? `ご予約の取消にともない、回数券「${t.plan_name}」を1回分お戻ししました。`
+      : `ご予約（予約番号 ${p.ref || "-"}）で回数券「${t.plan_name}」を1回分ご利用いただきました。`;
+    return {
+      subject: `${MAIL_STORE} 回数券の残り回数のお知らせ（あと${left}回）`,
+      tickets: [t, ...others],
+      body: [
+        head,
+        "",
+        ...ticketInfoBlock(t),
+        left === 0
+          ? "残り回数が0回になりました。マイページからいつでも新しい回数券をご購入いただけます。"
+          : left <= 2
+            ? "残り回数が少なくなっています。マイページからいつでも新しい回数券をご購入いただけます。"
+            : "残り回数はマイページ（予約サイト右上の「ログイン」→「回数券」）からいつでもご確認いただけます。",
+        ...otherTicketLines(others),
+        SNAP_NOTE,
+        `${origin()}/mypage#tickets`,
+      ].join("\n") + MAIL_COMMON,
+    };
+  },
+  // 有効期限1か月前のリマインド
+  ticketRemind(p) {
+    const t = state.tickets.get(p.ticketId);
+    if (!t) return { skip: "回数券が見つかりません" };
+    // 送信時点で案内の意味がない状態なら、誤った案内を送らずに中止する
+    if (t.uses_left <= 0) return { skip: "送信時点で残り回数が0回のため中止しました" };
+    if (Date.now() > t.expires_at) return { skip: "送信時点で有効期限を過ぎていたため中止しました" };
+    if (Date.now() < t.expires_at - 30 * 86400e3) return { skip: "有効期限が延長され、期限まで1か月以上あるため中止しました" };
+    const others = otherUsableTickets(t);
+    return {
+      subject: `${MAIL_STORE} 回数券の有効期限が近づいています`,
+      tickets: [t, ...others],
+      body: [
+        `${t.buyer_name} 様`,
+        "",
+        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+        `お持ちの「${t.plan_name}」の有効期限が近づいています。`,
+        "",
+        ...ticketInfoBlock(t),
+        "有効期限を過ぎるとご利用いただけなくなります。お早めのご予約をお待ちしております。",
+        ...otherTicketLines(others),
+        SNAP_NOTE,
+        `${origin()}/book`,
+      ].join("\n") + MAIL_COMMON,
+    };
+  },
+  // 回数券を使った予約のメール（完了・リマインド・変更・取消／お客様・店舗）。
+  // 予約内容の部分は従来と同じ文面で、回数券の行だけを送信時点の最新値で作る
+  booking(p) {
+    const found = findBooking(p.bookingId);
+    if (!found) throw new Error("予約が見つかりません: " + p.bookingId);
+    const bk = found.bk;
+    const t = bk.ticket_id ? state.tickets.get(bk.ticket_id) : null;
+    const built = BOOKING_MAIL[p.variant](bk, p);
+    return { ...built, tickets: t ? [t, ...otherUsableTickets(t)] : [] };
+  },
+};
+
+// 台帳（回数券の履歴）から「ある時刻の時点の残り回数・有効期限」を求める（メールとの照合用）
+function ticketLedgerAt(t, ms) {
+  let usesLeft = null;
+  for (const h of t.history || []) if (Date.parse(h.at) <= ms) usesLeft = h.left_after;
+  let expiresAt = t.expires_at;
+  const laterExt = (t.history || []).filter((h) => h.type === "extend" && Date.parse(h.at) > ms);
+  if (laterExt.length) expiresAt = laterExt[0].expires_before ?? null; // 後から期限変更があれば変更前の値
+  return { usesLeft, expiresAt };
+}
+// この回数券について送った（送る予定の）メールと、送信時点の残り回数・有効期限、台帳との一致
+function ticketMailLog(t) {
+  return state.mails.filter((m) => (m.ticketIds || []).includes(t.id)).map((m) => {
+    const snap = (m.ticketSnap || []).find((s) => s.ticketId === t.id) || null;
+    let ledger = null, match = null;
+    if (snap && m.renderedAt) {
+      ledger = ticketLedgerAt(t, m.renderedAt);
+      match = ledger.usesLeft === snap.usesLeft && (ledger.expiresAt === null || ledger.expiresAt === snap.expiresAt);
+    }
+    return {
+      id: m.id, type: m.type, kind: m.kind, to: m.to, subject: m.subject, status: m.status,
+      scheduledAt: m.scheduledAt, sentAt: m.sentAt, renderedAt: m.renderedAt || null,
+      error: m.error || null, skipReason: m.skipReason || null, snap, ledger, match,
+    };
+  }).sort((a, b) => (b.renderedAt || b.scheduledAt) - (a.renderedAt || a.scheduledAt));
+}
+
+// テンプレートからメールの件名・本文を作る。atSend=true のときは送信時点の回数券の状態を記録する
+function applyMailTemplate(m, atSend) {
+  const fn = MAIL_TPL[m.tpl && m.tpl.name];
+  if (!fn) return null;
+  const r = fn(m.tpl);
+  if (!r || r.skip) {
+    if (!atSend && r && r.skip && !m.body) m.body = "（送信予定時刻に最新の回数券情報で本文を作成します）";
+    if (!atSend && m.body) m.html = mailHtml(m.body);
+    return r;
+  }
+  m.subject = r.subject;
+  m.body = r.body;
+  m.html = mailHtml(r.body);
+  m.ticketIds = r.tickets.map((t) => t.id);
+  if (atSend) {
+    m.renderedAt = Date.now();
+    m.ticketSnap = r.tickets.map(ticketSnapshot);
+  }
+  return r;
 }
 
 function ticketPublicJson(t) {
@@ -1081,6 +1310,7 @@ function ticketForUse(ticketId, token, email, member) {
   if (!own && String(email || "").toLowerCase() !== t.buyer_email) throw err(409, "ticketInvalid");
   if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
   if (t.uses_left <= 0) throw err(409, "ticketEmpty");
+  if (!ticketUsable(t)) throw err(409, "ticketInvalid");
   return t;
 }
 
@@ -1097,32 +1327,14 @@ function consumeTicket(t, bookingId, ref) {
 }
 
 // 回数券の残数お知らせメール（1回使うたび・返却のたびに「あと何回」を本人へ送る。
-// マイページの回数券タブでも同じ残数をいつでも確認できる）
+// マイページの回数券タブでも同じ残数をいつでも確認できる）。
+// 本文は送信直前に最新の残り回数・有効期限で作る（ticketLeft テンプレート）。
+// メールの成否は回数券の処理と切り離す（メールが失敗しても残数の処理は確定済み・記録は管理画面に残る）
 function queueTicketLeftMail(t, type, ref) {
   try {
-    const left = t.uses_left;
-    const expJa = jstDateStr(t.expires_at);
-    const head = type === "refund"
-      ? [`ご予約の取消にともない、回数券「${t.plan_name}」を1回分お戻ししました。`]
-      : [`ご予約（予約番号 ${ref || "-"}）で回数券「${t.plan_name}」を1回分ご利用いただきました。`];
     queueMail("customer", "ticket", t.buyer_email,
-      `${MAIL_STORE} 回数券の残り回数のお知らせ（あと${left}回）`,
-      [
-        ...head,
-        "",
-        SEP,
-        `　${t.plan_name}`,
-        `残り回数 あと${left}回（${t.uses_total}回のうち ${t.uses_total - left}回ご利用済み）`,
-        `有効期限 ${expJa}`,
-        SEP,
-        left === 0
-          ? "残り回数が0回になりました。マイページからいつでも新しい回数券をご購入いただけます。"
-          : left <= 2
-            ? "残り回数が少なくなっています。マイページからいつでも新しい回数券をご購入いただけます。"
-            : "残り回数はマイページ（予約サイト右上の「ログイン」→「回数券」）からいつでもご確認いただけます。",
-        `${origin()}/mypage#tickets`,
-      ].join("\n") + MAIL_COMMON,
-      Date.now(), null);
+      `${MAIL_STORE} 回数券の残り回数のお知らせ`, "", Date.now(), null,
+      { name: "ticketLeft", ticketId: t.id, kind: type === "refund" ? "refund" : "use", ref: ref || null });
     deliverDueMails();
   } catch {}
 }
@@ -1145,29 +1357,37 @@ function maybeRefundTicket(bk) {
   return true;
 }
 
-// 回数券利用予約のメール追記行（未使用の予約では空＝既存メールを一切変えない）
+// 回数券利用予約のメール追記行（未使用の予約では空＝既存メールを一切変えない）。
+// 残り回数・有効期限は予約時に控えた数字ではなく、呼ばれた時点（＝送信直前）の
+// state.tickets から取る。例：予約後に別の予約で1回使えば、リマインドには減った後の回数が載る
 function ticketMailLinesCustomer(bk) {
   if (!bk.ticket_id) return [];
-  if (bk.ticket_refunded) {
-    return [
-      `回数券「${bk.ticket_name}」を1回分お戻ししました。`,
-      `現在の残り回数：${bk.ticket_left_after}回`,
-      "",
-    ];
+  const t = state.tickets.get(bk.ticket_id);
+  if (!t) {
+    // 券のデータが無い場合（通常は起きない）は予約に控えた値で従来どおり
+    return bk.ticket_refunded
+      ? [`回数券「${bk.ticket_name}」を1回分お戻ししました。`, `現在の残り回数：${bk.ticket_left_after}回`, ""]
+      : ["今回のご予約で回数券を1回使用します。", `ご予約後の残り回数：${bk.ticket_left_after}回`, `（ご利用の回数券：${bk.ticket_name}）`, ""];
   }
-  return [
-    "今回のご予約で回数券を1回使用します。",
-    `ご予約後の残り回数：${bk.ticket_left_after}回`,
-    `（ご利用の回数券：${bk.ticket_name}）`,
-    "",
-  ];
+  const lead = bk.ticket_refunded
+    ? [`回数券「${t.plan_name}」を1回分お戻ししました。現在の回数券の状況は以下のとおりです。`]
+    : bk.status === "cancelled"
+      ? ["開始時刻を過ぎてからの取消のため、回数券の返却はございません。現在の回数券の状況は以下のとおりです。"]
+      : ["今回のご予約で回数券を1回使用します（今回のご予約の分は差し引き済みです）。", "現在の回数券の状況は以下のとおりです。"];
+  return [...lead, ...ticketInfoBlock(t), ...otherTicketLines(otherUsableTickets(t)), SNAP_NOTE, ""];
 }
 function ticketMailLinesStore(bk) {
   if (!bk.ticket_id) return [];
-  if (bk.ticket_refunded) {
-    return [`回数券を1回分返却：${bk.ticket_name}（返却後の残り ${bk.ticket_left_after}回）`, ""];
+  const t = state.tickets.get(bk.ticket_id);
+  if (!t) {
+    return bk.ticket_refunded
+      ? [`回数券を1回分返却：${bk.ticket_name}（返却後の残り ${bk.ticket_left_after}回）`, ""]
+      : [`回数券利用：${bk.ticket_name}（ご予約後の残り ${bk.ticket_left_after}回）`, ""];
   }
-  return [`回数券利用：${bk.ticket_name}（ご予約後の残り ${bk.ticket_left_after}回）`, ""];
+  const now = `送信時点の残り ${t.uses_left}回／${t.uses_total}回・有効期限 ${jstDateStr(t.expires_at)}・${ticketStatus(t)}`;
+  if (bk.ticket_refunded) return [`回数券を1回分返却：${t.plan_name}（${now}）`, ""];
+  if (bk.status === "cancelled") return [`回数券利用の予約を開始後に取消（返却なし）：${t.plan_name}（${now}）`, ""];
+  return [`回数券利用：${t.plan_name}（${now}）`, ""];
 }
 
 function mailBlock(bk) {
@@ -1219,13 +1439,58 @@ const MAIL_COMMON = [
   MAIL_TEL,
 ].join("\n");
 
-// 予約確定時：完了メール（お客様）＋新規予約通知（店舗）＋双方のリマインドを予約する
-function queueBookingMails(bk) {
-  const now = Date.now();
+// ---- 予約のメール文面（完了・リマインド・変更・取消／お客様・店舗） ----
+// 文面は従来とまったく同じ。回数券を使った予約だけは、予約時に本文を固定せず、
+// 送信直前にこの関数で作り直す（回数券の行が送信時点の最新の残り回数・有効期限になる）
+const BOOKING_MAIL = {
+  customerConfirm: (bk) => ({ subject: `${MAIL_STORE} ご予約内容確認`,
+    body: bookingCustomerBody(bk, `この度は「${MAIL_STORE}」にご予約いただきありがとうございます。`) }),
+  customerRemind: (bk) => ({ subject: `${MAIL_STORE} ご予約リマインド`,
+    body: bookingCustomerBody(bk, `ご予約日が近づいてまいりましたのでご案内いたします。`) }),
+  storeNotify: (bk) => ({ subject: `${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
+    body: bookingStoreBody(bk, `「${MAIL_STORE}」に新しいご予約が入りました。`) }),
+  storeRemind: (bk) => ({ subject: `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
+    body: bookingStoreBody(bk, `本日のご予約のリマインドです。`) }),
+  customerChange: (bk) => ({ subject: `${MAIL_STORE} ご予約内容変更のお知らせ`,
+    body: [
+      `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+      "この度、以下の内容にご予約を変更いたしましたのでご案内いたします。",
+      "",
+      mailBlock(bk),
+      ...ticketMailLinesCustomer(bk),
+      "ご来店を心よりお待ちしております。",
+    ].join("\n") + MAIL_COMMON }),
+  customerChangeRemind: (bk) => ({ subject: `${MAIL_STORE} ご予約リマインド`,
+    body: [
+      `ご予約日が近づいてまいりましたのでご案内いたします。`,
+      "今回のご予約内容は以下のとおりです。",
+      "",
+      mailBlock(bk),
+      ...ticketMailLinesCustomer(bk),
+      "ご来店を心よりお待ちしております。",
+    ].join("\n") + MAIL_COMMON }),
+  storeChange: (bk) => ({ subject: `${MAIL_STORE} ご予約変更のお知らせ（予約ID ${displayId(bk)}）`,
+    body: [`「${MAIL_STORE}」のご予約が変更されました。`, "変更後のご予約内容は以下のとおりです。", "", mailBlockStore(bk), ...ticketMailLinesStore(bk)].join("\n") + MAIL_COMMON }),
+  storeChangeRemind: (bk) => ({ subject: `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
+    body: [`本日のご予約のリマインドです。`, "ご予約内容は以下のとおりです。", "", mailBlockStore(bk), ...ticketMailLinesStore(bk)].join("\n") + MAIL_COMMON }),
+  customerCancel: (bk) => ({ subject: `${MAIL_STORE} ご予約キャンセルのご案内`,
+    body: [
+      `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
+      "この度、以下のご予約を取り消しましたのでご案内いたします。",
+      "",
+      mailBlock(bk),
+      ...ticketMailLinesCustomer(bk),
+      "またのご利用を心よりお待ちしております。",
+      `${origin()}/cn-ueno-health-and-beauty`,
+    ].join("\n") + MAIL_COMMON }),
+  storeCancel: (bk) => ({ subject: `${MAIL_STORE} ご予約キャンセルのお知らせ（予約ID ${displayId(bk)}）`,
+    body: [`「${MAIL_STORE}」のご予約がキャンセルされました。`, "取り消したご予約内容は以下のとおりです。", "", mailBlockStore(bk), ...ticketMailLinesStore(bk)].join("\n") + MAIL_COMMON }),
+};
+function bookingCustomerBody(bk, lead) {
   const cancelUrl = bk.customer_token
     ? `${origin()}/mypage?id=${bk.id}&token=${bk.customer_token}`
     : `${origin()}/mypage`;
-  const customerBody = (lead) => [
+  return [
     lead,
     "今回のご予約内容は以下のとおりです。",
     "",
@@ -1241,31 +1506,32 @@ function queueBookingMails(bk) {
     "予約のキャンセルはこちら ⇒",
     `${cancelUrl},,`,
   ].join("\n") + MAIL_COMMON;
-  if (bk.email) {
-    queueMail("customer", "confirm", bk.email,
-      `${MAIL_STORE} ご予約内容確認`,
-      customerBody(`この度は「${MAIL_STORE}」にご予約いただきありがとうございます。`),
-      now, bk.id);
-    queueMail("customer", "remind", bk.email,
-      `${MAIL_STORE} ご予約リマインド`,
-      customerBody(`ご予約日が近づいてまいりましたのでご案内いたします。`),
-      Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
-  }
-  const storeBody = (lead) => [
+}
+function bookingStoreBody(bk, lead) {
+  return [
     lead,
     "ご予約内容は以下のとおりです。",
     "",
     mailBlockStore(bk),
     ...ticketMailLinesStore(bk),
   ].join("\n") + MAIL_COMMON;
-  queueMail("store", "notify", STORE_MAIL,
-    `${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
-    storeBody(`「${MAIL_STORE}」に新しいご予約が入りました。`),
-    now, bk.id);
-  queueMail("store", "remind", STORE_MAIL,
-    `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
-    storeBody(`本日のご予約のリマインドです。`),
-    Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+}
+// 予約のメールを1通キューに積む。回数券を使った予約なら「送信直前に作り直す」指定を付ける
+function queueBookingMail(kind, type, to, variant, bk, at) {
+  const b = BOOKING_MAIL[variant](bk);
+  const tpl = bk.ticket_id ? { name: "booking", variant, bookingId: bk.id } : undefined;
+  return queueMail(kind, type, to, b.subject, b.body, at, bk.id, tpl);
+}
+
+// 予約確定時：完了メール（お客様）＋新規予約通知（店舗）＋双方のリマインドを予約する
+function queueBookingMails(bk) {
+  const now = Date.now();
+  if (bk.email) {
+    queueBookingMail("customer", "confirm", bk.email, "customerConfirm", bk, now);
+    queueBookingMail("customer", "remind", bk.email, "customerRemind", bk, Math.max(now, bk.start_at - 24 * 3600e3));
+  }
+  queueBookingMail("store", "notify", STORE_MAIL, "storeNotify", bk, now);
+  queueBookingMail("store", "remind", STORE_MAIL, "storeRemind", bk, Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3));
   deliverDueMails();
 }
 
@@ -1280,59 +1546,19 @@ function queueChangeMails(bk) {
   dropPendingReminders(bk.id);
   const now = Date.now();
   if (bk.email) {
-    queueMail("customer", "change", bk.email,
-      `${MAIL_STORE} ご予約内容変更のお知らせ`,
-      [
-        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
-        "この度、以下の内容にご予約を変更いたしましたのでご案内いたします。",
-        "",
-        mailBlock(bk),
-        "ご来店を心よりお待ちしております。",
-      ].join("\n") + MAIL_COMMON,
-      now, bk.id);
-    queueMail("customer", "remind", bk.email,
-      `${MAIL_STORE} ご予約リマインド`,
-      [
-        `ご予約日が近づいてまいりましたのでご案内いたします。`,
-        "今回のご予約内容は以下のとおりです。",
-        "",
-        mailBlock(bk),
-        "ご来店を心よりお待ちしております。",
-      ].join("\n") + MAIL_COMMON,
-      Math.max(now, bk.start_at - 24 * 3600e3), bk.id);
+    queueBookingMail("customer", "change", bk.email, "customerChange", bk, now);
+    queueBookingMail("customer", "remind", bk.email, "customerChangeRemind", bk, Math.max(now, bk.start_at - 24 * 3600e3));
   }
-  queueMail("store", "change", STORE_MAIL,
-    `${MAIL_STORE} ご予約変更のお知らせ（予約ID ${displayId(bk)}）`,
-    [`「${MAIL_STORE}」のご予約が変更されました。`, "変更後のご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
-    now, bk.id);
-  queueMail("store", "remind", STORE_MAIL,
-    `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
-    [`本日のご予約のリマインドです。`, "ご予約内容は以下のとおりです。", "", mailBlockStore(bk)].join("\n") + MAIL_COMMON,
-    Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3), bk.id);
+  queueBookingMail("store", "change", STORE_MAIL, "storeChange", bk, now);
+  queueBookingMail("store", "remind", STORE_MAIL, "storeChangeRemind", bk, Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3));
   deliverDueMails();
 }
 
 function queueCancelMails(bk) {
   dropPendingReminders(bk.id);
   const now = Date.now();
-  if (bk.email) {
-    queueMail("customer", "cancel", bk.email,
-      `${MAIL_STORE} ご予約キャンセルのご案内`,
-      [
-        `いつも「${MAIL_STORE}」をご利用いただきありがとうございます。`,
-        "この度、以下のご予約を取り消しましたのでご案内いたします。",
-        "",
-        mailBlock(bk),
-        ...ticketMailLinesCustomer(bk),
-        "またのご利用を心よりお待ちしております。",
-        `${origin()}/cn-ueno-health-and-beauty`,
-      ].join("\n") + MAIL_COMMON,
-      now, bk.id);
-  }
-  queueMail("store", "cancel", STORE_MAIL,
-    `${MAIL_STORE} ご予約キャンセルのお知らせ（予約ID ${displayId(bk)}）`,
-    [`「${MAIL_STORE}」のご予約がキャンセルされました。`, "取り消したご予約内容は以下のとおりです。", "", mailBlockStore(bk), ...ticketMailLinesStore(bk)].join("\n") + MAIL_COMMON,
-    now, bk.id);
+  if (bk.email) queueBookingMail("customer", "cancel", bk.email, "customerCancel", bk, now);
+  queueBookingMail("store", "cancel", STORE_MAIL, "storeCancel", bk, now);
   deliverDueMails();
 }
 
@@ -1342,7 +1568,7 @@ if (mailTimer.unref) mailTimer.unref();
 
 function mailSummary() {
   deliverDueMails();
-  const counts = { pending: 0, sending: 0, accepted: 0, failed: 0 };
+  const counts = { pending: 0, sending: 0, accepted: 0, failed: 0, skipped: 0 };
   for (const m of state.mails) {
     if (m.status === "sent") counts.accepted++;
     else counts[m.status] = (counts[m.status] || 0) + 1;
@@ -2637,24 +2863,11 @@ function handleDemoApi(req, res, url) {
         };
         state.tickets.set(tid, t);
         if (member) memberAttachTicket(member, t); // 会員の券として記録（マイページ・予約時の選択に出る）
-        // 購入メール（既存メールと同じ書式・実送信はallowToのみ）
-        const expJa = jstDateStr(t.expires_at);
+        // 購入メール（既存メールと同じ書式・実送信はallowToのみ）。
+        // 本文は送信直前に最新の回数券データで作る（ticketPurchase テンプレート）
         queueMail("customer", "ticket", email,
-          `${MAIL_STORE} 回数券ご購入のご案内`,
-          [
-            `この度は「${MAIL_STORE}」の回数券をご購入いただきありがとうございます。`,
-            "ご購入内容は以下のとおりです。",
-            "",
-            SEP,
-            `　${plan.name}`,
-            `ご利用可能回数 ${plan.uses}回`,
-            `有効期限 ${expJa}（購入日から1年間）`,
-            `料金 ${plan.price.toLocaleString("ja-JP")} 円（店頭でのお支払い）`,
-            SEP,
-            "ご予約の際に「回数券を使用する」をお選びいただくと、1回のご予約につき1回分を使用します。",
-            "残り回数はマイページからいつでもご確認いただけます。",
-          ].join("\n") + MAIL_COMMON,
-          now, tid);
+          `${MAIL_STORE} 回数券ご購入のご案内`, "", now, null,
+          { name: "ticketPurchase", ticketId: tid });
         deliverDueMails();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, ticket: { ...ticketPublicJson(t), token: ttoken } }));
@@ -2883,10 +3096,12 @@ function handleDemoApi(req, res, url) {
   // 発行済み回数券の一覧・履歴・調整（調整は必ず履歴に残す）
   if (url.pathname === "/api/demo/tickets") {
     if (req.method === "GET" || req.method === "HEAD") {
+      deliverDueMails();
       const list = [...state.tickets.values()].map((t) => ({
         ...ticketPublicJson(t),
         buyer_name: t.buyer_name, buyer_email: t.buyer_email, buyer_phone: t.buyer_phone,
-        price: t.price, remind_sent: !!t.remind_sent, history: t.history,
+        price: t.price, remind_sent: t.remind_for_expiry === t.expires_at, history: t.history,
+        mails: ticketMailLog(t),
       }));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(req.method === "HEAD" ? undefined : JSON.stringify({ tickets: list }));
@@ -2912,8 +3127,11 @@ function handleDemoApi(req, res, url) {
             t.history.push({ at: new Date().toISOString(), type: "adjust", delta: usesDelta, left_after: t.uses_left, note });
           }
           if (extendDays) {
+            const before = t.expires_at;
             t.expires_at += extendDays * 86400e3;
-            t.history.push({ at: new Date().toISOString(), type: "extend", delta: 0, left_after: t.uses_left, note: `${note}（期限${extendDays > 0 ? "+" : ""}${extendDays}日）` });
+            t.history.push({ at: new Date().toISOString(), type: "extend", delta: 0, left_after: t.uses_left,
+              expires_before: before, expires_after: t.expires_at,
+              note: `${note}（期限${extendDays > 0 ? "+" : ""}${extendDays}日）` });
           }
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, ticket: { ...ticketPublicJson(t), history: t.history } }));

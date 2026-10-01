@@ -1828,3 +1828,9 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
   main.ledger-app .ledger-nav-menu > summary { min-height: 40px; }
   .ledger-nav-menu > div button, .ledger-nav-menu > div a { min-height: 40px; }
 }
+
+/* 回数券管理：券ごとのメール送信履歴（送信時点の残り回数・有効期限と台帳の照合） */
+#pm-ticket-modal .pm-tk-mails { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; }
+#pm-ticket-modal .pm-tk-mails th, #pm-ticket-modal .pm-tk-mails td { border: 1px solid #eee3d5; padding: 5px 7px; text-align: left; vertical-align: top; }
+#pm-ticket-modal .pm-tk-mails th { background: #faf6f0; color: #6b4f2a; font-weight: 600; }
+#pm-ticket-modal .pm-tk-mailrow > td { background: #fdfaf6; overflow-x: auto; }
