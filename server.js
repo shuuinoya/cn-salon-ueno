@@ -105,6 +105,8 @@ function sendFile(res, file, status, type, head, url, req) {
         // （管理画面には入れない。?v=更新時刻 を付けて、ブラウザに古いキャッシュを使わせない）
         if (brandFor(file, url) === BOOKING_BRAND && !file.includes("pm-login") && !file.includes("admin")) {
           text = text.replace("</body>", '<script src="/member.js?v=' + MEMBER_VER + '" defer></script></body>');
+          // 予約サイトのレイアウト補正（タブレット幅で本文の列を中央に置く）
+          text = text.replace("</head>", '<link rel="stylesheet" href="/booking-layout.css?v=' + fileVer("booking-layout.css") + '"/></head>');
         }
         // 予約・メニューページには、フリーメッセージ設定の反映と会員向け回数券表示のスクリプトを差し込む
         if (url.pathname.startsWith("/book") || url.pathname.startsWith("/menus")) {

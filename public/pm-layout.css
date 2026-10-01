@@ -1800,3 +1800,31 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
   /* 画面下の固定表示（トースト・お知らせ）に最後のボタンが隠れても、スクロールで必ず出せる余白 */
   main.ledger-app .ledger-side { padding-bottom: 170px; }
 }
+
+/* 月間シフト作成：上の操作ボタン2段（目標保存〜一括作成／シフト作成〜シフト変更・削除）は
+   幅が足りなければ折り返す（横一列のままだと狭い画面で左右にはみ出す） */
+#pm-month-left, #pm-month-tools, #pm-bulk-group, #pm-month-bottom { flex-wrap: wrap; max-width: 100%; min-width: 0; row-gap: 8px; }
+#pm-bulk-staff { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+  #pm-month-title { margin: -10px -10px 14px; }
+  #pm-month-tools { margin-left: 0; }
+}
+
+/* タッチ操作の端末（iPad等）：画面幅に関係なく、主要ボタンを指で押しやすい高さ（40px以上）にする。
+   マウス操作のPCには適用しない（PCの見た目は変えない） */
+@media (pointer: coarse) {
+  main.ledger-app .ledger-toolbar > button,
+  main.ledger-app .ledger-toolbar > select,
+  main.ledger-app .ledger-toolbar .ledger-date-trigger { height: 40px; min-height: 40px; }
+  main.ledger-app .ledger-toolbar > .ledger-day-arrow,
+  main.ledger-app .ledger-toolbar > .ledger-refresh { width: 44px; }
+  main.ledger-app .ledger-mode-group > button,
+  main.ledger-app .ledger-modes .ledger-add,
+  main.ledger-app .ledger-underbar > button,
+  main.ledger-app .ledger-category-row > button,
+  main.ledger-app .ledger-side button { min-height: 40px; height: auto; }
+  main.ledger-app .ledger-nav nav > button,
+  main.ledger-app .ledger-nav nav > a,
+  main.ledger-app .ledger-nav-menu > summary { min-height: 40px; }
+  .ledger-nav-menu > div button, .ledger-nav-menu > div a { min-height: 40px; }
+}
