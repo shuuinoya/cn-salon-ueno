@@ -37,6 +37,64 @@
     return res;
   };
 
+  // 狭い画面（〜960px）では左パネルが引き出し表示になる（pm-layout.css）。
+  // 暗くした背景（パネルの外側）をタップしたら、Reactの「編集欄を閉じる」×を押して閉じる
+  document.addEventListener("click", (e) => {
+    const ws = document.querySelector(".ledger-workspace");
+    if (!ws || e.target !== ws) return;
+    if (!window.matchMedia("(max-width: 960px)").matches) return;
+    const side = ws.querySelector(":scope > .ledger-side");
+    if (!side) return;
+    const close = side.querySelector('.ledger-side-search button[aria-label="編集欄を閉じる"]');
+    if (close) close.click();
+  });
+
+  // 上部ナビのドロップダウンは、開いた位置によって画面の左右からはみ出さないよう位置を補正する
+  // （ナビが折り返した狭い画面でも、メニューの中身がすべて押せる）
+  document.addEventListener("toggle", (e) => {
+    const det = e.target;
+    if (!(det instanceof HTMLDetailsElement) || !det.classList.contains("ledger-nav-menu") || !det.open) return;
+    const dd = det.querySelector(":scope > div");
+    if (!dd) return;
+    dd.style.left = ""; dd.style.right = "";
+    const r = dd.getBoundingClientRect();
+    const W = document.documentElement.clientWidth;
+    if (r.right > W - 8) {
+      const shift = r.right - (W - 8);
+      dd.style.left = (parseFloat(getComputedStyle(dd).left) || 0) - shift + "px";
+      dd.style.right = "auto";
+    }
+    const r2 = dd.getBoundingClientRect();
+    if (r2.left < 8) { dd.style.left = (parseFloat(dd.style.left || getComputedStyle(dd).left) || 0) + (8 - r2.left) + "px"; dd.style.right = "auto"; }
+  }, true);
+
+  // 日付カレンダー（ポップオーバー）が画面の左右からはみ出さないよう、開いた位置に応じて補正する
+  // （狭い画面ではツールバーが折り返し、日付ボックスの位置が幅によって変わるため）
+  function clampDatePopover() {
+    const pop = document.querySelector(".ledger-date-popover");
+    if (!pop) return;
+    const W = document.documentElement.clientWidth;
+    pop.style.left = ""; pop.style.right = "";
+    const r = pop.getBoundingClientRect();
+    const picker = pop.offsetParent || pop.parentElement;
+    const pr = picker.getBoundingClientRect();
+    let left = r.left;
+    if (r.right > W - 8) left = W - 8 - r.width;
+    if (left < 8) left = 8;
+    if (Math.abs(left - r.left) > 0.5) {
+      pop.style.left = left - pr.left + "px";
+      pop.style.right = "auto";
+    }
+  }
+  // カレンダーは開いた後に月表示の装飾で幅が変わるため、中身が変わるたびに補正し直す
+  let clampQueued = false;
+  new MutationObserver(() => {
+    if (clampQueued || !document.querySelector(".ledger-date-popover")) return;
+    clampQueued = true;
+    requestAnimationFrame(() => { clampQueued = false; clampDatePopover(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener("resize", clampDatePopover);
+
   function ensure() {
     const app = document.querySelector(".ledger-app");
     if (!app) return;
