@@ -18,11 +18,12 @@ const crypto = require("crypto");
 const IS_CLOUD = require("./persist").isCloud();
 const COOKIE_FLAGS = "Path=/; HttpOnly; SameSite=Lax" + (IS_CLOUD ? "; Secure" : "");
 const hashPass = (p) => crypto.createHash("sha256").update(String(p)).digest("hex");
-const ADMIN_ID = "kudaka1228";
+const ADMIN_ID = "CN-HB@2555";
+const LEGACY_ADMIN_ID = "kudaka1228"; // 旧ID（保存済みデータから起動時に新IDへ自動移行）
 // 初期管理者のパスワードハッシュ。本番ホスティングでは環境変数 ADMIN_PASS_HASH で
 // 必ず上書きする（コードを公開リポジトリに置いても、本番のパスワードは漏れない）
 const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH ||
-  "83cd05b641499627e43bd8a389cf712e2b3cf75bcda25c8e0b76593c848949de";
+  "c31e781fabb283207c02713244bde0eb5c3290f4d00fc6797630f9aa2a1d9b78";
 const SESSION_MAX_AGE = 7 * 86400000; // セッション有効期間（7日）
 const adminSessions = new Map(); // token -> { user, created }（メモリ上のみ）
 const ROLE_LV = { staff: 1, manager: 2, admin: 3 };
@@ -410,6 +411,18 @@ const persistReady = (() => {
       for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
       fillDefaults(state.settings, defaultSettings);
       for (const [t, s2] of loaded.data.sessions || []) adminSessions.set(t, s2);
+      // 旧ID（kudaka1228）で保存されたデータは、新IDの管理者へ自動移行する
+      // ・新IDが無ければ旧IDを改名（パスワードは新初期値／環境変数に更新）
+      // ・新IDが既にあれば旧IDを削除（旧IDでのログインは不可にする）
+      if (state.accounts.has(LEGACY_ADMIN_ID)) {
+        if (!state.accounts.has(ADMIN_ID)) {
+          const old = state.accounts.get(LEGACY_ADMIN_ID);
+          state.accounts.set(ADMIN_ID, { ...old, user: ADMIN_ID, pass: ADMIN_PASS_HASH });
+          for (const s2 of adminSessions.values()) if (s2.user === LEGACY_ADMIN_ID) s2.user = ADMIN_ID;
+        }
+        state.accounts.delete(LEGACY_ADMIN_ID);
+        console.log(`管理者IDを ${LEGACY_ADMIN_ID} → ${ADMIN_ID} へ移行しました`);
+      }
       // 環境変数でパスワードが指定されている場合は、保存済みアカウントにも常に適用する
       if (process.env.ADMIN_PASS_HASH && state.accounts.has(ADMIN_ID)) {
         state.accounts.get(ADMIN_ID).pass = process.env.ADMIN_PASS_HASH;
