@@ -60,6 +60,61 @@ function clearSession(req, res) {
   res.setHeader("Set-Cookie", "pm_session=; " + COOKIE_FLAGS + "; Max-Age=0");
 }
 // 認証イベントの記録（パスワード等の機密は残さない）
+// ---- 予約サイトの会員（お客様）セッション ----
+// Cookie cn_member（HttpOnly）でログイン状態を保持。会員本人の予約・回数券だけを返す
+const MEMBER_SESSION_MAX_AGE = 90 * 86400000; // 90日
+const MEMBER_COOKIE_FLAGS = COOKIE_FLAGS + "; Max-Age=" + Math.floor(MEMBER_SESSION_MAX_AGE / 1000);
+const normEmail = (v) => String(v || "").replace(/＠/g, "@").replace(/　/g, " ").trim().toLowerCase().slice(0, 254);
+function memberTokenOf(req) {
+  const m = /(?:^|;\s*)cn_member=([a-f0-9]+)/.exec(req.headers.cookie || "");
+  return m ? m[1] : "";
+}
+function memberOf(req) {
+  const token = memberTokenOf(req);
+  if (!token) return null;
+  const s = state.memberSessions.get(token);
+  if (!s) return null;
+  if (Date.now() - s.created > MEMBER_SESSION_MAX_AGE) { state.memberSessions.delete(token); return null; }
+  return state.members.get(s.email) || null;
+}
+function memberPublic(m) {
+  return { email: m.email, name: m.name || "", phone: m.phone || "", createdAt: m.createdAt };
+}
+// 会員に予約・回数券を紐付ける（本人のものだけ。重複なし）
+function memberAttachBooking(m, bk) {
+  if (!m || !bk) return;
+  bk.member_email = m.email;
+  if (!m.bookings.includes(bk.id)) m.bookings.push(bk.id);
+  if (!m.name && bk.name) m.name = bk.name;
+  if (!m.phone && bk.phone) m.phone = bk.phone;
+}
+function memberAttachTicket(m, t) {
+  if (!m || !t) return;
+  t.member_email = m.email;
+  if (!m.tickets.includes(t.id)) m.tickets.push(t.id);
+}
+function findBooking(id) {
+  const date = state.bookingIndex.get(String(id || ""));
+  if (!date) return null;
+  const bk = ensureEvents(date).bookings.find((x) => x.id === id);
+  return bk ? { bk, date } : null;
+}
+// JSONボディを読む共通処理（サイズ上限つき）
+function readJson(req, res, limit, fn) {
+  let raw = "";
+  req.on("data", (c) => { raw += c; if (raw.length > limit) req.destroy(); });
+  req.on("end", () => {
+    let b = {};
+    try { b = JSON.parse(raw || "{}"); } catch {}
+    try {
+      fn(b);
+    } catch (e) {
+      res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+    }
+  });
+}
+
 function authLogPush(entry) {
   state.authLog.push({ at: Date.now(), ...entry });
   if (state.authLog.length > 200) state.authLog.splice(0, state.authLog.length - 200);
@@ -387,6 +442,11 @@ const state = {
   ]),
   authLog: [],             // 認証イベント（成功・失敗・権限外アクセス。機密は含めない）
   loginFails: new Map(),   // ユーザー名 -> {n, until}（連続失敗によるロック）
+  // 予約サイトの会員（お客様）。メールアドレス＋パスワード（ハッシュのみ保持）で登録・ログインし、
+  // 自分の予約の確認・変更・取消と回数券の購入・残数確認ができる
+  members: new Map(),        // email -> {email, pass, name, phone, createdAt, bookings:[id], tickets:[id]}
+  memberSessions: new Map(), // token -> {email, created}（ログイン状態。保存されるので再起動後も有効）
+  memberFails: new Map(),    // email -> {n, until}（連続失敗によるロック）
 };
 
 // ---- 永続化（persist.js＝このシステムのデータベース層） ----
@@ -1012,10 +1072,13 @@ function ticketPublicJson(t) {
 }
 
 // 予約で使う回数券の事前検証（所有者・残数・期限）。減算はしない
-function ticketForUse(ticketId, token, email) {
+function ticketForUse(ticketId, token, email, member) {
   const t = state.tickets.get(String(ticketId || ""));
-  if (!t || t.token !== String(token || "")) throw err(409, "ticketInvalid");
-  if (String(email || "").toLowerCase() !== t.buyer_email) throw err(409, "ticketInvalid");
+  if (!t) throw err(409, "ticketInvalid");
+  // ログイン中の会員は、自分の券ならトークン・メール一致の確認なしで使える
+  const own = member && t.member_email === member.email;
+  if (!own && t.token !== String(token || "")) throw err(409, "ticketInvalid");
+  if (!own && String(email || "").toLowerCase() !== t.buyer_email) throw err(409, "ticketInvalid");
   if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
   if (t.uses_left <= 0) throw err(409, "ticketEmpty");
   return t;
@@ -1029,7 +1092,39 @@ function consumeTicket(t, bookingId, ref) {
   t.uses_left -= 1;
   t.history.push({ at: new Date().toISOString(), type: "use", booking_id: bookingId, ref, delta: -1, left_after: t.uses_left });
   state.ticketUseByBooking.set(bookingId, t.id);
+  queueTicketLeftMail(t, "use", ref);
   return t.uses_left;
+}
+
+// 回数券の残数お知らせメール（1回使うたび・返却のたびに「あと何回」を本人へ送る。
+// マイページの回数券タブでも同じ残数をいつでも確認できる）
+function queueTicketLeftMail(t, type, ref) {
+  try {
+    const left = t.uses_left;
+    const expJa = jstDateStr(t.expires_at);
+    const head = type === "refund"
+      ? [`ご予約の取消にともない、回数券「${t.plan_name}」を1回分お戻ししました。`]
+      : [`ご予約（予約番号 ${ref || "-"}）で回数券「${t.plan_name}」を1回分ご利用いただきました。`];
+    queueMail("customer", "ticket", t.buyer_email,
+      `${MAIL_STORE} 回数券の残り回数のお知らせ（あと${left}回）`,
+      [
+        ...head,
+        "",
+        SEP,
+        `　${t.plan_name}`,
+        `残り回数 あと${left}回（${t.uses_total}回のうち ${t.uses_total - left}回ご利用済み）`,
+        `有効期限 ${expJa}`,
+        SEP,
+        left === 0
+          ? "残り回数が0回になりました。マイページからいつでも新しい回数券をご購入いただけます。"
+          : left <= 2
+            ? "残り回数が少なくなっています。マイページからいつでも新しい回数券をご購入いただけます。"
+            : "残り回数はマイページ（予約サイト右上の「ログイン」→「回数券」）からいつでもご確認いただけます。",
+        `${origin()}/mypage#tickets`,
+      ].join("\n") + MAIL_COMMON,
+      Date.now(), null);
+    deliverDueMails();
+  } catch {}
 }
 
 // キャンセル時の返却。規定：予約開始前の正規キャンセルに限り1回分を戻す。
@@ -1046,6 +1141,7 @@ function maybeRefundTicket(bk) {
   state.ticketUseByBooking.delete(bk.id);
   bk.ticket_refunded = true;
   bk.ticket_left_after = t.uses_left;
+  queueTicketLeftMail(t, "refund", bk.reference);
   return true;
 }
 
@@ -1655,8 +1751,19 @@ function isRepeatEmail(email) {
   return false;
 }
 
-function createPublicBooking(body) {
+function createPublicBooking(body, member) {
   const course = getCourse(body.course);
+  // 日時変更（ログイン会員のみ）：元の予約が本人のもの・予約中・開始前であることを先に確認し、
+  // 新しい予約が成立した直後に元の予約を取り消す（成立しなければ元の予約はそのまま残る）
+  let reschedule = null;
+  if (body.rescheduleId) {
+    if (!member) throw err(401, "loginRequired");
+    const found = findBooking(String(body.rescheduleId));
+    if (!found || found.bk.member_email !== member.email) throw err(404, "notFound");
+    if (found.bk.status !== "confirmed") throw err(409, "alreadyCancelled");
+    if (found.bk.start_at <= Date.now()) throw err(409, "tooLate");
+    reschedule = found;
+  }
   const date = body.date;
   const people = Number(body.people);
   const pref = ["none", "male", "female"].includes(body.staff) ? body.staff : "none";
@@ -1701,7 +1808,7 @@ function createPublicBooking(body) {
   let useTicket = null;
   if (body.ticketId) {
     if (people !== 1) throw err(400, "invalid"); // 回数券は1名予約のみ
-    useTicket = ticketForUse(body.ticketId, body.ticketToken, body.email);
+    useTicket = ticketForUse(body.ticketId, body.ticketToken, body.email, member);
   }
 
   state.bookingSerial++;
@@ -1743,18 +1850,45 @@ function createPublicBooking(body) {
   const coAssignees = free.filter((sid) => sid !== assignee).slice(0, people - 1);
   for (const sid of [assignee, ...coAssignees]) ev.assignments.push({ booking_id: id, staff_id: sid });
   state.bookingIndex.set(id, date);
-  queueBookingMails(ev.bookings.find((b) => b.id === id)); // 完了メール＋通知＋双方のリマインド
+  const newBk = ev.bookings.find((b) => b.id === id);
+  if (member) memberAttachBooking(member, newBk); // ログイン中なら会員の予約として記録（マイページに出る）
+  queueBookingMails(newBk); // 完了メール＋通知＋双方のリマインド
   ensureDay(date).version++; sseTouch();
+  // 日時変更：新しい予約が成立したので元の予約を取り消す（回数券は返却→新予約で再使用済み）
+  if (reschedule) {
+    newBk.rescheduled_from = reschedule.bk.id;
+    cancelBooking(reschedule.bk, reschedule.date);
+  }
   const result = useTicket ? { id, token, ticketLeft } : { id, token };
+  if (reschedule) result.rescheduledFrom = reschedule.bk.id;
   if (rk) state.requestKeys.set(rk, result);
   return result;
 }
 
-function getPublicBooking(id, token) {
+// 予約の取消（お客様用の共通処理。回数券の返却・メール・台帳の更新まで）
+function cancelBooking(bk, date) {
+  const ev2 = ensureEvents(date);
+  if (bk.status !== "confirmed") throw err(409, "alreadyCancelled");
+  if (bk.start_at <= Date.now()) throw err(409, "tooLate"); // 開始後は店舗にお電話で
+  bk.status = "cancelled";
+  ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
+  maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
+  queueCancelMails(bk);
+  ensureDay(date).version++; sseTouch();
+}
+
+// お客様本人の予約かどうか（予約ごとのトークン、またはログイン中の会員本人）
+function ownsBooking(bk, token, member) {
+  if (!bk) return false;
+  if (member && bk.member_email === member.email) return true;
+  return !!(token && bk.customer_token && bk.customer_token === token);
+}
+
+function getPublicBooking(id, token, member) {
   const date = state.bookingIndex.get(id || "");
   if (!date) throw err(404, "notFound");
   const bk = ensureEvents(date).bookings.find((b) => b.id === id);
-  if (!bk || !bk.customer_token || bk.customer_token !== token) throw err(404, "notFound");
+  if (!ownsBooking(bk, token, member)) throw err(404, "notFound");
   return {
     booking: {
       id: bk.id, reference: bk.reference, displayId: String(displayId(bk)), status: bk.status,
@@ -2088,18 +2222,10 @@ function handleDemoApi(req, res, url) {
       try {
         const b = JSON.parse(raw || "{}");
         const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-        const date = state.bookingIndex.get(String(b.id || ""));
-        if (!date) throw err(404, "notFound");
-        const ev2 = ensureEvents(date);
-        const bk = ev2.bookings.find((x) => x.id === b.id);
-        if (!bk || !bk.customer_token || bk.customer_token !== token) throw err(404, "notFound");
-        if (bk.status !== "confirmed") throw err(409, "alreadyCancelled");
-        if (bk.start_at <= Date.now()) throw err(409, "tooLate"); // 開始後は店舗にお電話で
-        bk.status = "cancelled";
-        ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
-        maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
-        queueCancelMails(bk);
-        ensureDay(date).version++; sseTouch();
+        const found = findBooking(String(b.id || ""));
+        if (!found || !ownsBooking(found.bk, token, memberOf(req))) throw err(404, "notFound");
+        const bk = found.bk;
+        cancelBooking(bk, found.date);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, status: "cancelled",
           ticketLeft: bk.ticket_id ? state.tickets.get(bk.ticket_id)?.uses_left : undefined }));
@@ -2114,7 +2240,7 @@ function handleDemoApi(req, res, url) {
     if (req.method === "GET" || req.method === "HEAD") {
       try {
         const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-        const data = getPublicBooking(url.searchParams.get("id"), token);
+        const data = getPublicBooking(url.searchParams.get("id"), token, memberOf(req));
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(req.method === "HEAD" ? undefined : JSON.stringify(data));
       } catch (e) {
@@ -2128,7 +2254,7 @@ function handleDemoApi(req, res, url) {
       req.on("data", (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
       req.on("end", () => {
         try {
-          const result = createPublicBooking(JSON.parse(raw || "{}"));
+          const result = createPublicBooking(JSON.parse(raw || "{}"), memberOf(req));
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify(result));
         } catch (e) {
@@ -2488,12 +2614,14 @@ function handleDemoApi(req, res, url) {
       try {
         const b = JSON.parse(raw || "{}");
         const plan = state.ticketPlans.get(String(b.planId || ""));
-        const name = String(b.name || "").trim().slice(0, 120);
-        const email = String(b.email || "").trim().toLowerCase().slice(0, 254);
+        // ログイン中の会員は、会員情報のメールアドレス・お名前で購入する（入力不要）
+        const member = memberOf(req);
+        const name = String(b.name || (member ? member.name : "") || "").trim().slice(0, 120);
+        const email = member ? member.email : String(b.email || "").trim().toLowerCase().slice(0, 254);
         if (!plan || plan.active !== 1 || !name || !email.includes("@")) throw err(400, "invalid");
-        // 会員のみ購入可（このシステムの会員＝予約実績のあるメールアドレス）。
+        // 会員のみ購入可（ログイン中の会員、または予約実績のあるメールアドレス）。
         // 画面の表示制御だけに頼らず、サーバー側で必ず確認する
-        if (!isRepeatEmail(email)) throw err(403, "memberOnly");
+        if (!member && !isRepeatEmail(email)) throw err(403, "memberOnly");
         state.ticketSerial++;
         const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
         const ttoken = Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
@@ -2508,6 +2636,7 @@ function handleDemoApi(req, res, url) {
           history: [{ at: new Date(now).toISOString(), type: "purchase", delta: plan.uses, left_after: plan.uses }],
         };
         state.tickets.set(tid, t);
+        if (member) memberAttachTicket(member, t); // 会員の券として記録（マイページ・予約時の選択に出る）
         // 購入メール（既存メールと同じ書式・実送信はallowToのみ）
         const expJa = jstDateStr(t.expires_at);
         queueMail("customer", "ticket", email,
@@ -2554,6 +2683,152 @@ function handleDemoApi(req, res, url) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "invalid" }));
       }
+    });
+    return true;
+  }
+
+  // ---- 予約サイトの会員（お客様）：登録・ログイン・マイページ ----
+  // ・メールアドレス＋パスワード。未登録のアドレスなら、その場で会員登録（無料）してログイン
+  // ・ログイン中は Cookie（HttpOnly）で本人確認。予約の確認・変更・取消、回数券の購入・残数確認は
+  //   すべてサーバー側で「本人の予約・券か」を確認する（画面の出し分けには頼らない）
+  if (url.pathname === "/api/member/login" && req.method === "POST") {
+    readJson(req, res, 1e5, (b) => {
+      const email = normEmail(b.email);
+      const pass = String(b.pass || "").replace(/＠/g, "@").replace(/　/g, " ").trim();
+      const ip = req.socket.remoteAddress || "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw err(400, "badEmail");
+      const lock = state.memberFails.get(email);
+      if (lock && lock.until > Date.now()) {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "tooManyAttempts", retry: Math.ceil((lock.until - Date.now()) / 1000) }));
+      }
+      let m = state.members.get(email);
+      let registered = false;
+      if (m) {
+        if (m.pass !== hashPass(pass)) {
+          const n = (lock ? lock.n : 0) + 1;
+          state.memberFails.set(email, { n, until: n >= 5 ? Date.now() + 60000 : 0 });
+          authLogPush({ kind: "member", user: email, ok: false, ip });
+          res.writeHead(401, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalidLogin" }));
+        }
+      } else {
+        // 新規会員登録（メールアドレスとパスワードが揃えばそのまま会員になる）
+        if (pass.length < 6) throw err(400, "shortPass");
+        m = { email, pass: hashPass(pass), name: String(b.name || "").trim().slice(0, 120),
+          phone: String(b.phone || "").trim().slice(0, 40), createdAt: Date.now(), bookings: [], tickets: [] };
+        state.members.set(email, m);
+        registered = true;
+        queueMail("customer", "member", email,
+          `${MAIL_STORE} 会員登録完了のお知らせ`,
+          [
+            `この度は「${MAIL_STORE}」の会員にご登録いただきありがとうございます。`,
+            "",
+            SEP,
+            `ログインID（メールアドレス）：${email}`,
+            SEP,
+            "予約サイト右上の「ログイン」からマイページを開くと、ご予約の確認・日時変更・取消、",
+            "回数券のご購入と残り回数の確認がいつでも行えます。",
+            `${origin()}/mypage`,
+          ].join("\n") + MAIL_COMMON,
+          Date.now(), null);
+        deliverDueMails();
+      }
+      state.memberFails.delete(email);
+      // このブラウザに保存されていた予約・回数券（予約ID＋トークン＝本人の証明）を会員に紐付ける
+      const link = b.link || {};
+      for (const it of (Array.isArray(link.bookings) ? link.bookings : []).slice(0, 50)) {
+        const found = findBooking(String(it?.id || ""));
+        if (found && found.bk.customer_token && found.bk.customer_token === String(it?.token || "") &&
+            (!found.bk.member_email || found.bk.member_email === email)) memberAttachBooking(m, found.bk);
+      }
+      for (const it of (Array.isArray(link.tickets) ? link.tickets : []).slice(0, 50)) {
+        const t = state.tickets.get(String(it?.id || ""));
+        if (t && t.token === String(it?.token || "") && (!t.member_email || t.member_email === email)) memberAttachTicket(m, t);
+      }
+      const token = crypto.randomBytes(24).toString("hex");
+      state.memberSessions.set(token, { email, created: Date.now() });
+      if (state.memberSessions.size > 5000) state.memberSessions.delete(state.memberSessions.keys().next().value);
+      authLogPush({ kind: "member", user: email, ok: true, ip, registered });
+      res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": `cn_member=${token}; ${MEMBER_COOKIE_FLAGS}` });
+      res.end(JSON.stringify({ ok: true, registered, member: memberPublic(m) }));
+    });
+    return true;
+  }
+  if (url.pathname === "/api/member/logout" && req.method === "POST") {
+    state.memberSessions.delete(memberTokenOf(req));
+    res.writeHead(200, { "Content-Type": "application/json", "Set-Cookie": "cn_member=; " + COOKIE_FLAGS + "; Max-Age=0" });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
+  }
+  // パスワードを忘れた場合：仮パスワードを発行してメールで送る（本人のメールにしか届かない）
+  if (url.pathname === "/api/member/reset" && req.method === "POST") {
+    readJson(req, res, 1e4, (b) => {
+      const email = normEmail(b.email);
+      const m = state.members.get(email);
+      // 登録の有無を推測させない（どちらでも同じ応答）
+      if (m) {
+        const temp = crypto.randomBytes(4).toString("hex");
+        m.pass = hashPass(temp);
+        queueMail("customer", "member", email,
+          `${MAIL_STORE} 仮パスワードのお知らせ`,
+          [
+            "パスワード再設定のご依頼を受け付けました。以下の仮パスワードでログインしてください。",
+            "",
+            SEP,
+            `仮パスワード：${temp}`,
+            SEP,
+            "ログイン後、マイページの「会員情報」から新しいパスワードに変更してください。",
+            `${origin()}/login`,
+          ].join("\n") + MAIL_COMMON,
+          Date.now(), null);
+        deliverDueMails();
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    return true;
+  }
+  // マイページ用：会員情報＋本人の予約一覧＋本人の回数券＋販売中プラン
+  if (url.pathname === "/api/member/me" && (req.method === "GET" || req.method === "HEAD")) {
+    const m = memberOf(req);
+    if (!m) {
+      res.writeHead(401, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(req.method === "HEAD" ? undefined : JSON.stringify({ error: "loginRequired" }));
+    }
+    const bookings = [];
+    for (const id of m.bookings) {
+      const found = findBooking(id);
+      if (!found) continue;
+      try {
+        const j = getPublicBooking(id, found.bk.customer_token, m);
+        bookings.push({ ...j.booking, token: found.bk.customer_token || "" });
+      } catch {}
+    }
+    bookings.sort((a, b) => b.start - a.start);
+    const tickets = m.tickets.map((id) => state.tickets.get(id)).filter(Boolean)
+      .map((t) => ({ ...ticketPublicJson(t), token: t.token }));
+    const plans = [...state.ticketPlans.values()].filter((p2) => p2.active === 1)
+      .map((p2) => ({ id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses }));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ member: memberPublic(m), bookings, tickets, plans }));
+    return true;
+  }
+  // 会員情報の変更（お名前・電話番号・パスワード）
+  if (url.pathname === "/api/member/profile" && req.method === "POST") {
+    readJson(req, res, 1e4, (b) => {
+      const m = memberOf(req);
+      if (!m) throw err(401, "loginRequired");
+      if ("name" in b) m.name = String(b.name || "").trim().slice(0, 120);
+      if ("phone" in b) m.phone = String(b.phone || "").trim().slice(0, 40);
+      if (b.newPass) {
+        const np = String(b.newPass).trim();
+        if (np.length < 6) throw err(400, "shortPass");
+        if (m.pass !== hashPass(String(b.pass || "").trim())) throw err(401, "invalidLogin");
+        m.pass = hashPass(np);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, member: memberPublic(m) }));
     });
     return true;
   }
