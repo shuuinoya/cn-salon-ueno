@@ -33,6 +33,7 @@
   }
   .tabs a.active { color: #b08d4f; border-bottom-color: #b08d4f; }
   main { max-width: 980px; margin: 0 auto; padding: 16px 24px 60px; }
+  .card.focus { box-shadow: 0 0 0 2px #c5a15e, 0 1px 3px rgb(0 0 0 / 0.08); }
   .card {
     background: #fff;
     border-radius: 8px;
@@ -181,6 +182,16 @@
     list.push({ id: q.get("id"), token: q.get("token"), name: "", lang: pageLang });
     saveStore(list);
   }
+  // メールのリンク（?tab=tickets 等）で開くタブを指定できる。予約の合言葉はアドレス欄に残さない。
+  // 予約メールの「予約のキャンセルはこちら」（?id=…&token=…）は、予約情報タブのその予約へ直接移動する
+  const focusId = q.get("id") && q.get("token") ? q.get("id") : "";
+  {
+    const tabQ = q.get("tab") || (focusId ? "resv" : "");
+    if (q.get("token") || tabQ) {
+      const want = ["home", "resv", "member", "tickets"].includes(tabQ) ? "#" + tabQ : location.hash;
+      try { history.replaceState(null, "", location.pathname + (q.get("lang") ? "?lang=" + encodeURIComponent(q.get("lang")) : "") + want); } catch {}
+    }
+  }
 
   const hm = (ms) => {
     const d = new Date(ms + 9 * 3600e3);
@@ -222,7 +233,19 @@
   async function loadAll() {
     await loadMember();
     rows = [];
-    if (!member) return; // 未ログイン：ログイン案内だけを表示する
+    if (!member) {
+      // 未ログインでも、予約メールのリンク（予約ID＋予約ごとの合言葉）で開いた予約だけは表示する
+      // （確認・取消のみ。日時変更・回数券・会員情報はログインが必要）
+      for (const entry of store()) {
+        try {
+          const r = await fetch("/api/bookings?id=" + encodeURIComponent(entry.id), {
+            headers: { Authorization: "Bearer " + entry.token }, cache: "no-store" });
+          if (r.ok) rows.push({ entry, bk: (await r.json()).booking });
+        } catch {}
+      }
+      rows.sort((a, b) => b.bk.start - a.bk.start);
+      return;
+    }
     await loadTickets();
     // 本人の予約（会員に紐付いた予約）＋このブラウザに記録された予約（ログイン前の分）
     for (const bk of memberData.bookings || []) rows.push({ entry: { id: bk.id, token: bk.token, name: bk.name }, bk });
@@ -250,10 +273,12 @@
       '<div class="btnrow"><button type="button" class="gold" style="border:0;cursor:pointer" id="mp-login">' + (ja ? "ログイン / 会員登録" : "Log in / Sign up") + "</button></div></div>";
   }
 
+  // メールの「予約のキャンセルはこちら」から開いた予約を一番上に並べる
+  const focusFirst = (list) => focusId ? [...list.filter((r) => r.entry.id === focusId), ...list.filter((r) => r.entry.id !== focusId)] : list;
   function bookingCard(row, withButtons) {
     const t = L[norm(row.bk.language)] || T();
     const cancelled = row.bk.status !== "confirmed";
-    return '<div class="card" data-id="' + esc(row.entry.id) + '">' +
+    return '<div class="card' + (row.entry.id === focusId ? " focus" : "") + '" data-id="' + esc(row.entry.id) + '">' +
       '<div class="rowline"><span class="badge' + (cancelled ? " gray" : "") + '">' + (cancelled ? t.cancelled : t.booked) + "</span>" +
       '<span class="when">' + t.date(row.bk.serviceDate, hm(row.bk.start)) + "</span></div>" +
       '<div class="rowline"><span class="k">' + t.menu + "</span><span>" + esc(row.bk.courseName) + "</span></div>" +
@@ -283,7 +308,12 @@
     }
     const main = document.getElementById("main");
     if (!member) {
-      main.innerHTML = loginGate();
+      if (!rows.length || tab === "member" || tab === "tickets") {
+        main.innerHTML = loginGate();
+        return;
+      }
+      // メールのリンクから開いた予約（ログイン不要で確認・取消できる）＋ログインの案内
+      main.innerHTML = focusFirst(rows).map((r) => bookingCard(r, true)).join("") + loginGate();
       return;
     }
     const name = member.name || store().map((x) => x.name).filter(Boolean).pop() || "";
@@ -317,7 +347,7 @@
           : '<p class="empty">お得な回数券をご用意しています。</p>') +
         '<div class="btnrow"><a class="gold" href="#tickets">回数券を見る</a></div></div>';
     } else if (tab === "resv") {
-      main.innerHTML = rows.map((r) => bookingCard(r, true)).join("");
+      main.innerHTML = focusFirst(rows).map((r) => bookingCard(r, true)).join("");
     }
   }
 
@@ -469,7 +499,12 @@
   });
   window.addEventListener("hashchange", render);
 
-  loadAll().then(render);
+  loadAll().then(() => {
+    render();
+    // メールのリンクで開いた予約まで画面を移動する
+    const el = focusId && document.querySelector('.card.focus');
+    if (el) try { el.scrollIntoView({ block: "center" }); } catch {}
+  });
 })();
 </script>
   <nav class="mobile-nav" aria-label="モバイルメニュー"><a href="/" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M218.83 103.77 138.83 28.29a16 16 0 0 0-21.64 0L37.17 103.77A16 16 0 0 0 32 115.55V208a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48h32v48a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-92.45a16 16 0 0 0-5.17-11.78ZM208 208h-48v-48a16 16 0 0 0-16-16h-32a16 16 0 0 0-16 16v48H48v-92.45L128 40l80 75.53Z"></path></svg><small>ホーム</small></a><a href="/book" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 176H48V96h160Zm0-128H48V48h24v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24Z"></path></svg><small>予約</small></a><a href="/menus" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 116v36a80 80 0 0 1-160 0V76a20 20 0 0 1 40 0V44a20 20 0 0 1 40 0v16a20 20 0 0 1 40 0v56a20 20 0 0 1 40 0Z" opacity=".2"></path><path d="M188 88a27.75 27.75 0 0 0-12 2.71V60a28 28 0 0 0-41.36-24.6A28 28 0 0 0 80 44v6.71A28 28 0 0 0 40 76v76a88 88 0 0 0 176 0v-36a28 28 0 0 0-28-28Zm12 64a72 72 0 0 1-144 0V76a12 12 0 0 1 24 0v44a8 8 0 0 0 16 0V44a12 12 0 0 1 24 0v68a8 8 0 0 0 16 0V60a12 12 0 0 1 24 0v68.67A48.08 48.08 0 0 0 120 176a8 8 0 0 0 16 0 32 32 0 0 1 32-32 8 8 0 0 0 8-8v-20a12 12 0 0 1 24 0Z"></path></svg><small>メニュー</small></a><a href="/map" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M128 64a40 40 0 1 0 40 40 40 40 0 0 0-40-40Zm0 64a24 24 0 1 1 24-24 24 24 0 0 1-24 24Zm0-112a88.1 88.1 0 0 0-88 88c0 31.4 14.51 64.68 42 96.25a254.19 254.19 0 0 0 41.45 38.3 8 8 0 0 0 9.18 0A254.19 254.19 0 0 0 174 200.25c27.45-31.57 42-64.85 42-96.25A88.1 88.1 0 0 0 128 16Zm0 206c-16.53-13-72-60.75-72-118a72 72 0 0 1 144 0c0 57.23-55.47 105-72 118Z"></path></svg><small>マップ</small></a></nav>
