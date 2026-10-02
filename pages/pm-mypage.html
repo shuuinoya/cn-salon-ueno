@@ -267,10 +267,11 @@
     const ja = pageLang !== "en";
     return '<div class="card"><h2>' + (ja ? "マイページ" : "My page") + "</h2>" +
       '<p class="empty" style="margin:0 0 12px">' +
-      (ja ? "マイページのご利用にはログインが必要です。<br>ご予約の確認・日時変更・取消、回数券のご購入・残り回数の確認ができます。<br>初めての方は、メールアドレスとパスワードを入力するとそのまま会員登録（無料）できます。"
-          : "Please log in to use My page. You can check, reschedule or cancel bookings and buy or check tickets.<br>New here? Enter your email and a password to sign up for free.") +
+      (ja ? "マイページのご利用にはログインが必要です。<br>ご予約の確認・日時変更・取消、回数券のご購入・残り回数の確認ができます。<br>はじめての方は「新規会員登録（無料）」からご登録ください。"
+          : "Please log in to use My page. You can check, reschedule or cancel bookings and buy or check tickets.<br>New here? Please create a free account.") +
       "</p>" +
-      '<div class="btnrow"><button type="button" class="gold" style="border:0;cursor:pointer" id="mp-login">' + (ja ? "ログイン / 会員登録" : "Log in / Sign up") + "</button></div></div>";
+      '<div class="btnrow"><button type="button" class="gold" style="border:0;cursor:pointer" id="mp-login">' + (ja ? "ログイン" : "Log in") + "</button>" +
+      '<button type="button" class="gold" style="border:1px solid #c5a15e;background:#fff;color:#8a6a33;cursor:pointer" id="mp-register">' + (ja ? "新規会員登録（無料）" : "Sign up (free)") + "</button></div></div>";
   }
 
   // メールの「予約のキャンセルはこちら」から開いた予約を一番上に並べる
@@ -436,8 +437,12 @@
   });
 
   document.addEventListener("click", async (e) => {
+    if (e.target.closest("#mp-register")) {
+      if (window.CNMember) window.CNMember.open("register"); else location.href = "/login?register=1";
+      return;
+    }
     if (e.target.closest("#mp-login")) {
-      if (window.CNMember) window.CNMember.open(); else location.href = "/login";
+      if (window.CNMember) window.CNMember.open("login"); else location.href = "/login";
       return;
     }
     if (e.target.closest("#mp-logout")) {

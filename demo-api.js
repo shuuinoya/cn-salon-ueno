@@ -3053,6 +3053,19 @@ function handleDemoApi(req, res, url) {
       }
       let m = state.members.get(email);
       let registered = false;
+      // mode：register＝新規会員登録（既に登録済みならエラー）／login＝ログインのみ（未登録ならエラー）／
+      // 指定なし＝従来どおり（未登録ならそのまま登録してログイン）
+      const mode = b.mode === "register" ? "register" : b.mode === "login" ? "login" : "auto";
+      if (m && mode === "register") {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "alreadyRegistered" }));
+      }
+      if (!m && mode === "login") {
+        const n = (lock ? lock.n : 0) + 1;
+        state.memberFails.set(email, { n, until: n >= 5 ? Date.now() + 60000 : 0 });
+        res.writeHead(401, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "invalidLogin" }));
+      }
       if (m) {
         if (m.pass !== hashPass(pass)) {
           const n = (lock ? lock.n : 0) + 1;
@@ -3071,13 +3084,18 @@ function handleDemoApi(req, res, url) {
         queueMail("customer", "member", email,
           `${MAIL_STORE} 会員登録完了のお知らせ`,
           [
+            ...(m.name ? [`${m.name} 様`, ""] : []),
             `この度は「${MAIL_STORE}」の会員にご登録いただきありがとうございます。`,
+            "ご登録内容は以下のとおりです。ログインの際にご利用ください。",
             "",
             SEP,
             `ログインID（メールアドレス）：${email}`,
+            "パスワード：ご登録時に設定されたもの（セキュリティのためメールには記載しておりません）",
             SEP,
             "予約サイト右上の「ログイン」からマイページを開くと、ご予約の確認・日時変更・取消、",
             "回数券のご購入と残り回数の確認がいつでも行えます。",
+            "また、会員様には【予約】【メニュー】ページの一番上に回数券が表示され、ご予約の際にお使いいただけます。",
+            "パスワードをお忘れの場合は、ログイン画面の「パスワードを忘れた方はこちら」から仮パスワードを発行できます。",
             `${origin()}/mypage`,
           ].join("\n") + MAIL_COMMON,
           Date.now(), null);
