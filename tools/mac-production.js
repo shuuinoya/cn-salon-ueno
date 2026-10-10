@@ -4,6 +4,8 @@
 //   （Render に戻すときは、このMacを止めてから Render を動かせば、そのまま引き継がれる）
 // ・動かしている間はMacをスリープさせない（ふたを閉じる・電源を切ると止まります）
 // ・サーバーが止まったら同じURLのまま自動で起動し直す。トンネルが切れたらつなぎ直す（URLは変わる）
+// ・tools/mac-production.env に PUBLIC_URL（Tailscale Funnel の固定URL https://〜.ts.net）があれば、
+//   Cloudflare の代わりに Tailscale で公開する（URLが変わらない・リアルタイム通知も使える）
 // 使い方：「このMacで本番を動かす.command」をダブルクリック（止めるときはその画面で Ctrl+C）
 // 必要：tools/mac-production.env に GH_TOKEN と GH_REPO（Render の Environment と同じ値）
 "use strict";
@@ -63,7 +65,7 @@ function announce() {
   console.log(` 管理画面　　　　　　: ${publicUrl}/cnsalon-board`);
   console.log(" ・この画面とMacは開いたまま（ふたを閉じない・電源につなぐ）にしてください");
   console.log(" ・止めるときは、この画面で Ctrl+C");
-  console.log(" ・URLは起動するたびに変わります（data/mac-production-url.txt にも保存）");
+  console.log(fileEnv.PUBLIC_URL ? " ・URLは固定です（Tailscale）。起動し直しても変わりません" : " ・URLは起動するたびに変わります（data/mac-production-url.txt にも保存）");
   console.log("==============================================\n");
 }
 
@@ -85,7 +87,13 @@ function publicOk(url) {
 let watchFails = 0;
 setInterval(async () => {
   if (stopping || !publicUrl || !tunnel || Date.now() - tunnelAt < 120000) return;
-  if (await publicOk(publicUrl)) { watchFails = 0; return; }
+  // Tailscale（固定URL）はこのMacから公開用の入口へ折り返せないため、Tailscale 経由（このMacの中）で確認する
+  const ok = fileEnv.PUBLIC_URL ? await new Promise((resolve) => {
+    const rq = https.get(publicUrl + "/api/tickets/plans", { timeout: 15000 }, (r) => { r.resume(); resolve(r.statusCode === 200); });
+    rq.on("timeout", () => { rq.destroy(); resolve(false); });
+    rq.on("error", () => resolve(false));
+  }) : await publicOk(publicUrl);
+  if (ok) { watchFails = 0; return; }
   watchFails++;
   console.log(`（注意）外からつながりません（${watchFails}回目）: ${publicUrl}`);
   if (watchFails >= 3) {
@@ -150,4 +158,50 @@ function startServer(show) {
   if (show) setTimeout(announce, 4000);
 }
 
-startTunnel();
+// Tailscale（固定URL）：Tailscale アプリの内部窓口（LocalAPI）で、このMacの443番を本サーバーへ転送・公開する設定を確認する
+function tailscaleLocalApi() {
+  try {
+    const dir = path.join(require("os").homedir(), "Library", "Group Containers");
+    for (const g of fs.readdirSync(dir).filter((x) => /tailscale/i.test(x))) {
+      const f = fs.readdirSync(path.join(dir, g)).find((x) => x.startsWith("sameuserproof-"));
+      if (f) { const [, port, ...tok] = f.split("-"); return { port, token: tok.join("-") }; }
+    }
+  } catch {}
+  return null;
+}
+function ensureFunnel(host) {
+  const api = tailscaleLocalApi();
+  if (!api) { console.log("（注意）Tailscale アプリが見つかりません。Tailscale を起動してログインしてください"); return Promise.resolve(false); }
+  const call = (method, p, body, headers = {}) => new Promise((resolve) => {
+    const rq = require("http").request({ host: "127.0.0.1", port: api.port, path: p, method, auth: ":" + api.token,
+      headers: { "Sec-Tailscale": "localapi", ...headers, ...(body ? { "Content-Type": "application/json" } : {}) } }, (r) => {
+      let b = ""; r.on("data", (c) => (b += c)); r.on("end", () => resolve({ s: r.statusCode, h: r.headers, b }));
+    });
+    rq.on("error", () => resolve({ s: 0, h: {}, b: "" }));
+    if (body) rq.write(JSON.stringify(body));
+    rq.end();
+  });
+  return call("GET", "/localapi/v0/serve-config").then(async (cur) => {
+    const key = host + ":443";
+    const want = { TCP: { 443: { HTTPS: true } }, Web: { [key]: { Handlers: { "/": { Proxy: "http://127.0.0.1:" + PORT } } } }, AllowFunnel: { [key]: true } };
+    let have = {}; try { have = JSON.parse(cur.b || "{}") || {}; } catch {}
+    const ok = have.AllowFunnel && have.AllowFunnel[key] && have.Web && have.Web[key] &&
+      JSON.stringify(have.Web[key].Handlers) === JSON.stringify(want.Web[key].Handlers);
+    if (ok) return true;
+    const r = await call("POST", "/localapi/v0/serve-config", want, cur.h && cur.h.etag ? { "If-Match": cur.h.etag } : {});
+    if (r.s >= 200 && r.s < 300) { console.log("Tailscale で公開する設定をしました: https://" + host); return true; }
+    console.log("（注意）Tailscale の公開設定に失敗しました: HTTP " + r.s + " " + r.b.slice(0, 200));
+    return false;
+  });
+}
+
+if (fileEnv.PUBLIC_URL) {
+  // 固定URL（Tailscale Funnel）で公開
+  publicUrl = fileEnv.PUBLIC_URL.replace(/\/+$/, "");
+  tunnelAt = Date.now();
+  const host = publicUrl.replace(/^https:\/\//, "");
+  ensureFunnel(host).then(() => startServer(true));
+  tunnel = { kill() { ensureFunnel(host); } }; // 見張りが「つながらない」と判断したら公開設定をかけ直す（URLは変わらない）
+} else {
+  startTunnel();
+}
