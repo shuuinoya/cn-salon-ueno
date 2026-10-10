@@ -8,6 +8,8 @@
 // 必要：tools/mac-production.env に GH_TOKEN と GH_REPO（Render の Environment と同じ値）
 "use strict";
 const { spawn } = require("child_process");
+const dns = require("dns");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 
@@ -65,6 +67,35 @@ function announce() {
   console.log("==============================================\n");
 }
 
+// 外から本当につながるかの確認（このMacのDNSは古い結果を覚えていることがあるため、外部のDNSで引く）。
+// 無料トンネルは、プログラムが動いたまま住所だけ消されることがある（2026-10-10に発生）
+const resolver = new dns.Resolver();
+resolver.setServers(["1.1.1.1", "8.8.8.8"]);
+function publicOk(url) {
+  const host = url.replace(/^https:\/\//, "");
+  return new Promise((resolve) => {
+    resolver.resolve4(host, (e, ips) => {
+      if (e || !ips || !ips.length) return resolve(false);
+      const rq = https.get({ host: ips[0], servername: host, path: "/api/tickets/plans", headers: { Host: host }, timeout: 15000 }, (r) => { r.resume(); resolve(r.statusCode === 200); });
+      rq.on("timeout", () => { rq.destroy(); resolve(false); });
+      rq.on("error", () => resolve(false));
+    });
+  });
+}
+let watchFails = 0;
+setInterval(async () => {
+  if (stopping || !publicUrl || !tunnel || Date.now() - tunnelAt < 120000) return;
+  if (await publicOk(publicUrl)) { watchFails = 0; return; }
+  watchFails++;
+  console.log(`（注意）外からつながりません（${watchFails}回目）: ${publicUrl}`);
+  if (watchFails >= 3) {
+    watchFails = 0;
+    console.log("（注意）インターネット公開が切れているため、つなぎ直します（URLは変わります）");
+    try { tunnel.kill("SIGTERM"); } catch {}
+  }
+}, 120000);
+let tunnelAt = 0;
+
 // 1) 無料トンネルを起動して、公開URL（https://〜.trycloudflare.com）を受け取る
 function startTunnel() {
   console.log("インターネット公開の準備をしています（30秒ほど）…");
@@ -74,6 +105,7 @@ function startTunnel() {
     const m = String(b).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
     if (!m || got) return;
     got = true;
+    tunnelAt = Date.now();
     const changed = publicUrl && publicUrl !== m[0];
     publicUrl = m[0];
     if (changed) console.log("\n【お知らせ】インターネット公開がつなぎ直され、URLが変わりました。お客様に新しいURLを伝えてください。");
