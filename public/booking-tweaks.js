@@ -50,6 +50,9 @@
     const label = ta.closest("label");
     const fm = settings;
     if (label) label.style.display = fm.visible ? "" : "none";
+    // 非表示にした欄が必須のままだと、見えない空欄で予約を止めてしまう
+    const required = !!fm.visible && !!fm.required;
+    if (ta.required !== required) ta.required = required;
     if (!fm.visible) return;
     // 管理画面で設定した見出し・入力例（日本語）は、日本語表示のときだけ使う（ほかの言語は予約サイトの訳のまま）
     const jaMode = curLang() === "ja";
@@ -60,7 +63,6 @@
     const ph = jaMode ? (fm.placeholder || "") : (fm.placeholder && I18N && I18N.has(fm.placeholder) ? T(fm.placeholder) : "");
     if (ta.placeholder !== ph) ta.placeholder = ph;
     if (ta.maxLength !== (fm.maxLength || 2000)) ta.maxLength = fm.maxLength || 2000;
-    if (ta.required !== !!fm.required) ta.required = !!fm.required;
     // 必須マークと説明文
     let note = label && label.querySelector(".fm-note");
     const noteText = (fm.required ? T("（必須）") : "") + (fm.description ? " " + T(fm.description) : "");
@@ -127,9 +129,11 @@
       if (u.includes("/api/bookings") && !u.includes("cancel") && init?.method === "POST" && res.ok) {
         const j = await res.clone().json();
         const body = JSON.parse(init.body || "{}");
+        // 完了画面の案内は今回の予約だけ。前回の回数券・日時変更の案内を残さない
+        try { sessionStorage.removeItem("fm-rescheduled"); sessionStorage.removeItem("fm-ticket-used"); } catch {}
         if (j.rescheduledFrom) {
           clearReschedule();
-          try { sessionStorage.setItem("fm-rescheduled", "1"); } catch {}
+          try { if (j.id) sessionStorage.setItem("fm-rescheduled", j.id); } catch {}
         }
         if (j.id && j.token) {
           const list = store().filter((x) => x.id !== j.id);
@@ -137,9 +141,9 @@
           saveStore(list);
           try { localStorage.setItem("fm-lang", body.language || "ja"); } catch {}
         }
-        if (j.ticketLeft !== undefined && window.__fmTicketSel) {
+        if (j.id && j.ticketLeft !== undefined && window.__fmTicketSel) {
           try { sessionStorage.setItem("fm-ticket-used",
-            JSON.stringify({ name: window.__fmTicketSel.name, left: j.ticketLeft })); } catch {}
+            JSON.stringify({ id: j.id, name: window.__fmTicketSel.name, left: j.ticketLeft })); } catch {}
         }
       }
     } catch {}
@@ -631,7 +635,8 @@
     if (!location.pathname.includes("/book/complete")) return;
     let used = null;
     try { used = JSON.parse(sessionStorage.getItem("fm-ticket-used") || "null"); } catch {}
-    if (!used) return;
+    const id = new URLSearchParams(location.search).get("id");
+    if (!id || !used || used.id !== id) return;
     const dl = document.querySelector(".booking-receipt dl");
     if (!dl || dl.dataset.fmTicket) return;
     dl.dataset.fmTicket = "1";
@@ -677,7 +682,7 @@
     if (!location.pathname.includes("/book/complete")) return;
     let done = "";
     try { done = sessionStorage.getItem("fm-rescheduled") || ""; } catch {}
-    if (!done) return;
+    if (!done || done !== new URLSearchParams(location.search).get("id")) return;
     const dl = document.querySelector(".booking-receipt dl");
     if (!dl || dl.dataset.fmRescheduled) return;
     dl.dataset.fmRescheduled = "1";
