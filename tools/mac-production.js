@@ -42,7 +42,8 @@ if (!fileEnv.GH_TOKEN || !fileEnv.GH_REPO) {
   console.log("  GH_REPO=ユーザー名/リポジトリ名\n");
   process.exit(1);
 }
-if (!fs.existsSync(CF)) {
+// cloudflared は、固定URL（Tailscale：PUBLIC_URL あり）のときは使わないので、無くても起動する
+if (!fileEnv.PUBLIC_URL && !fs.existsSync(CF)) {
   console.log("tools/bin/cloudflared が見つかりません（インターネット公開に必要です）");
   process.exit(1);
 }
