@@ -1006,7 +1006,9 @@ function postSchedule(body) {
     }
     case "staff": {
       const p = body;
-      if (!p.id || !p.name || ![`male`, `female`].includes(p.gender)) throw err(400, "invalid");
+      const prevStaff = state.staff.find((x) => x.id === p.id);
+      const gender = p.gender || prevStaff?.gender || "none";
+      if (!p.id || !String(p.name || "").trim() || !["male", "female", "none"].includes(gender)) throw err(400, "invalid");
       const profile = { ...(p.profile || {}) };
       delete profile.nominationFeePending;
       if (p.photo) {
@@ -1016,7 +1018,6 @@ function postSchedule(body) {
         state.photos.delete(p.id);
         profile.imageKey = "";
       }
-      const prevStaff = state.staff.find((x) => x.id === p.id);
       // 新規スタッフのIDは数字8桁の連番で採番する（ID欄がすべて数字8桁で揃うように）
       let staffRecId = p.id;
       if (!prevStaff) {
@@ -1033,7 +1034,7 @@ function postSchedule(body) {
       const rec = {
         id: staffRecId,
         name: String(p.name),
-        gender: p.gender,
+        gender,
         active: p.active ? 1 : 0,
         locked: 0, // 鍵は日ごと（days[date].locked）
         courses: JSON.stringify(p.allCourses ? [] : p.courses || []),

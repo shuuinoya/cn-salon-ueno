@@ -121,3 +121,23 @@ test('予約失敗時には成功済みの案内を変更しない', async () =>
   assert.equal(storage.get('fm-ticket-used'), 'test-existing');
   assert.equal(storage.get('fm-rescheduled'), 'test-existing');
 });
+
+// 保存済みの本人確認トークンを、同一サイト・一致する予約の照会だけに使う。
+test('予約照会の本人確認を回復し、他サイト・別ID・明示トークンには流用しない', async () => {
+  const { ctx } = bookingContext();
+  ctx.URL = URL; ctx.Headers = Headers;
+  ctx.location.origin = 'https://salon.example.test';
+  ctx.store = () => [{ id: 'test-current', token: 'owned-token' }];
+  let sent;
+  ctx.origFetch = async (url, init) => { sent = { url, init }; return { ok: true }; };
+  await ctx.window.fetch('/api/bookings?id=test-current', { headers: { Authorization: 'Bearer ' } });
+  assert.equal(sent.init.headers.get('Authorization'), 'Bearer owned-token');
+  for (const url of ['https://elsewhere.example.test/api/bookings?id=test-current', '/api/bookings?id=test-other', '/api/bookings/cancel?id=test-current']) {
+    await ctx.window.fetch(url, {});
+    assert.equal(sent.init.headers, undefined);
+  }
+  await ctx.window.fetch('/api/bookings?id=test-current', { headers: { Authorization: 'Bearer explicit-token' } });
+  assert.equal(sent.init.headers.Authorization, 'Bearer explicit-token');
+  await ctx.window.fetch('/api/bookings?id=test-current', { method: 'POST', body: '{}' });
+  assert.equal(sent.init.headers, undefined);
+});

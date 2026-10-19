@@ -355,7 +355,7 @@
       // 名前の左の帯：管理画面の「スタッフ情報」の性別（読み込む前は従来の名前での判定）
       const female = lockInfo && lockInfo.gender ? lockInfo.gender === "female" : !!d.female;
       row.classList.toggle("pm-acc-f", female);
-      row.classList.toggle("pm-acc-m", !female);
+      row.classList.toggle("pm-acc-m", !female && lockInfo?.gender !== "none");
       row.classList.toggle("pm-blue", !!lockInfo?.locked);
       row.classList.toggle("pm-locked", !!lockInfo?.locked);
       if (lockInfo && !cell.querySelector(".pm-lockbtn")) {

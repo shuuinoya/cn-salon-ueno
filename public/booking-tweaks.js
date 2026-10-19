@@ -85,6 +85,24 @@
   const saveStore = (list) => { try { localStorage.setItem(MYKEY, JSON.stringify(list.slice(-20))); } catch {} };
   const origFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
+    // 完了ページのURLに確認用トークンが無い場合も、この端末で予約した本人の記録だけを使う。
+    // 同一オリジンの予約照会GETに限定し、明示されたトークンは上書きしない。
+    try {
+      const url = new URL(typeof input === "string" ? input : input.url, location.origin);
+      const method = String(init?.method || input?.method || "GET").toUpperCase();
+      if (url.origin === location.origin && url.pathname === "/api/bookings" && method === "GET") {
+        const headers = new Headers(init?.headers || input?.headers);
+        const auth = (headers.get("Authorization") || "").trim();
+        const id = url.searchParams.get("id");
+        if (id && (!auth || auth === "Bearer")) {
+          const saved = store().find((x) => x.id === id && typeof x.token === "string" && x.token);
+          if (saved) {
+            headers.set("Authorization", "Bearer " + saved.token);
+            init = { ...init, headers };
+          }
+        }
+      }
+    } catch {}
     // 日時変更中：空き状況の問い合わせに元の予約IDを添える（元の予約の枠を空きとして表示。本人確認はサーバー側）
     try {
       const rs0 = typeof input === "string" && input.includes("/api/availability") && !input.includes("reschedule=") ? rescheduleId() : "";
