@@ -1967,6 +1967,15 @@ dialog.pm-move-confirm::backdrop { background: rgb(0 0 0 / 30%); }
   touch-action: manipulation;
 }
 .pm-move-confirm-actions .pm-move-confirm-ok { background: #ff5257; border-color: #ff5257; color: #fff; }
+.pm-move-confirm-actions .pm-move-confirm-ok:disabled { background: #d9d2cc; border-color: #d9d2cc; color: #fff; cursor: not-allowed; }
+/* 変更前 → 変更後（日時・担当）、メニュー、施術時間 */
+.pm-move-confirm-detail { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0 0; font-size: 15px; line-height: 1.5; }
+.pm-move-confirm-detail dt { color: #8a6a50; white-space: nowrap; }
+.pm-move-confirm-detail dd { margin: 0; overflow-wrap: anywhere; }
+.pm-move-confirm-detail:empty { display: none; }
+/* 対応メニュー外・性別指定の警告 */
+.pm-move-confirm-warn { margin: 12px 0 0; padding: 8px 12px; border: 1px solid #f0c36d; border-radius: 4px; background: #fff8e1; color: #6d4300; font-size: 14px; line-height: 1.6; }
+.pm-move-confirm-warn:empty { display: none; }
 .pm-move-confirm-actions button:focus-visible { outline: 3px solid #326cb4; outline-offset: 3px; }
 @media (max-width: 480px) {
   .pm-move-confirm h2 { padding: 12px 16px; font-size: 23px; }
@@ -2008,4 +2017,67 @@ main.ledger-app .ledger-event.pm-ev-warn { outline: 2px dashed #d13438; outline-
 .ledger-row.pm-info-missing > .ledger-staff-cell b::after {
   content: "情報未入力"; display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 3px;
   background: #d13438; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; vertical-align: 1px;
+}
+
+/* ---- 予約カードの直接ドラッグ（pm-layout.js の最後のブロック）---- */
+body.pm-ledger-dragging, body.pm-ledger-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+/* 掴んだ枠の元の位置は薄く残す（どこから動かしているか分かるように） */
+main.ledger-app .ledger-event.pm-drag-origin { opacity: 0.35; }
+/* 保存後、新しい位置に描かれた枠へ写しを重ねる間だけ隠す */
+main.ledger-app .ledger-event.pm-drag-landing { opacity: 0 !important; }
+/* ポインターに付いてくる写し（位置・大きさはスクリプトが決める） */
+main.ledger-app .ledger-event.pm-drag-clone {
+  z-index: 3000 !important; pointer-events: none !important; will-change: transform;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28) !important; filter: none !important; opacity: 0.82;
+}
+main.ledger-app .ledger-event.pm-drag-clone.pm-drag-ng { opacity: 0.65; }
+main.ledger-app .ledger-event.pm-drag-clone.pm-drag-saving { opacity: 0.85; box-shadow: 0 4px 12px rgb(0 0 0 / 0.2) !important; }
+/* 置かれる位置の枠（時間軸と同じ % の位置。置ける＝緑／承認が必要＝黄／置けない＝赤） */
+main.ledger-app .ledger-track .pm-drop-guide {
+  position: absolute; top: 0; bottom: 0; z-index: 3; box-sizing: border-box; pointer-events: none;
+  display: flex; align-items: flex-end; justify-content: flex-start; padding: 0 3px 1px; overflow: hidden;
+  border: 2px dashed #3d8b40; border-radius: 2px; background: rgb(76 175 80 / 0.16);
+  color: #1e5c22; font-size: 10px; font-weight: 700; line-height: 12px; white-space: nowrap;
+}
+main.ledger-app .ledger-track .pm-drop-guide.pm-dg-warn { border-color: #c98a00; background: rgb(255 193 7 / 0.2); color: #6d4300; }
+main.ledger-app .ledger-track .pm-drop-guide.pm-dg-ng { border-color: #d13438; background: rgb(209 52 56 / 0.14); color: #a3262a; }
+/* 写しの上の札：移動先の担当・時刻と、置けない理由 */
+#pm-drag-label {
+  position: fixed; left: 0; top: 0; z-index: 3001; pointer-events: none; will-change: transform;
+  max-width: min(560px, calc(100vw - 8px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; line-height: 18px;
+  background: #2e7d32; color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+#pm-drag-label:empty { display: none; }
+#pm-drag-label.pm-dg-warn { background: #b26a00; }
+#pm-drag-label.pm-dg-ng { background: #c62828; }
+#pm-drag-label.pm-dg-none, #pm-drag-label.pm-dg-same { background: #616161; }
+#pm-drag-label.pm-dg-park { background: #6d4c33; }
+/* 保存できた・できなかったのお知らせ */
+#pm-drag-toast {
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 3002;
+  max-width: min(640px, calc(100vw - 24px)); padding: 9px 16px; border-radius: 6px;
+  background: #fff4f2; color: #b3261e; border: 1px solid #f0a8a0; font-size: 13px; font-weight: 700; line-height: 1.6;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.15);
+}
+#pm-drag-toast.pm-ok { background: #eef8ee; color: #1e5c22; border-color: #9bd09e; }
+/* 点線の置き場（日付をまたぐ移動） */
+main.ledger-app .ledger-modes > span.pm-park-hover { border-color: #3d8b40 !important; border-style: solid !important; background: #eef8ee; }
+main.ledger-app .ledger-modes > span.pm-has-park { font-size: 0; padding-top: 3px; padding-bottom: 3px; }
+main.ledger-app .ledger-modes > span .pm-park-chip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 10px;
+  border: 1px solid #c3cf5f; border-radius: 3px; background: #eef98a; color: #333;
+  font-size: 12px; line-height: 1.4; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+}
+main.ledger-app .ledger-modes > span .pm-park-chip b { white-space: nowrap; }
+main.ledger-app .ledger-modes > span .pm-park-chip small { font-size: 11px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main.ledger-app .ledger-modes > span .pm-park-x {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: 1px solid #b7ad9c; border-radius: 3px;
+  background: #fff; color: #555; font-size: 12px; line-height: 20px; cursor: pointer;
+}
+/* 置き場に置いた予約の、元の位置の枠（まだ動いていない） */
+main.ledger-app .ledger-event.pm-parked-origin { outline: 2px dashed #6d4c33; outline-offset: -2px; opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  main.ledger-app .ledger-event.pm-drag-clone { transition: none !important; }
 }

@@ -860,7 +860,8 @@ function err(code, message) {
   return e;
 }
 
-function postSchedule(body) {
+// actor：操作した管理画面のアカウント（{user, role}。権限の確認と移動の記録に使う）
+function postSchedule(body, actor) {
   const { action, date } = body;
   if (!action || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw err(400, "invalid");
   const day = ensureDay(date);
@@ -962,43 +963,75 @@ function postSchedule(body) {
     case "moveBooking": {
       checkRevision();
       const { id, staffId, start, end } = body;
+      // 別の日へ移すとき（台帳の点線の置き場から、別の日の台帳へドラッグ）：移動先の日（toDate）と、その日の台帳の版（toRevision）。
+      // 予約ID・お客様・メニュー・施術時間・回数券などはそのまま、日付・時間・担当だけを変える
+      const toDate = body.toDate && body.toDate !== date ? String(body.toDate) : date;
+      if (toDate !== date) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(toDate) || toDate < todayJst() || toDate > addDays(todayJst(), 90)) throw err(400, "invalid");
+        if (body.toRevision !== ensureDay(toDate).version) throw err(409, "scheduleConflict");
+      }
       const ev = ensureEvents(date);
       const bk = ev.bookings.find((b) => b.id === id && b.status === "confirmed");
       if (!bk) throw err(404, "notFound");
-      // 指名のお客様の予約は、別の時間・別のスタッフへ動かせない（お客様が担当と時間を指定して予約しているため）
-      if (bk.nominated_staff_id && (staffId !== bk.nominated_staff_id || start !== msToMin(date, bk.start_at))) throw err(409, "nominatedLocked");
+      const curStaff = ev.assignments.find((a) => a.booking_id === id)?.staff_id || null;
+      // ドラッグを始めたときの担当・開始時刻（expect）と今の予約が違えば、ほかの画面で先に変えられている → 動かさない
+      if (body.expect && (body.expect.staffId !== curStaff || body.expect.start !== msToMin(date, bk.start_at))) throw err(409, "bookingChanged");
+      // 指名のお客様の予約は、別の日・別の時間・別のスタッフへ動かせない（お客様が担当と時間を指定して予約しているため）
+      if (bk.nominated_staff_id && (staffId !== bk.nominated_staff_id || start !== msToMin(date, bk.start_at) || toDate !== date)) throw err(409, "nominatedLocked");
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
       if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
-      // スタッフ情報がそろっていない人には移せない（いまの担当のまま時間を変えるのはよい）
-      if (!staffReady(mvTarget) && !ev.assignments.some((a) => a.booking_id === id && a.staff_id === staffId)) throw err(409, "staffInfoMissing");
-      if (staffLockedOn(staffId, date)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
+      // スタッフ情報がそろっていない人には移せない（いまの担当のまま同じ日の時間を変えるのはよい）
+      if (!staffReady(mvTarget) && !(toDate === date && ev.assignments.some((a) => a.booking_id === id && a.staff_id === staffId))) throw err(409, "staffInfoMissing");
+      if (staffLockedOn(staffId, toDate)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(Number.isInteger(start) && Number.isInteger(end) && end > start && end - start <= 600)) throw err(400, "invalid");
-      // 担当メニュー外・性別の合わないスタッフには移せない（理由が分かるエラーを返す）
+      // 担当メニュー外のスタッフ：確認画面で警告を見たうえで、マネージャー以上が承認したとき（allowCourseMismatch）だけ移せる。
+      // スタッフ情報の「コース」は変えない（台帳に「対応外」の印が付く）。性別指定のメニューは承認しても移せない
       const mvWhy = bookingMismatch(mvTarget, bk);
-      if (mvWhy) throw mismatchError(mvWhy);
+      let courseOverride = false;
+      if (mvWhy === "course" && body.allowCourseMismatch === true) {
+        if (!actor || (ROLE_LV[actor.role] || 0) < ROLE_LV.manager) throw err(403, "courseOverrideForbidden");
+        if (genderMismatch(mvTarget, bk)) throw mismatchError("gender");
+        courseOverride = true;
+      } else if (mvWhy) throw mismatchError(mvWhy);
       const mvGender = courseGender(bk.course);
-      if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
-      if (overlaps(date, staffId, start, end, id)) throw err(409, "soldOut");
+      if (!withinShift(toDate, staffId, start, end)) throw err(409, "outsideShift");
+      if (overlaps(toDate, staffId, start, end, id)) throw err(409, "soldOut");
       // 複数名の予約は残りの担当も、新しい時間帯に対応可能なスタッフから割り当て直す
       const others = bk.people > 1
-        ? freeStaffIds(date, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId).slice(0, bk.people - 1)
+        ? freeStaffIds(toDate, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId).slice(0, bk.people - 1)
         : [];
       if (others.length < bk.people - 1) throw err(409, "soldOut");
-      bk.start_at = minToMs(date, start);
-      bk.end_at = minToMs(date, end);
+      const from = { date, staff_id: curStaff, start_at: bk.start_at, end_at: bk.end_at };
+      bk.start_at = minToMs(toDate, start);
+      bk.end_at = minToMs(toDate, end);
       // 料金の再計算（深夜料金・指名料）。ホットペッパーの予約はホットペッパー側の確定金額なので変えない
       if (bk.source !== "hotpepper") {
         const late = start >= 1320 ? 2000 * bk.people : 0;
         bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
       }
       ev.assignments = ev.assignments.filter((a) => a.booking_id !== id);
-      for (const sid of [staffId, ...others]) ev.assignments.push({ booking_id: id, staff_id: sid });
+      let evTo = ev;
+      if (toDate !== date) {
+        ev.bookings = ev.bookings.filter((b) => b.id !== id);
+        evTo = ensureEvents(toDate);
+        evTo.bookings.push(bk);
+        bk.service_date = toDate;
+        state.bookingIndex.set(id, toDate);
+      }
+      for (const sid of [staffId, ...others]) evTo.assignments.push({ booking_id: id, staff_id: sid });
+      // 移動の記録（いつ・誰が・どこからどこへ。対応メニュー外を承認して移したか）。新しい20件まで
+      bk.move_log = [...(Array.isArray(bk.move_log) ? bk.move_log : []), {
+        at: Date.now(), by: actor?.user || "", from,
+        to: { date: toDate, staff_id: staffId, start_at: bk.start_at, end_at: bk.end_at },
+        ...(courseOverride ? { course_override: true } : {}),
+      }].slice(-20);
       if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
       queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
       bump();
-      return { ok: true };
+      if (toDate !== date) bump(toDate);
+      return { ok: true, date: toDate, ...(courseOverride ? { courseOverride: true } : {}) };
     }
     case "createBooking": {
       checkRevision();
@@ -2537,6 +2570,12 @@ function bookingMismatch(st, bk) {
   const g = nm.includes("女性") ? "female" : nm.includes("男性") ? "male" : "none";
   if (g !== "none" && st.gender !== g) return "gender";
   return null;
+}
+// 予約のメニューの性別指定（女性限定・男性限定）にスタッフの性別が合わないか（担当メニューのチェックとは別に確かめる）
+function genderMismatch(st, bk) {
+  const nm = String(bk.course_name || "");
+  const g = bk.course ? courseGender(bk.course) : nm.includes("女性") ? "female" : nm.includes("男性") ? "male" : "none";
+  return g !== "none" && st.gender !== g;
 }
 
 // コース名に性別指定がある場合は、リクエストの希望より優先する
@@ -4678,7 +4717,7 @@ function handleDemoApi(req, res, url) {
           denyApi(req, res);
           return;
         }
-        const result = postSchedule(body);
+        const result = postSchedule(body, sessionAccount(req));
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (e) {

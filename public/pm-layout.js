@@ -6,17 +6,40 @@
 
   // お客様の予約を動かす前に、画像の見本と同じ確認画面で承認を受ける。
   // OK まで保存しない。キャンセル・Esc・画面を閉じた場合は変更しない。
-  window.__pmConfirmBookingMove = (move, data = window.__pmSchedData) => {
-    if (document.getElementById("pm-move-confirm")) return Promise.resolve(false);
-    const booking = data?.bookings?.find((b) => b.id === move.id);
-    const staffName = (id) => data?.staff?.find((s) => s.id === id)?.name || "";
-    const beforeStaff = data?.assignments?.find((a) => a.booking_id === move.id)?.staff_id;
+  // 変更前→変更後の日時・担当、メニュー、施術時間を並べる。移動先のスタッフの対応メニュー（スタッフ情報の「コース」）に
+  // チェックがない予約は、警告を出して「対応外を承知で移動」を押したときだけ承認する（マネージャー以上。サーバーでも確かめる）。
+  // 承認した移動は __pmMoveApprovals に覚え、保存のとき allowCourseMismatch を付けて送る（下の fetch の上書き）
+  window.__pmMoveApprovals = window.__pmMoveApprovals || new Map();
+  window.__pmMoveKey = (m) => [m.id, m.staffId, m.start, m.toDate || m.date].join("|");
+  // スタッフがその予約を担当できるか（サーバーの bookingMismatch と同じ判定）：null＝できる／"course"＝対応メニュー外／"gender"＝性別指定が合わない
+  window.__pmStaffMismatch = (st, bk) => {
+    if (!st || !bk) return null;
+    let list;
+    try { list = JSON.parse(st.courses || "[]"); } catch { return "course"; }
+    if (!Array.isArray(list)) return "course";
+    const nm = String(bk.course_name || "");
+    const g = nm.includes("女性") ? "female" : nm.includes("男性") ? "male" : "none";
+    if (bk.course ? !(list.length === 0 || list.includes(bk.course)) : list.length !== 0) return "course";
+    return g !== "none" && st.gender !== g ? "gender" : null;
+  };
+  window.__pmConfirmBookingMove = async (move, data = window.__pmSchedData) => {
+    if (document.getElementById("pm-move-confirm")) return false;
+    const toDate = move.toDate || move.date;
+    const booking = move.booking || data?.bookings?.find((b) => b.id === move.id);
+    const staffOf = (id) => [...(data?.allStaff || []), ...(data?.staff || [])].find((s) => s.id === id);
+    const staffName = (id) => staffOf(id)?.name || "";
+    const beforeStaff = move.before ? move.before.staffId : data?.assignments?.find((a) => a.booking_id === move.id)?.staff_id;
     const time = (v) => String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
-    const beforeStart = booking ? (booking.start_at - Date.parse(move.date + "T00:00:00+09:00")) / 60000 : null;
-    const beforeEnd = booking ? (booking.end_at - Date.parse(move.date + "T00:00:00+09:00")) / 60000 : null;
+    const dayLabel = (d) => { const t = new Date(d + "T00:00:00Z"); return (t.getUTCMonth() + 1) + "/" + t.getUTCDate() + "（" + WEEK[t.getUTCDay()] + "）"; };
+    const beforeStart = move.before ? move.before.start : booking ? (booking.start_at - Date.parse(move.date + "T00:00:00+09:00")) / 60000 : null;
+    const beforeEnd = move.before ? move.before.end : booking ? (booking.end_at - Date.parse(move.date + "T00:00:00+09:00")) / 60000 : null;
     const afterTime = time(move.start);
     const newStaff = staffName(move.staffId);
-    const oldStaff = staffName(beforeStaff);
+    const oldStaff = (move.before && move.before.staffName) || staffName(beforeStaff);
+    const why = beforeStaff !== move.staffId ? window.__pmStaffMismatch(staffOf(move.staffId), booking) : null;
+    const me = why === "course" ? await getWhoami() : null;
+    const canOverride = !me || !me.role || me.role === "admin" || me.role === "manager";
+    if (document.getElementById("pm-move-confirm")) return false;
     return new Promise((resolve) => {
       const previousFocus = document.activeElement;
       const dialog = document.createElement("dialog");
@@ -26,20 +49,50 @@
       dialog.setAttribute("aria-describedby", "pm-move-confirm-message");
       dialog.innerHTML = '<h2 id="pm-move-confirm-title">予約の移動確認</h2>' +
         '<div class="pm-move-confirm-body"><p class="pm-move-confirm-customer"></p>' +
-        '<p id="pm-move-confirm-message"></p><p class="pm-move-confirm-staff"></p>' +
+        '<p id="pm-move-confirm-message"></p><dl class="pm-move-confirm-detail"></dl><p class="pm-move-confirm-staff"></p>' +
+        '<p class="pm-move-confirm-warn" role="alert"></p>' +
         '<div class="pm-move-confirm-actions"><button type="button" class="pm-move-confirm-ok">OK</button>' +
         '<button type="button" class="pm-move-confirm-cancel" autofocus>キャンセル</button></div></div>';
       dialog.querySelector(".pm-move-confirm-customer").textContent = booking?.name ? booking.name + " 様" : "";
-      dialog.querySelector("#pm-move-confirm-message").textContent = move.start !== beforeStart
-        ? "開始時間が" + afterTime + "に変更になりますが、よろしいですか？"
-        : move.end !== beforeEnd
-          ? "終了時間が" + time(move.end) + "に変更になりますが、よろしいですか？"
-          : "担当スタッフが変更になりますが、よろしいですか？";
+      dialog.querySelector("#pm-move-confirm-message").textContent = toDate !== move.date
+        ? dayLabel(toDate) + " " + afterTime + "に変更になりますが、よろしいですか？"
+        : move.start !== beforeStart
+          ? "開始時間が" + afterTime + "に変更になりますが、よろしいですか？"
+          : move.end !== beforeEnd
+            ? "終了時間が" + time(move.end) + "に変更になりますが、よろしいですか？"
+            : "担当スタッフが変更になりますが、よろしいですか？";
+      // 変更前 → 変更後（日時・担当）と、変わらないもの（メニュー・施術時間）
+      const rows = [];
+      if (beforeStart !== null) {
+        const day = toDate !== move.date;
+        const span = (d, s, e) => (day ? dayLabel(d) + " " : "") + time(s) + "〜" + time(e);
+        rows.push(["日時", span(move.date, beforeStart, beforeEnd) + " → " + span(toDate, move.start, move.end)]);
+      }
+      if (beforeStaff !== move.staffId && newStaff) rows.push(["担当", (oldStaff || "現在の担当") + " → " + newStaff]);
+      else if (newStaff) rows.push(["担当", newStaff + "（変更なし）"]);
+      if (booking?.course_name) rows.push(["メニュー", booking.course_name]);
+      rows.push(["施術時間", (move.end - move.start) + "分" + (beforeEnd !== null && move.end - move.start === beforeEnd - beforeStart ? "（変更なし）" : "")]);
+      const dl = dialog.querySelector(".pm-move-confirm-detail");
+      for (const [k, v] of rows) {
+        const dt = document.createElement("dt"); dt.textContent = k;
+        const dd = document.createElement("dd"); dd.textContent = v;
+        dl.append(dt, dd);
+      }
       const staff = dialog.querySelector(".pm-move-confirm-staff");
       staff.textContent = booking?.people > 1 && newStaff
-        ? "移動先の担当スタッフ：" + newStaff + "（ほかの担当は空き状況から割り当てます）"
-        : beforeStaff && beforeStaff !== move.staffId && newStaff
-          ? "担当スタッフ：" + (oldStaff || "現在の担当") + " → " + newStaff : "";
+        ? "移動先の担当スタッフ：" + newStaff + "（ほかの担当は空き状況から割り当てます）" : "";
+      const ok = dialog.querySelector(".pm-move-confirm-ok");
+      if (why === "course") {
+        dialog.querySelector(".pm-move-confirm-warn").textContent = "⚠ " + (newStaff || "移動先のスタッフ") +
+          "は、このメニューの対応メニュー（スタッフ情報の「コース」）にチェックがありません。移動すると台帳に「対応外」の印が付きます（スタッフ情報は変わりません）。" +
+          (canOverride ? "内容を確認し、承認する場合だけ「対応外を承知で移動」を押してください。"
+            : "対応外の移動を承認できるのは、マネージャー以上の権限のアカウントです。");
+        ok.textContent = "対応外を承知で移動";
+        ok.disabled = !canOverride;
+      } else if (why === "gender") {
+        dialog.querySelector(".pm-move-confirm-warn").textContent = "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、" + (newStaff || "このスタッフ") + "には移動できません。";
+        ok.disabled = true;
+      }
       let settled = false;
       const finish = (approved) => {
         if (settled) return;
@@ -47,6 +100,7 @@
         if (dialog.open) dialog.close();
         dialog.remove();
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        if (approved && why === "course") window.__pmMoveApprovals.set(window.__pmMoveKey(move), Date.now());
         resolve(approved);
       };
       dialog.querySelector(".pm-move-confirm-ok").addEventListener("click", () => finish(true));
@@ -73,6 +127,14 @@
           if (Number.isFinite(v) && v >= 5 && v <= 1020) {
             b.end = b.start + v;
             init = { ...init, body: JSON.stringify(b) };
+          }
+        }
+        // 確認画面で「対応外を承知で移動」を押した移動だけ、承認の印を付けて送る（2分以内・1回限り）
+        if (b && b.action === "moveBooking" && !b.allowCourseMismatch) {
+          const k = window.__pmMoveKey(b), at = window.__pmMoveApprovals.get(k);
+          if (at) {
+            window.__pmMoveApprovals.delete(k);
+            if (Date.now() - at < 120000) init = { ...init, body: JSON.stringify({ ...b, allowCourseMismatch: true }) };
           }
         }
       }
@@ -496,9 +558,12 @@
     const sn = document.querySelector(".ledger-store-name");
     const SN = "Ueno spa&massage CN Health & Beauty SALON";
     if (sn && sn.textContent !== SN) sn.textContent = SN;
-    const modeMsg = document.querySelector(".ledger-modes span");
+    const modeMsg = document.querySelector(".ledger-modes > span");
     const MSG = "日付をまたいで予定を変更したい場合は、一旦このエリアに置いてください。";
-    if (modeMsg && modeMsg.textContent !== MSG) modeMsg.textContent = MSG;
+    // 先頭の文字だけを書き換える（この枠に置いた予約（.pm-park-chip）は消さない）
+    const msgNode = modeMsg?.firstChild;
+    if (modeMsg && (!msgNode || msgNode.nodeType !== 3)) modeMsg.insertBefore(document.createTextNode(MSG), msgNode || null);
+    else if (msgNode && msgNode.nodeValue !== MSG) msgNode.nodeValue = MSG;
     document.querySelectorAll(".ledger-rail button").forEach((b) => {
       const hasLabel = !!(b.querySelector("small")?.textContent || "").trim();
       if (!hasLabel && /^[+＋]$/.test(b.textContent.trim())) b.style.display = "none";
@@ -558,6 +623,7 @@
     if (!window.__pmEvTip) {
       window.__pmEvTip = 1;
       document.addEventListener("mouseover", (e) => {
+        if (document.body.classList.contains("pm-ledger-dragging")) return; // ドラッグ中は出さない
         const el = e.target.closest(".ledger-event");
         if (!el || el.classList.contains("activity")) { document.getElementById("pm-evtip")?.remove(); return; }
         showEventTip(el);
@@ -1093,6 +1159,10 @@
     });
   }
 
+  // 予約カードのドラッグ（下の別ブロック）から、保存後に新しい位置の枠をすぐ整えるために使う
+  window.__pmDecorateEvents = decorateEvents;
+  window.__pmRefreshSched = refreshSched;
+
   // 予約枠のホバー詳細（会員番号〜会計情報まで本物と同じ並び）
   function showEventTip(el) {
     const d = window.__pmSchedData;
@@ -1454,6 +1524,8 @@
         scheduleConflict: "画面の情報が古くなっています。最新の状態で再度お試しください。",
         staffUnavailable: "そのスタッフには移動できません。",
         staffInfoMissing: "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。先に「スタッフ情報」で入力してください。",
+        courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
+        bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の台帳を確認してください。",
         staffCannotDoCourse: "このスタッフは選択されたメニューに対応していません（スタッフ情報の「コース」でこのメニューにチェックがありません）。",
         staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
         staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
@@ -2831,6 +2903,8 @@
       document.body.appendChild(el);
     };
     const doSync = () => {
+      // 予約カードのドラッグ中・保存中は待つ（動かしている枠が途中で描き直されないように。離したら追いつく）
+      if (document.body.classList.contains("pm-ledger-dragging")) { pendingSync = true; return; }
       const rb = document.querySelector(".ledger-refresh");
       if (rb && !rb.disabled && !isEditing()) {
         pendingSync = false;
@@ -3289,4 +3363,493 @@
   setTimeout(refreshCapWarn, 1200);
   setInterval(() => { if (!document.hidden) refreshCapWarn(); }, 60000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshCapWarn(); });
+})();
+
+// ---- 予約カードの直接ドラッグ（2026-10-20）----
+// 台帳の予約（休憩・業務も）の枠をマウスで掴んで、そのまま左右（時間）・上下（担当スタッフ）・斜め（両方）へ動かす。
+// ・掴んだ枠の写しがポインターに付いてくる（1コマに1回だけ transform で動かす。台帳全体は描き直さない）
+// ・移動先の行に「置かれる位置」の枠を出し、時刻・担当と、置けないときは理由を札で示す。
+//   開始時刻は写しの左端の位置から5分単位で決める（掴んだ位置のずれを含めない）。施術時間は変えない
+// ・押して6px動かすまではクリック（予約詳細を開く）。動かしたらドラッグ。Escで取りやめ
+// ・離すと、予約は「予約の移動確認」でOKを押してから保存（休憩・業務はすぐ保存）。保存できたら新しい位置へ収め、
+//   できなかったら理由を出し、サーバーの最新の状態を読み直して今の位置へ戻す
+// ・点線の置き場に置くと、別の日の台帳を開いて、置き場から台帳へドラッグできる（予約IDはそのまま、日付・時間・担当だけ変える）
+// 台帳の本体（AdminSchedule）は、枠を押したときに window.__pmLedgerDrag を呼ぶ（無ければ従来のドラッグのまま）
+(function () {
+  "use strict";
+  const DAY0 = 600, SPAN = 1020, STEP = 5, THRESH = 6, EDGE = 44;
+  const PARK_KEY = "pm-parked-booking";
+  const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
+  const hm = (v) => String(Math.floor((v % 1440) / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
+  const dayMs = (d) => Date.parse(d + "T00:00:00+09:00");
+  const minOf = (d, ms) => Math.round((ms - dayMs(d)) / 60000);
+  const dayLabel = (d) => { const t = new Date(d + "T00:00:00Z"); return (t.getUTCMonth() + 1) + "/" + t.getUTCDate() + "（" + WEEK[t.getUTCDay()] + "）"; };
+  const shownDate = () => document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime") || "";
+  const still = () => !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  const staffIn = (data, id) => [...(data?.staff || []), ...(data?.allStaff || [])].find((s) => s.id === id);
+  const ERR = {
+    soldOut: "その時間は、移動先のスタッフにほかの予約・休憩・業務があります（複数名の予約は、残りの担当の空きも必要です）。",
+    outsideShift: "移動先のスタッフのシフトの時間外です。",
+    scheduleConflict: "ほかの画面で台帳が変更されていました。最新の状態にしたので、もう一度動かしてください。",
+    bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の状態にしました。",
+    staffUnavailable: "そのスタッフには移動できません。",
+    staffInfoMissing: "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。",
+    staffCannotDoCourse: "このスタッフは、この予約のメニューの対応メニュー（スタッフ情報の「コース」）にチェックがありません。",
+    courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
+    staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
+    staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
+    nominatedLocked: "指名のお客様の予約は、別の日・別の時間・別のスタッフへ動かせません。",
+    notFound: "この予約は取消されたか、見つかりませんでした。",
+    invalid: "移動先の日時が正しくありません。",
+    loginRequired: "ログインの有効期限が切れました。もう一度ログインしてください。",
+    forbidden: "このアカウントでは変更できません。",
+  };
+
+  let press = null; // 押している間・ドラッグ中の状態
+  let busy = false; // 確認・保存の途中（新しいドラッグを始めない。連打で二重に保存しない）
+
+  // ---- 移動先：ポインターの下の行と、写しの左端の位置から開始時刻 ----
+  function locate(p) {
+    const hit = document.elementFromPoint(p.x, p.y);
+    if (!hit) return { kind: "none" };
+    const parkEl = hit.closest("main.ledger-app .ledger-modes > span");
+    if (parkEl) return { kind: "park", el: parkEl };
+    if (hit.closest(".ledger-grid-head, .ledger-nav")) return { kind: "none" };
+    const track = hit.closest(".ledger-row")?.querySelector(".ledger-track[data-staff-row]");
+    if (!track) return { kind: "none" };
+    const r = track.getBoundingClientRect();
+    if (!r.width) return { kind: "none" };
+    const dur = p.item.end - p.item.start;
+    let start = DAY0 + Math.round(((p.x - p.grab.dx - r.left) / r.width * SPAN) / STEP) * STEP;
+    start = Math.min(DAY0 + SPAN - dur, Math.max(DAY0, start));
+    return { kind: "row", track, staffId: track.dataset.staffRow, date: p.shown, start, end: start + dur };
+  }
+
+  // ---- 置けるか（画面のデータで判定して、ドラッグ中に知らせる。保存のときはサーバーが同じことを確かめる）----
+  function judge(p, t) {
+    const it = p.item;
+    if (t.kind === "none") return { level: "none", text: "ここには置けません", reason: "" };
+    if (t.kind === "park") {
+      if (it.type !== "booking") return { level: "ng", text: "✕ 休憩・業務は日付をまたいで動かせません", reason: "休憩・業務は日付をまたいで動かせません。" };
+      if (p.kind === "chip") return { level: "same", text: "置き場に戻す" };
+      if (p.booking?.nominated_staff_id) return { level: "ng", text: "✕ 指名のお客様の予約は日付を変えられません", reason: ERR.nominatedLocked };
+      return { level: "park", text: "ここに置いて、移動先の日の台帳を開いてください" };
+    }
+    const d = p.data || {};
+    const st = staffIn(d, t.staffId);
+    const sameDay = p.date === t.date;
+    if (sameDay && t.staffId === it.staffId && t.start === it.start) return { level: "same", text: "元の位置" };
+    const where = (st?.name || "") + "　" + (sameDay ? "" : dayLabel(t.date) + " ") + hm(t.start) + "〜" + hm(t.end);
+    // why：札に出す短い理由／reason：離したときのお知らせの文
+    const ng = (why, reason) => ({ level: "ng", text: where + "　✕ " + why, reason });
+    if (!st) return ng("このスタッフには置けません", "このスタッフには移動できません。");
+    if (it.type === "booking" && p.booking?.nominated_staff_id) return ng("指名のお客様の予約です", ERR.nominatedLocked);
+    if ((st.info_missing || []).length && !(it.type === "booking" && sameDay && t.staffId === it.staffId)) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
+    if (it.type === "booking" && st.locked) return ng("受付停止（鍵）中です", ERR.staffLocked);
+    const sh = (d.shifts || []).find((x) => x.staff_id === t.staffId && x.date === t.date);
+    if (!sh || t.start < minOf(t.date, sh.start_at) || t.end > minOf(t.date, sh.end_at)) return ng("シフトの時間外です", ERR.outsideShift);
+    const mine = (b) => (d.assignments || []).some((a) => a.booking_id === b.id && a.staff_id === t.staffId);
+    const others = [
+      ...(d.bookings || []).filter((b) => b.status === "confirmed" && b.id !== it.id && mine(b)),
+      ...(d.blocks || []).filter((b) => b.staff_id === t.staffId && !(it.type === "block" && b.id === it.id)),
+    ];
+    if (others.some((x) => minOf(t.date, x.start_at) < t.end && minOf(t.date, x.end_at) > t.start)) {
+      return ng("ほかの予約・休憩・業務と重なります", "移動先の時間に、ほかの予約・休憩・業務が入っています。");
+    }
+    if (it.type === "booking" && t.staffId !== it.staffId) {
+      const why = window.__pmStaffMismatch?.(st, p.booking);
+      if (why === "gender") return ng("性別指定のメニューです", ERR.staffGenderOnly);
+      if (why === "course") return { level: "warn", text: where + "　⚠ 対応メニュー外（確認画面で承認が必要）" };
+    }
+    return { level: "ok", text: where };
+  }
+
+  // ---- 押す → 動かす → 離す ----
+  function startPress(e, src) {
+    try { src.el.setPointerCapture(e.pointerId); } catch {}
+    press = { ...src, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, dragging: false, raf: 0 };
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onCancel, true);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", onCancel);
+  }
+  function stopListening() {
+    window.removeEventListener("pointermove", onMove, true);
+    window.removeEventListener("pointerup", onUp, true);
+    window.removeEventListener("pointercancel", onCancel, true);
+    window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("blur", onCancel);
+  }
+  function onMove(e) {
+    const p = press;
+    if (!p || e.pointerId !== p.pointerId) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (!p.dragging) {
+      if (Math.hypot(p.x - p.x0, p.y - p.y0) < THRESH) return;
+      beginDrag(p);
+    }
+    if (!p.raf) p.raf = requestAnimationFrame(frame);
+  }
+  function onUp(e) {
+    const p = press;
+    if (!p || e.pointerId !== p.pointerId) return;
+    stopListening();
+    if (!p.dragging) { press = null; p.open?.(); return; } // 動かしていない＝クリック（予約詳細を開く）
+    p.x = e.clientX; p.y = e.clientY;
+    drop(p).catch(() => back(p));
+  }
+  function onCancel() {
+    const p = press;
+    if (!p) return;
+    stopListening();
+    if (!p.dragging) { press = null; return; }
+    cancelAnimationFrame(p.raf);
+    back(p);
+  }
+  function onKey(e) {
+    if (e.key !== "Escape" || !press?.dragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onCancel();
+  }
+
+  function beginDrag(p) {
+    p.dragging = true;
+    busy = true;
+    const r = p.el.getBoundingClientRect();
+    let w = r.width, h = r.height;
+    if (p.kind === "chip") {
+      // 置き場の札から動かすときは、台帳の時間軸の縮尺で施術時間ぶんの幅の枠にする
+      const tr = document.querySelector("main.ledger-app .ledger-track[data-staff-row]")?.getBoundingClientRect();
+      if (tr?.width) { w = Math.max(24, (p.item.end - p.item.start) / SPAN * tr.width); h = tr.height; }
+    }
+    p.base = { left: r.left, top: r.top };
+    p.grab = { dx: Math.min(p.x0 - r.left, w - 4), dy: Math.min(p.y0 - r.top, h - 4) };
+    p.clone = makeClone(p, w, h);
+    p.label = document.createElement("div");
+    p.label.id = "pm-drag-label";
+    p.label.setAttribute("aria-live", "polite");
+    document.body.appendChild(p.label);
+    p.guide = document.createElement("div");
+    p.guide.className = "pm-drop-guide";
+    p.guide.setAttribute("aria-hidden", "true");
+    p.tkey = "";
+    if (p.kind === "card") p.el.classList.add("pm-drag-origin");
+    document.body.classList.add("pm-ledger-dragging");
+    document.getElementById("pm-evtip")?.remove();
+  }
+  function makeClone(p, w, h) {
+    let c;
+    if (p.kind === "card") {
+      c = p.el.cloneNode(true);
+      for (const a of ["aria-label", "title", "disabled", "aria-current", "id"]) c.removeAttribute(a);
+    } else {
+      c = document.createElement("div");
+      c.className = "ledger-event pm-ev pm-ev-lime";
+      c.innerHTML = '<span class="pm-ev-l1"></span><span class="pm-ev-l2"></span>';
+      c.firstChild.textContent = p.booking?.name ? p.booking.name + " 様" : "予約";
+      c.lastChild.textContent = hm(p.item.start) + "~" + hm(p.item.end);
+    }
+    c.classList.remove("pm-drag-origin", "pm-parked-origin", "pm-drag-landing");
+    c.classList.add("pm-drag-clone");
+    c.setAttribute("aria-hidden", "true");
+    const set = (k, v) => c.style.setProperty(k, v, "important");
+    set("position", "fixed"); set("left", p.base.left + "px"); set("top", p.base.top + "px");
+    set("right", "auto"); set("bottom", "auto"); set("margin", "0");
+    set("width", w + "px"); set("height", h + "px"); set("transition", "none");
+    // 少しだけ持ち上げて見せる（掴んだ点を中心に大きくするので、掴んだ点はポインターの真下のまま）
+    set("transform-origin", p.grab.dx + "px " + p.grab.dy + "px");
+    set("transform", "translate3d(0,0,0) scale(1.03)");
+    (document.querySelector("main.ledger-app") || document.body).appendChild(c);
+    return c;
+  }
+
+  // 1コマに1回：写しと札を動かし、移動先が変わったときだけ案内を描き直す
+  function frame() {
+    const p = press;
+    if (!p || !p.dragging) return;
+    p.raf = 0;
+    const scrolled = autoScroll(p);
+    const x = p.x - p.grab.dx, y = p.y - p.grab.dy;
+    p.clone.style.setProperty("transform", "translate3d(" + (x - p.base.left) + "px," + (y - p.base.top) + "px,0) scale(1.03)", "important");
+    p.label.style.transform = "translate3d(" + Math.max(4, Math.min(x, window.innerWidth - p.label.offsetWidth - 4)) + "px," + (y < 34 ? y + p.clone.offsetHeight + 6 : y - 28) + "px,0)";
+    const t = locate(p);
+    const key = t.kind + "|" + (t.staffId || "") + "|" + (t.start ?? "");
+    if (key !== p.tkey) {
+      p.tkey = key;
+      p.target = t;
+      p.verdict = judge(p, t);
+      paint(p);
+    }
+    if (scrolled) p.raf = requestAnimationFrame(frame); // 端で自動スクロール中は、ポインターが止まっていても続ける
+  }
+  function paint(p) {
+    const t = p.target, v = p.verdict, g = p.guide;
+    document.querySelectorAll(".pm-park-hover").forEach((x) => x.classList.remove("pm-park-hover"));
+    if (t.kind === "row" && v.level !== "same") {
+      if (g.parentNode !== t.track) t.track.appendChild(g);
+      g.style.left = (t.start - DAY0) / SPAN * 100 + "%";
+      g.style.width = (t.end - t.start) / SPAN * 100 + "%";
+      g.className = "pm-drop-guide pm-dg-" + v.level;
+      g.textContent = hm(t.start) + "〜" + hm(t.end);
+    } else g.remove();
+    if (t.kind === "park" && v.level === "park") t.el.classList.add("pm-park-hover");
+    p.label.className = "pm-dg-" + v.level;
+    p.label.textContent = v.text;
+    p.clone.classList.toggle("pm-drag-ng", v.level === "ng" || v.level === "none");
+  }
+  // 画面の端に近づいたら、その方向へ少しずつスクロール（ページの上下・台帳の左右）。スクロールしたら true
+  function autoScroll(p) {
+    const sp = (d) => Math.max(2, Math.round(18 * (1 - Math.min(Math.max(d, 0), EDGE) / EDGE)));
+    let moved = false;
+    const navBottom = Math.max(0, document.querySelector("main.ledger-app .ledger-nav")?.getBoundingClientRect().bottom || 0);
+    const root = document.scrollingElement || document.documentElement;
+    if (p.y < navBottom + EDGE && root.scrollTop > 0) { window.scrollBy(0, -sp(p.y - navBottom)); moved = true; }
+    else if (p.y > window.innerHeight - EDGE && root.scrollTop + window.innerHeight < root.scrollHeight - 1) { window.scrollBy(0, sp(window.innerHeight - p.y)); moved = true; }
+    const gs = document.querySelector("main.ledger-app .ledger-grid-scroll");
+    if (gs && gs.scrollWidth > gs.clientWidth + 1) {
+      const r = gs.getBoundingClientRect(), left = r.left + 126; // 左のスタッフ名の列の右から
+      if (p.y > r.top && p.y < r.bottom) {
+        if (p.x < left + EDGE && gs.scrollLeft > 0) { gs.scrollLeft -= sp(p.x - left); moved = true; }
+        else if (p.x > r.right - EDGE && gs.scrollLeft + gs.clientWidth < gs.scrollWidth - 1) { gs.scrollLeft += sp(r.right - p.x); moved = true; }
+      }
+    }
+    return moved;
+  }
+
+  async function drop(p) {
+    cancelAnimationFrame(p.raf);
+    p.raf = 0;
+    const t = locate(p);
+    p.target = t;
+    p.verdict = judge(p, t);
+    p.guide.remove();
+    document.querySelectorAll(".pm-park-hover").forEach((x) => x.classList.remove("pm-park-hover"));
+    const v = p.verdict;
+    if (v.level === "park") return park(p);
+    if (v.level === "same" || v.level === "none") return back(p);
+    if (v.level === "ng") { toast(v.reason); return back(p); }
+    // 置かれる位置へ写しをぴたりと収めてから、確認・保存
+    p.label.remove();
+    const r = t.track.getBoundingClientRect();
+    await glide(p, { left: r.left + (t.start - DAY0) / SPAN * r.width, top: r.top, width: (t.end - t.start) / SPAN * r.width, height: r.height }, 140);
+    return commit(p, t);
+  }
+
+  async function commit(p, t) {
+    const it = p.item;
+    const cross = t.date !== p.date;
+    const move = { date: p.date, id: it.id, staffId: t.staffId, start: t.start, end: t.end };
+    if (cross) move.toDate = t.date;
+    if (it.type === "booking") {
+      const ok = await window.__pmConfirmBookingMove(cross
+        ? { ...move, before: { staffId: it.staffId, staffName: p.staffName, start: it.start, end: it.end }, booking: p.booking }
+        : move, p.data);
+      if (!ok) return back(p);
+    }
+    p.clone.classList.add("pm-drag-saving");
+    let out = {}, status = 0;
+    try {
+      const body = it.type === "booking"
+        ? { action: "moveBooking", ...move, revision: await versionOf(p, p.date), expect: { staffId: it.staffId, start: it.start } }
+        : { action: "block", date: p.date, revision: await versionOf(p, p.date), id: it.id, staffId: t.staffId, start: t.start, end: t.end, kind: it.kind, note: it.note ?? "" };
+      if (cross) body.toRevision = await versionOf(p, t.date);
+      const r = await fetch("/api/demo/schedule", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
+      });
+      status = r.status;
+      out = await r.json().catch(() => ({}));
+    } catch { out = { error: "network" }; }
+    if (status === 200 && out.ok) {
+      if (p.kind === "chip") setParked(null);
+      await land(p, t);
+      toast(it.type !== "booking" ? "保存しました。" : out.courseOverride ? "予約を移動しました（対応メニュー外として承認）。" : "予約を移動しました。", "ok");
+      return;
+    }
+    toast(ERR[out.error] || (out.error === "network"
+      ? "通信に失敗しました。保存できたか分からないため、最新の状態を読み直しました。台帳を確認してください。" : "移動できませんでした。"));
+    await reloadLedger(p);
+    return back(p);
+  }
+  // その日の台帳の版（ほかの画面での変更の検出に使う）。表示中の日は画面のデータ、ほかの日はサーバーに聞く
+  async function versionOf(p, date) {
+    const v = (p.data?.days || []).find((x) => x.date === date)?.version;
+    if (v !== undefined && date === p.shown) return v;
+    try {
+      const j = await (await fetch("/api/demo/schedule?date=" + date, { cache: "no-store" })).json();
+      return (j.days || []).find((x) => x.date === date)?.version ?? 0;
+    } catch { return 0; }
+  }
+  // 台帳を読み直す（台帳の本体の再読込）。描き直しが済むまで待つ
+  function reloadLedger(p) {
+    if (p.reload && p.date === shownDate()) return Promise.resolve().then(() => p.reload()).catch(() => {});
+    return new Promise((resolve) => {
+      const done = () => { window.removeEventListener("cn:api", on); clearTimeout(tm); resolve(); };
+      const on = (e) => {
+        const dt = e.detail || {};
+        if (dt.path === "/api/demo/schedule" && new URLSearchParams(dt.search || "").get("date") === shownDate()) setTimeout(done, 0);
+      };
+      const tm = setTimeout(done, 3000);
+      window.addEventListener("cn:api", on);
+      document.querySelector("main.ledger-app .ledger-refresh")?.click();
+    });
+  }
+  function findCard(staffId, start, end, type) {
+    const track = [...document.querySelectorAll("main.ledger-app .ledger-track[data-staff-row]")].find((x) => x.dataset.staffRow === staffId);
+    if (!track) return null;
+    const L = (start - DAY0) / SPAN * 100, W = (end - start) / SPAN * 100;
+    return [...track.querySelectorAll(".ledger-event")].find((e) => !e.classList.contains("pm-drag-clone") &&
+      (type === "block") === e.classList.contains("activity") &&
+      Math.abs(parseFloat(e.style.left) - L) < 0.05 && Math.abs(parseFloat(e.style.width) - W) < 0.05) || null;
+  }
+  // 保存できた：台帳を読み直し、新しい位置に描かれた枠へ写しを重ねてから入れ替える
+  async function land(p, t) {
+    await reloadLedger(p);
+    let el = null;
+    for (let i = 0; i < 90 && !el; i++) { await nextFrame(); el = findCard(t.staffId, t.start, t.end, p.item.type); }
+    window.__pmDecorateEvents?.();
+    if (el) {
+      el.classList.add("pm-drag-landing");
+      await glide(p, el.getBoundingClientRect(), 160);
+      el.classList.remove("pm-drag-landing");
+    }
+    finish(p);
+  }
+  // 取りやめ・置けない・保存できなかった：写しを今の位置（元の枠／置き場の札）へ戻す
+  async function back(p) {
+    p.label?.remove();
+    p.guide?.remove();
+    let r = null;
+    if (p.kind === "chip") r = document.querySelector(".pm-park-chip")?.getBoundingClientRect() || null;
+    else {
+      const d = window.__pmSchedData;
+      const bk = p.item.type === "booking" ? d?.bookings?.find((b) => b.id === p.item.id && b.status === "confirmed") : null;
+      const sid = bk ? d.assignments?.find((a) => a.booking_id === bk.id)?.staff_id : null;
+      const el = bk && d.__date === shownDate() ? findCard(sid, minOf(d.__date, bk.start_at), minOf(d.__date, bk.end_at), "booking") : null;
+      r = (el || (p.el.isConnected ? p.el : null))?.getBoundingClientRect() || null;
+    }
+    if (r && r.width) await glide(p, r, 180);
+    finish(p);
+  }
+  function glide(p, r, ms) {
+    return new Promise((resolve) => {
+      const c = p.clone;
+      if (!c) return resolve();
+      const dur = still() ? 0 : ms;
+      const set = (k, v) => c.style.setProperty(k, v, "important");
+      set("transition", dur ? "transform " + dur + "ms cubic-bezier(0.2, 0.8, 0.2, 1), width " + dur + "ms, height " + dur + "ms" : "none");
+      set("transform", "translate3d(" + (r.left - p.base.left) + "px," + (r.top - p.base.top) + "px,0) scale(1)");
+      set("width", r.width + "px");
+      set("height", r.height + "px");
+      if (!dur) return resolve();
+      let done = false;
+      const end = () => { if (!done) { done = true; resolve(); } };
+      c.addEventListener("transitionend", end, { once: true });
+      setTimeout(end, dur + 80);
+    });
+  }
+  function finish(p) {
+    p.clone?.remove();
+    p.label?.remove();
+    p.guide?.remove();
+    document.querySelectorAll(".pm-drag-origin, .pm-drag-landing").forEach((x) => x.classList.remove("pm-drag-origin", "pm-drag-landing"));
+    document.body.classList.remove("pm-ledger-dragging");
+    if (press === p) press = null;
+    busy = false;
+    renderPark();
+  }
+  function toast(text, kind) {
+    if (!text) return;
+    let el = document.getElementById("pm-drag-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "pm-drag-toast";
+      document.body.appendChild(el);
+    }
+    el.setAttribute("role", kind === "ok" ? "status" : "alert");
+    el.className = kind === "ok" ? "pm-ok" : "";
+    el.textContent = text;
+    clearTimeout(el._pmT);
+    el._pmT = setTimeout(() => el.remove(), kind === "ok" ? 2400 : 6000);
+  }
+
+  // ---- 日付をまたぐ移動：点線の置き場 ----
+  let memParked = null; // ブラウザの保存が使えないときの控え
+  function getParked() {
+    try { return JSON.parse(sessionStorage.getItem(PARK_KEY) || "null"); } catch { return memParked; }
+  }
+  function setParked(v) {
+    memParked = v;
+    try { if (v) sessionStorage.setItem(PARK_KEY, JSON.stringify(v)); else sessionStorage.removeItem(PARK_KEY); } catch {}
+    renderPark();
+  }
+  async function park(p) {
+    const it = p.item, bk = p.booking || {};
+    setParked({
+      id: it.id, date: p.date, staffId: it.staffId, staffName: staffIn(p.data, it.staffId)?.name || "", start: it.start, end: it.end,
+      booking: { name: bk.name || "", course: bk.course || "", course_name: bk.course_name || "", people: bk.people || 1, nominated_staff_id: bk.nominated_staff_id || null },
+    });
+    p.label.remove();
+    const chip = document.querySelector(".pm-park-chip")?.getBoundingClientRect();
+    if (chip) await glide(p, chip, 180);
+    finish(p);
+    toast("置き場に置きました（まだ予約は変わっていません）。移動先の日の台帳を開き、置き場から予約をドラッグしてください。", "ok");
+  }
+  function renderPark() {
+    const pk = getParked();
+    const span = document.querySelector("main.ledger-app .ledger-modes > span");
+    document.querySelectorAll(".pm-parked-origin").forEach((x) => x.classList.remove("pm-parked-origin"));
+    if (!span) return;
+    span.classList.toggle("pm-has-park", !!pk);
+    let chip = span.querySelector(".pm-park-chip");
+    if (!pk) { chip?.remove(); return; }
+    const key = pk.id + "|" + pk.date + "|" + pk.staffId + "|" + pk.start;
+    if (!chip || chip.dataset.key !== key) {
+      chip?.remove();
+      chip = document.createElement("span");
+      chip.className = "pm-park-chip";
+      chip.dataset.key = key;
+      chip.setAttribute("role", "button");
+      chip.title = "ドラッグして、移動先のスタッフ・時間に置いてください";
+      chip.innerHTML = '<b></b><small></small><button type="button" class="pm-park-x" aria-label="置き場から戻す（予約は変わりません）" title="置き場から戻す（予約は変わりません）">✕</button>';
+      chip.querySelector("b").textContent = pk.booking?.name ? pk.booking.name + " 様" : "予約";
+      chip.querySelector("small").textContent = dayLabel(pk.date) + " " + hm(pk.start) + "〜" + hm(pk.end) +
+        "（" + (pk.end - pk.start) + "分）" + (pk.staffName ? "・" + pk.staffName : "") + "　→ 台帳へドラッグ";
+      const x = chip.querySelector(".pm-park-x");
+      x.addEventListener("pointerdown", (e) => e.stopPropagation());
+      x.addEventListener("click", (e) => { e.stopPropagation(); setParked(null); });
+      chip.addEventListener("pointerdown", onChipDown);
+      span.appendChild(chip);
+    }
+    // 元の日の台帳を開いているときは、置き場に置いた予約の枠に印（まだ動いていない）
+    if (shownDate() === pk.date) findCard(pk.staffId, pk.start, pk.end, "booking")?.classList.add("pm-parked-origin");
+  }
+  function onChipDown(e) {
+    if (e.button !== 0 || busy || press) return;
+    const pk = getParked();
+    if (!pk) return;
+    e.preventDefault();
+    const shown = shownDate();
+    const d = window.__pmSchedData;
+    startPress(e, {
+      kind: "chip", el: e.currentTarget, item: { type: "booking", id: pk.id, staffId: pk.staffId, start: pk.start, end: pk.end },
+      date: pk.date, shown, data: d && d.__date === shown ? d : {}, booking: pk.booking, staffName: pk.staffName, open: null, reload: null,
+    });
+  }
+  setInterval(() => { if (!press) renderPark(); }, 500);
+
+  // 台帳の本体から呼ばれる入口。引き受けたら true（台帳の本体の従来のドラッグは使わない）
+  window.__pmLedgerDrag = (e, item, api) => {
+    if (!item || (item.type !== "booking" && item.type !== "block")) return false;
+    if (busy || press) return true; // 確認・保存の途中は新しいドラッグを始めない
+    const el = e.currentTarget;
+    if (!el || !el.isConnected) return false;
+    const date = api?.date || shownDate();
+    const data = api?.data || window.__pmSchedData || {};
+    const booking = item.type === "booking" ? (data.bookings || []).find((b) => b.id === item.id) || null : null;
+    startPress(e, { kind: "card", el, item, date, shown: date, data, booking, staffName: staffIn(data, item.staffId)?.name || "", open: api?.open, reload: api?.reload });
+    return true;
+  };
 })();
