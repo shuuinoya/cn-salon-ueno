@@ -222,7 +222,7 @@
     if (!firstCard || document.getElementById("fm-tkbanner")) return;
     await loadMyTickets();
     const use = usableTickets();
-    let plans = [], title = "会員様向け 回数券";
+    let plans = [], title = "会員様向け 回数券", ticketSettings;
     const price = (n) => (I18N ? I18N.price(n) : Number(n).toLocaleString("ja-JP") + "円");
     const planName = (n) => (I18N ? I18N.plan(n) : n);
     try {
@@ -230,6 +230,7 @@
       // 管理画面で「予約・メニューページの最上部に表示」にしたプランだけ（並び順も管理画面の順）
       plans = (pj.plans || []).filter((pl) => pl.show_banner !== false);
       if (pj.settings && pj.settings.bannerTitle) title = pj.settings.bannerTitle;
+      ticketSettings = pj.settings;
     } catch {}
     if (!plans.length && !use.length) return;
     const box = document.createElement("section");
@@ -248,7 +249,7 @@
       "</b><small>" + (pl.regular_price > pl.price ? "<s>" + esc2(price(pl.regular_price)) + "</s> " : "") + esc2(price(pl.price)) +
       (pl.description ? "　" + esc2(T(pl.description)) : "") + "</small></span>" +
       '<i aria-hidden="true">›</i></a>').join("");
-    box.innerHTML = "<h2>" + esc2(T(title)) + "</h2>" + '<div class="list-body">' + rows + "</div>";
+    box.innerHTML = "<h2>" + esc2(T(title)) + "</h2>" + window.CNTickets.offer(ticketSettings) + '<div class="list-body">' + rows + "</div>";
     firstCard.parentElement.insertBefore(box, firstCard);
     if (!document.getElementById("fm-tk-style")) {
       const st = document.createElement("style");
@@ -285,7 +286,8 @@
       '<div class="fm-box">' +
       '<label><input type="radio" name="fm-tk" value="" checked> ' + esc2(T("使用しない")) + "</label>" +
       use.map((t, i) => '<label><input type="radio" name="fm-tk" value="' + i + '"> ' +
-        esc2((I18N ? I18N.plan(t.plan_name) : t.plan_name) + T("（残り {n}回・有効期限 {date}）", { n: t.uses_left, date: jd2(t.expires_at) })) + "</label>").join("") +
+        esc2((I18N ? I18N.plan(t.plan_name) : t.plan_name) + T("（残り {n}回・有効期限 {date}）", { n: t.uses_left, date: jd2(t.expires_at) })) +
+        '<small class="fm-ticket-purchased">' + esc2(T(t.kind === "revival" ? "復活した日" : "購入日") + ": " + window.CNTickets.date(t.purchased_at)) + "</small></label>").join("") +
       '<p class="fm-tk-note" id="fm-tk-note"></p>' +
       "</div>";
     anchor.before(sec);

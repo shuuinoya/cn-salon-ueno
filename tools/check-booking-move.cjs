@@ -48,7 +48,7 @@ function setupSave(source, confirmResult, response = { ok: true, body: { ok: tru
     L: (value) => log.selected.push(value),
     c: () => { log.update += 1; },
     q: async () => { log.refresh += 1; },
-    ae: { scheduleConflict: "test-conflict", nominatedLocked: "test-nominated" },
+    ae: { scheduleConflict: "test-conflict", nominatedConfirmationRequired: "test-nominated" },
     AbortSignal: { timeout: () => ({ testSignal: true }) },
     fetch: async (url, init) => {
       log.posts.push({ url, method: init.method, body: JSON.parse(init.body) });
@@ -167,9 +167,9 @@ async function checkChunk(name) {
   }
 
   {
-    const h = setupSave(source, true, { ok: false, body: { error: "nominatedLocked" } });
+    const h = setupSave(source, true, { ok: false, body: { error: "nominatedConfirmationRequired" } });
     assert.equal(await h.run(), false);
-    assert.equal(h.log.errors.at(-1), "test-nominated", "Server nomination rejection remains handled");
+    assert.equal(h.log.errors.at(-1), "test-nominated", "Missing nomination confirmation remains handled");
     assert.equal(h.context.j, false);
     checked += 1;
   }
@@ -177,10 +177,11 @@ async function checkChunk(name) {
   {
     const h = setupDrop(source, true);
     h.run();
-    assert.equal(h.log.posts.length, 0, "Named-staff booking cannot be dragged");
-    assert.ok(h.log.errors.at(-1).includes("指名"));
+    assert.equal(h.log.posts.length, 1, "Named-staff booking enters the shared confirmation gate");
+    assert.equal(h.log.posts[0].action, "moveBooking");
+    assert.equal(h.log.errors.length, 0);
     assert.equal(h.context.K.current, null);
-    assert.equal(h.context.H, null, "Refused drop removes the ghost");
+    assert.equal(h.context.H, null, "Drop removes the ghost");
     checked += 1;
   }
 

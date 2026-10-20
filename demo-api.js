@@ -978,8 +978,11 @@ function postSchedule(body, actor) {
       const dragged = body.expect && cur.includes(body.expect.staffId) ? body.expect.staffId : cur[0] || null;
       // ドラッグを始めたときの担当・開始時刻（expect）と今の予約が違えば、ほかの画面で先に変えられている → 動かさない
       if (body.expect && (!cur.includes(body.expect.staffId) || body.expect.start !== msToMin(date, bk.start_at))) throw err(409, "bookingChanged");
-      // 指名のお客様の予約は、別の日・別の時間・別のスタッフへ動かせない（お客様が担当と時間を指定して予約しているため）
-      if (bk.nominated_staff_id && (staffId !== bk.nominated_staff_id || start !== msToMin(date, bk.start_at) || toDate !== date)) throw err(409, "nominatedLocked");
+      // 指名予約も移動できるが、日時・担当を変えるときは専用の確認を必須にする。
+      // 古い画面や確認欄を通らない保存でも、指名予約をそのまま変更しない。
+      const nominationMove = !!bk.nominated_staff_id &&
+        (staffId !== dragged || start !== msToMin(date, bk.start_at) || end !== msToMin(date, bk.end_at) || toDate !== date);
+      if (nominationMove && body.confirmNominationMove !== true) throw err(409, "nominatedConfirmationRequired");
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
       if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
@@ -1015,10 +1018,19 @@ function postSchedule(body, actor) {
         }
       }
       if (others.length < bk.people - 1) throw err(409, "soldOut");
+      // 複数名の予約で、指名されていない枠を動かしただけなのに指名担当が自動で替わることを防ぐ。
+      if (bk.nominated_staff_id && dragged !== bk.nominated_staff_id &&
+        ![staffId, ...others].includes(bk.nominated_staff_id)) throw err(409, "nominatedStaffUnavailable");
       const from = { date, staff_id: dragged, start_at: bk.start_at, end_at: bk.end_at };
+      const oldNominee = bk.nominated_staff_id;
       bk.start_at = minToMs(toDate, start);
       bk.end_at = minToMs(toDate, end);
-      // 料金の再計算（深夜料金・指名料）。ホットペッパーの予約はホットペッパー側の確定金額なので変えない
+      if (oldNominee && dragged === oldNominee && staffId !== oldNominee) {
+        bk.nominated_staff_id = staffId;
+        bk.nominated_staff_name = profileOf(mvTarget).nickname || mvTarget.name;
+      }
+      // 指名料は予約時の金額を維持し、深夜料金だけ従来どおり再計算する。
+      // ホットペッパーの予約はホットペッパー側の確定金額なので変えない。
       if (bk.source !== "hotpepper") {
         const late = start >= 1320 ? 2000 * bk.people : 0;
         bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
@@ -1038,6 +1050,7 @@ function postSchedule(body, actor) {
         at: Date.now(), by: actor?.user || "", from,
         to: { date: toDate, staff_id: staffId, start_at: bk.start_at, end_at: bk.end_at },
         ...(courseOverride ? { course_override: true } : {}),
+        ...(nominationMove ? { nomination_confirmed: true, nominated_from: oldNominee, nominated_to: bk.nominated_staff_id } : {}),
       }].slice(-20);
       if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
       queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
@@ -2131,9 +2144,33 @@ function sortedPlans() {
 function ticketSettingsJson() {
   const t = state.settings.tickets || {};
   return { remindDays: ticketRemindDays(), remindHour: TICKET_REMIND_HOUR,
-    bannerTitle: t.bannerTitle || "会員様向け 回数券", purchaseNote: t.purchaseNote ?? "" };
+    bannerTitle: t.bannerTitle || "会員様向け 回数券", purchaseNote: t.purchaseNote ?? "",
+    monthlyOffer: ticketMonthlyOffer(t.monthlyOffer) };
+}
+// 限定料金の「案内」の設定。予約金額・回数券残数はこの設定では変更しない。
+const TICKET_LANGUAGES = ["ja", "en", "zh", "ko", "fr", "es", "it", "de"];
+function ticketMonthlyOffer(value) {
+  const v = value || {};
+  return { enabled: v.enabled !== false, startDay: v.startDay ?? 8, endDay: v.endDay ?? 14,
+    details: Object.fromEntries(TICKET_LANGUAGES.map((lang) => [lang, String(v.details?.[lang] || "")])) };
+}
+function normalizeTicketMonthlyOffer(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.enabled !== "boolean") throw err(400, "invalidMonthlyOffer");
+  const { startDay, endDay } = value;
+  if (![startDay, endDay].every((n) => Number.isInteger(n) && n >= 1 && n <= 31) || startDay > endDay) throw err(400, "invalidMonthlyOfferDays");
+  const details = {};
+  for (const lang of TICKET_LANGUAGES) {
+    const text = value.details?.[lang] ?? "";
+    if (typeof text !== "string" || text.trim().length > 400) throw err(400, "invalidMonthlyOfferDetails");
+    details[lang] = text.trim();
+  }
+  // 追加説明を掲載する場合は、すべての言語で同じ内容を入力してから保存する。
+  const filled = Object.values(details).filter(Boolean).length;
+  if (filled && filled !== TICKET_LANGUAGES.length) throw err(400, "monthlyOfferTranslationsRequired");
+  return { enabled: value.enabled, startDay, endDay, details };
 }
 function ticketPublicJson(t) {
+  const scope = ticketConditions(t).scopeKey === "all" ? "all" : ticketConditions(t).scopeKey.split(",");
   return {
     id: t.id,
     plan_id: t.plan_id,
@@ -2148,7 +2185,8 @@ function ticketPublicJson(t) {
     expires_label: jstDateStr(t.expires_at),
     valid_months: t.valid_months || 12,
     status: ticketStatus(t),
-    menu_scope: ticketConditions(t).scopeKey === "all" ? "all" : ticketConditions(t).scopeKey.split(","),
+    menu_scope: scope,
+    menu_names: scope === "all" ? [] : scope.map((id) => getCourse(id)?.name || ""),
     // 復活分の券：どの購入分から何回復活したか／購入した券：この購入で復活した回数と復活分の券
     revived_from: (Array.isArray(t.revived_from) ? t.revived_from : []).map((x) => ({ ticket_id: x.ticket_id, plan_name: x.plan_name,
       purchased_label: jstDateStr(Date.parse(x.purchased_at)), expired_label: jstDateStr(x.expired_at), count: x.count })),
@@ -4145,7 +4183,7 @@ function handleDemoApi(req, res, url) {
       .map(planPublicJson);
     const ts = ticketSettingsJson();
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ plans, settings: { bannerTitle: ts.bannerTitle, purchaseNote: ts.purchaseNote } }));
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ plans, settings: { bannerTitle: ts.bannerTitle, purchaseNote: ts.purchaseNote, monthlyOffer: ts.monthlyOffer } }));
     return true;
   }
   // 購入（デモ：支払いは店頭。購入と同時に顧客アカウント＝メール＋トークンに紐付く）
@@ -4432,7 +4470,7 @@ function handleDemoApi(req, res, url) {
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     const ts = ticketSettingsJson();
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ member: memberPublic(m), bookings, tickets, plans,
-      ticketSettings: { bannerTitle: ts.bannerTitle, purchaseNote: ts.purchaseNote } }));
+      ticketSettings: { bannerTitle: ts.bannerTitle, purchaseNote: ts.purchaseNote, monthlyOffer: ts.monthlyOffer } }));
     return true;
   }
   // 会員情報の変更（お名前・電話番号・パスワード）
@@ -4507,6 +4545,7 @@ function handleDemoApi(req, res, url) {
             // 予約サイトの回数券の案内：見出し・購入時の案内文
             if (b.bannerTitle !== undefined) next.bannerTitle = String(b.bannerTitle).trim().slice(0, 60) || "会員様向け 回数券";
             if (b.purchaseNote !== undefined) next.purchaseNote = String(b.purchaseNote).trim().slice(0, 400);
+            if (b.monthlyOffer !== undefined) next.monthlyOffer = normalizeTicketMonthlyOffer(b.monthlyOffer);
             state.settings.tickets = next;
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true, settings: ticketSettingsJson() }));
@@ -4679,8 +4718,10 @@ function handleDemoApi(req, res, url) {
     for (let t = 600; t + dur <= 1620; t += 5) {
       const free = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id);
       const curOk = cur.filter((sid) => withinShift(date, sid, t, t + dur) && !overlaps(date, sid, t, t + dur, bk.id));
-      const targets = [...new Set([...free, ...curOk.filter((sid) => !bookingMismatch(state.staff.find((s) => s.id === sid), bk))])];
+      const targets = [...new Set([...free, ...curOk.filter((sid) => state.staff.find((s) => s.id === sid)?.active === 1)])];
       for (const sid of targets) {
+        if (bk.nominated_staff_id && current !== bk.nominated_staff_id &&
+          sid !== bk.nominated_staff_id && !curOk.includes(bk.nominated_staff_id)) continue;
         const pool = new Set([...curOk.filter((x) => x !== current), ...free]);
         pool.delete(sid);
         if (pool.size < people - 1) continue; // 複数名予約は人数分の空きが必要
@@ -4700,10 +4741,10 @@ function handleDemoApi(req, res, url) {
       }));
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({
-      ok: true, id: bk.id, date, start, duration: dur, people,
+      ok: true, id: bk.id, date, start, duration: dur, people, currentStaffId: current,
       course: bk.course, course_name: bk.course_name,
-      nominated: !!bk.nominated_staff_id, // 指名のお客様の予約は動かせない（候補は出さない）
-      staff: bk.nominated_staff_id ? [] : list,
+      nominated: !!bk.nominated_staff_id, // 指名予約は候補を表示し、保存時に専用の確認を必須にする
+      staff: list,
     }));
     return true;
   }

@@ -2,6 +2,24 @@
    右の列（.side-column）があるのはトップと日時選択だけ。それ以外のページは本文の列（最大768px）が
    左に寄って右側が空くため、右の列がないページに限り、768px以上では本文を中央に置く
    （マイページと同じ並び。幅を変えても途中で位置が跳ばない）。幅・文字サイズ・余白は変えない。 */
+.cn-ticket-summary { padding: 16px 0; border-bottom: 1px dashed #ded7c9; min-width: 0; overflow-wrap: anywhere; }
+.cn-ticket-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; line-height: 1.6; }
+.cn-ticket-heading strong { font-size: 15px; }
+.cn-ticket-heading b { color: #8c672d; white-space: nowrap; font-size: 14px; }
+.cn-ticket-summary dl { margin: 10px 0 0; font-size: 13px; line-height: 1.65; }
+.cn-ticket-summary dl > div { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr); gap: 5px 12px; margin-top: 5px; }
+.cn-ticket-summary dt { color: #666; font-weight: 400; }
+.cn-ticket-summary dd { margin: 0; }
+.cn-ticket-status { color: #666; font-size: 12px; margin: 4px 0; }
+.cn-ticket-offer { padding: 14px; margin: 16px 0; border: 1px solid #e2cfaa; border-radius: 8px; background: #fcf7ed; color: #765420; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.cn-ticket-offer p { margin: 8px 0 0; white-space: pre-line; }
+.card > .cn-ticket-summary { padding-left: 20px; padding-right: 20px; }
+.card > .cn-ticket-offer { margin-left: 20px; margin-right: 20px; }
+#fm-tkbanner > .cn-ticket-offer { margin: 12px 16px; }
+.fm-ticket-purchased { display: block; margin-left: 24px; color: #555; }
+@media (max-width: 400px) {
+  .cn-ticket-summary dl > div { grid-template-columns: 1fr; gap: 0; margin-top: 8px; }
+}
 @media (min-width: 768px) {
   .content:not(:has(> .side-column)) { justify-content: center; }
   .content:not(:has(> .side-column)) > .main-column { padding-right: 0; }

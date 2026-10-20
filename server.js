@@ -390,6 +390,7 @@ function sendFile(res, file, status, type, head, url, req) {
           // スタッフ紹介・マイページはページの中のスクリプトがすぐ辞書を使うので、そのまま
           const i18nDefer = /pm-(staff|mypage)\.html$/.test(file) ? "" : " defer";
           text = text.replace("</head>", '<script src="/cn-i18n.js?v=' + fileVer("cn-i18n.js") + '"' + i18nDefer + '></script></head>');
+          text = text.replace("</head>", '<script src="/ticket-display.js?v=' + fileVer("ticket-display.js") + '"' + i18nDefer + '></script></head>');
           text = text.replace("</body>", '<script src="/member.js?v=' + fileVer("member.js") + '" defer></script></body>');
           // 予約サイトのレイアウト補正（タブレット幅で本文の列を中央に置く）
           text = text.replace("</head>", '<link rel="stylesheet" href="/booking-layout.css?v=' + fileVer("booking-layout.css") + '"/></head>');

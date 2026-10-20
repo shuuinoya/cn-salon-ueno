@@ -381,8 +381,9 @@
         '<div class="btnrow"><a class="gold" href="#member">' + t.member + "</a></div></div>" +
         '<div class="card"><h2>' + esc(tr("回数券")) + "</h2>" +
         (myTickets.length
-          ? myTickets.map((tk) => '<div class="rowline"><span class="k">' + esc(plan(tk.plan_name)) + "</span><span>" + esc(tr("残り {n}回", { n: tk.uses_left })) + "</span></div>").join("")
+          ? myTickets.map((tk) => window.CNTickets.summary(tk)).join("")
           : '<p class="empty">' + esc(tr("お得な回数券をご用意しています。")) + "</p>") +
+        window.CNTickets.offer(memberData?.ticketSettings) +
         '<div class="btnrow"><a class="gold" href="#tickets">' + esc(tr("回数券を見る")) + "</a></div></div>" +
         logoutFoot();
     } else if (tab === "resv") {
@@ -427,7 +428,8 @@
         : "";
       return '<div class="card">' +
         '<div class="rowline"><span class="badge' + stCls + '">' + esc(tr(tk.status)) + '</span><span class="when">' + esc(plan(tk.plan_name)) + "</span></div>" +
-        '<div class="rowline"><span class="k">' + esc(tr(revival ? "復活した日" : "購入日")) + "</span><span>" + esc(dateLabel(jd(tk.purchased_at))) + "</span></div>" +
+        '<div class="rowline"><span class="k">' + esc(tr("対象メニュー")) + "</span><span>" + esc(window.CNTickets.scope(tk)) + "</span></div>" +
+        '<div class="rowline"><span class="k">' + esc(tr(revival ? "復活した日" : "購入日")) + "</span><span>" + esc(window.CNTickets.date(tk.purchased_at)) + "</span></div>" +
         '<div class="rowline"><span class="k">' + esc(tr(revival ? "復活した回数" : "利用可能回数")) + "</span><span>" + esc(tr("{n}回", { n: tk.uses_total })) + "</span></div>" +
         (revival ? '<div class="rowline"><span class="k">' + esc(tr("内訳")) + "</span><span>" + esc(tr("前回までの購入分から復活")) + "<br>" + why + "</span></div>" : "") +
         '<div class="rowline"><span class="k">' + esc(tr("残り回数")) + '</span><span><b style="font-size:16px">' + esc(tr("{n}回", { n: tk.uses_left })) + "</b>" +
@@ -435,7 +437,7 @@
           ? tr("（利用済み {n}回・期限切れ後に{m}回を新しい回数券へ復活）", { n: tk.used, m: tk.revived_out })
           : tr("（利用済み {n}回）", { n: tk.used })) + "</span></div>" +
         (tk.revival ? '<div class="rowline"><span class="k">' + esc(tr("復活")) + "</span><span>" + esc(tr("このご購入で、期限切れの未使用{n}回を復活しました（「復活分」の回数券）", { n: tk.revival.total })) + "</span></div>" : "") +
-        '<div class="rowline"><span class="k">' + esc(tr("有効期限")) + "</span><span>" + esc(dateLabel(tk.expires_label || jd(new Date(tk.expires_at + 9 * 3600e3).toISOString()))) + "</span></div>" +
+        '<div class="rowline"><span class="k">' + esc(tr("有効期限")) + "</span><span>" + esc(window.CNTickets.date(tk.expires_at)) + "</span></div>" +
         "</div>";
     }).join("");
     const plans = ticketPlans.map((pl) =>
@@ -451,6 +453,7 @@
     // ログイン中の会員だけが購入できる（判定はサーバー側でも必ず行う）
     if (!member) return loginGate();
     return '<div class="card"><h2>' + esc(tr("保有中の回数券")) + "</h2>" +
+      window.CNTickets.offer(memberData?.ticketSettings) +
       (own || '<p class="empty">' + esc(tr("保有中の回数券はありません。")) + "</p>") + "</div>" +
       '<div class="card"><h2>' + esc(tr("回数券のご購入")) + "</h2>" +
       '<p class="empty" style="margin:0 0 8px">' + esc(ticketNote ? tr(ticketNote) : "") + "</p>" +

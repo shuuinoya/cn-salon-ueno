@@ -10,7 +10,8 @@
   // チェックがない予約は、警告を出して「対応外を承知で移動」を押したときだけ承認する（マネージャー以上。サーバーでも確かめる）。
   // 承認した移動は __pmMoveApprovals に覚え、保存のとき allowCourseMismatch を付けて送る（下の fetch の上書き）
   window.__pmMoveApprovals = window.__pmMoveApprovals || new Map();
-  window.__pmMoveKey = (m) => [m.id, m.staffId, m.start, m.toDate || m.date].join("|");
+  window.__pmNominationMoveApprovals = window.__pmNominationMoveApprovals || new Map();
+  window.__pmMoveKey = (m) => [m.id, m.staffId, m.start, m.end, m.date, m.toDate || m.date].join("|");
   // スタッフがその予約を担当できるか（サーバーの bookingMismatch と同じ判定）：null＝できる／"course"＝対応メニュー外／"gender"＝性別指定が合わない
   window.__pmStaffMismatch = (st, bk) => {
     if (!st || !bk) return null;
@@ -26,9 +27,11 @@
     if (document.getElementById("pm-move-confirm")) return false;
     const toDate = move.toDate || move.date;
     const booking = move.booking || data?.bookings?.find((b) => b.id === move.id);
+    const nominated = !!booking?.nominated_staff_id;
+    window.__pmNominationMoveApprovals.delete(window.__pmMoveKey(move));
     const staffOf = (id) => [...(data?.allStaff || []), ...(data?.staff || [])].find((s) => s.id === id);
     const staffName = (id) => staffOf(id)?.name || "";
-    const beforeStaff = move.before ? move.before.staffId : data?.assignments?.find((a) => a.booking_id === move.id)?.staff_id;
+    const beforeStaff = move.before ? move.before.staffId : move.expect?.staffId || data?.assignments?.find((a) => a.booking_id === move.id)?.staff_id;
     const time = (v) => String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
     const dayLabel = (d) => { const t = new Date(d + "T00:00:00Z"); return (t.getUTCMonth() + 1) + "/" + t.getUTCDate() + "（" + WEEK[t.getUTCDay()] + "）"; };
     const beforeStart = move.before ? move.before.start : booking ? (booking.start_at - Date.parse(move.date + "T00:00:00+09:00")) / 60000 : null;
@@ -53,6 +56,8 @@
         '<div class="pm-move-confirm-body"><p class="pm-move-confirm-customer"></p>' +
         '<p id="pm-move-confirm-message"></p><dl class="pm-move-confirm-detail"></dl><p class="pm-move-confirm-staff"></p>' +
         '<p class="pm-move-confirm-warn" role="alert"></p>' +
+        '<p class="pm-move-confirm-nomination" role="alert" hidden></p>' +
+        '<label class="pm-move-confirm-ack" hidden><input type="checkbox">指名予約の日時・担当の変更を確認しました</label>' +
         '<div class="pm-move-confirm-actions"><button type="button" class="pm-move-confirm-ok">OK</button>' +
         '<button type="button" class="pm-move-confirm-cancel" autofocus>キャンセル</button></div></div>';
       dialog.querySelector(".pm-move-confirm-customer").textContent = booking?.name ? booking.name + " 様" : "";
@@ -73,6 +78,12 @@
       if (beforeStaff !== move.staffId && newStaff) rows.push(["担当", (oldStaff || "現在の担当") + " → " + newStaff]);
       else if (newStaff) rows.push(["担当", newStaff + "（変更なし）"]);
       if (booking?.course_name) rows.push(["メニュー", booking.course_name]);
+      if (nominated) {
+        const nomineeName = staffName(booking.nominated_staff_id) || booking.nominated_staff_name || "";
+        rows.push(["指名スタッフ", beforeStaff === booking.nominated_staff_id && beforeStaff !== move.staffId
+          ? nomineeName + " → " + newStaff : nomineeName + "（変更なし）"]);
+        rows.push(["指名料", Number(booking.nomination_fee || 0).toLocaleString("ja-JP") + "円（予約時の金額を維持）"]);
+      }
       rows.push(["施術時間", (move.end - move.start) + "分" + (beforeEnd !== null && move.end - move.start === beforeEnd - beforeStart ? "（変更なし）" : "")]);
       const dl = dialog.querySelector(".pm-move-confirm-detail");
       for (const [k, v] of rows) {
@@ -95,14 +106,28 @@
         dialog.querySelector(".pm-move-confirm-warn").textContent = "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、" + (newStaff || "このスタッフ") + "には移動できません。";
         ok.disabled = true;
       }
+      const ack = dialog.querySelector(".pm-move-confirm-ack input");
+      if (nominated) {
+        dialog.querySelector("#pm-move-confirm-title").textContent = "【確認】指名予約の変更";
+        const notice = dialog.querySelector(".pm-move-confirm-nomination");
+        notice.hidden = false;
+        notice.textContent = "指名のある予約です。お客様のご希望と、変更前後の日時・担当スタッフを必ず確認してください。確認するまで予約は変わりません。";
+        ack.parentElement.hidden = false;
+        const forbidden = ok.disabled;
+        ok.disabled = true;
+        ok.textContent = why === "course" ? "確認して対応外へ移動" : "確認して移動";
+        ack.addEventListener("change", () => { ok.disabled = forbidden || !ack.checked; });
+      }
       let settled = false;
       const finish = (approved) => {
         if (settled) return;
+        if (approved && (ok.disabled || (nominated && !ack.checked))) return;
         settled = true;
         if (dialog.open) dialog.close();
         dialog.remove();
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
         if (approved && why === "course") window.__pmMoveApprovals.set(window.__pmMoveKey(move), Date.now());
+        if (approved && nominated) window.__pmNominationMoveApprovals.set(window.__pmMoveKey(move), Date.now());
         resolve(approved);
       };
       dialog.querySelector(".pm-move-confirm-ok").addEventListener("click", () => finish(true));
@@ -138,6 +163,13 @@
             window.__pmMoveApprovals.delete(k);
             if (Date.now() - at < 120000) init = { ...init, body: JSON.stringify({ ...b, allowCourseMismatch: true }) };
           }
+        }
+        if (b && b.action === "moveBooking") {
+          const k = window.__pmMoveKey(b), at = window.__pmNominationMoveApprovals.get(k);
+          window.__pmNominationMoveApprovals.delete(k);
+          const confirmed = !!at && Date.now() - at < 120000;
+          // この画面でチェックして承認した移動だけに確認済みの印を付ける（1回限り）。
+          init = { ...init, body: JSON.stringify({ ...JSON.parse(init.body), confirmNominationMove: confirmed }) };
         }
       }
     } catch {}
@@ -286,7 +318,7 @@
 
   function ensure() {
     const app = document.querySelector(".ledger-app");
-    if (!app) return;
+    if (!app || !window.__pmLedgerReady) return;
 
     // 1) 日付表示を「2026-09-25 金」形式に
     const time = document.querySelector(".ledger-date-trigger time");
@@ -1319,6 +1351,19 @@
     const dl = form?.querySelector(".ledger-booking-detail");
     if (side) {
       side.classList.add("pm-side");
+      let mobileHead = side.querySelector(".pm-mobile-panel-head");
+      if (!mobileHead) {
+        mobileHead = document.createElement("div");
+        mobileHead.className = "pm-mobile-panel-head";
+        mobileHead.innerHTML = '<strong>予約・編集</strong><button type="button" aria-label="台帳に戻る">台帳に戻る ×</button>';
+        mobileHead.querySelector("button").addEventListener("click", () => {
+          const close = side.querySelector(".ledger-side-search button");
+          if (close) close.click();
+          else [...side.querySelectorAll(".ledger-form-actions button")].find((b) => b.textContent === "戻る")?.click();
+        });
+        side.appendChild(mobileHead);
+      }
+      mobileHead.querySelector("strong").textContent = dl ? "予約詳細" : form?.querySelector("h2")?.textContent || "予約一覧";
       const inp = side.querySelector(".ledger-side-search input");
       if (inp && inp.placeholder !== "顧客を検索") inp.placeholder = "顧客を検索";
     }
@@ -1334,19 +1379,20 @@
     };
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\'/g, "&#39;");
     const ref = (val("予約ID")?.textContent || "").trim();
-    const prevDay = dateISOMinus1(form.querySelector("p time")?.getAttribute("datetime") || "");
     // 台帳データから該当予約を引き当てる（予約ID・作成日時・ブースなどの実値を使う）
     const bkRow = (window.__pmSchedData?.bookings || []).find((b) => String(b.reference) === ref);
-    const bookingId = /^\d{6,}$/.test(ref) ? ref : "24725" + (ref.replace(/\D/g, "").slice(-4) || "8666");
-    const createdLabel = bkRow?.created_label || prevDay + " 23:42　PC";
+    const bookingId = ref;
+    const createdLabel = bkRow?.created_label || (Number.isFinite(bkRow?.created_at)
+      ? new Date(bkRow.created_at + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ")
+      : "登録日時：未登録");
     const name = (val("お名前")?.textContent || "").trim();
     const menu = (val("メニュー")?.textContent || "").trim();
     // 連絡先はメール<br>電話の構造。非表示中はinnerTextの改行が失われるためノード単位で読む
     const contactParts = val("連絡先")
       ? [...val("連絡先").childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).filter(Boolean)
       : [];
-    const cEmail = contactParts.find((s2) => s2.includes("@")) || "";
-    const tel = contactParts.find((s2) => /^[-\d+ ]{6,}$/.test(s2)) || "08091951969";
+    const cEmail = bkRow?.email || contactParts.find((s2) => s2.includes("@")) || "";
+    const tel = bkRow?.phone || contactParts.find((s2) => /^[-\d+ ]{6,}$/.test(s2)) || "";
     const dateISO = form.querySelector("p time")?.getAttribute("datetime") || "";
     const tsel = form.querySelectorAll(".ledger-time-input select");
     const hh = String(tsel[0]?.value ?? "").padStart(2, "0");
@@ -1358,29 +1404,30 @@
     const html =
       '<div class="pm-shoprow"><label><input type="checkbox" checked/> 自店のみ</label><button type="button" class="pm-red" data-act="none">検索</button></div>' +
       '<div class="pm-cust">' +
-        '<div class="pm-cust-rank">ランク:★★★　会員番号：<br/>TEL:' + esc(tel) + "</div>" +
-        '<div class="pm-cust-name"><span class="pm-gender' + (bkRow?.customer_gender === "m" ? " pm-gender-m" : "") + '">' +
-        (bkRow?.customer_gender === "m" ? "♂" : "♀") + "</span> " + (esc(name) || "&nbsp;") + '<span class="pm-count">回数:1/1</span></div>' +
+        '<div class="pm-cust-rank">TEL:' + esc(tel || "未登録") + "</div>" +
+        '<div class="pm-cust-name">' + (esc(name) || "お名前未登録") + "</div>" +
       "</div>" +
       '<div class="pm-icons">' +
         [["顧客", "♙", "customer"], ["カード", "▦", "none"], ["履歴", "↺", "none"], ["会計", "▤", "pay"], ["返客", "↶", "none"]]
-          .map(([t, g, a]) => '<button type="button" data-act="' + a + '"><small>' + t + "</small><b>" + g + "</b></button>").join("") +
+          .map(([t, g, a]) => '<button type="button" data-act="' + a + '"' + (a === "none" ? ' disabled title="この機能は準備中です"' : "") + '><small>' + t + "</small><b>" + g + "</b></button>").join("") +
       "</div>" +
       '<div class="pm-idbox">' +
         '<div class="pm-idrow"><span>ID:' + esc(bookingId) + "<br/>" + esc(createdLabel) + "</span>" +
-        '<span class="pm-idbtns"><button type="button" class="pm-red" data-act="none">完了</button><button type="button" class="pm-x" data-act="close">X</button></span></div>' +
+        '<span class="pm-idbtns"><button type="button" class="pm-red" data-act="close">閉じる</button><button type="button" class="pm-x" data-act="close" aria-label="予約詳細を閉じる">X</button></span></div>' +
         '<div class="pm-tabrow"><span class="pm-tab">' + (esc(name) || "予約") + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
-        '<div class="pm-btnrow"><button type="button" class="pm-outline" data-act="pay">精算</button><span></span><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
+        '<div class="pm-btnrow"><button type="button" class="pm-outline" data-act="pay">精算</button><span></span><button type="button" class="pm-red" data-act="cancel">予約取消</button></div>' +
         '<div class="pm-btnrow"><label class="pm-mini"><input type="checkbox"/> 他店</label><button type="button" class="pm-red" data-act="none">検索</button><button type="button" class="pm-red" data-act="none">＋ 新規</button></div>' +
         '<div class="pm-dtrow"><span class="pm-cap">日時</span><b>' + esc(dateISO) + " " + hh + ":" + mm + "〜</b></div>" +
-        '<div class="pm-chips"><span class="pm-chip">' + esc((bkRow?.course_label || menu).slice(0, 22)) + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
-        '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="edit">編集</button><button type="button" class="pm-red" data-act="cancel">削除</button></div>' +
+        '<div class="pm-chips"><span class="pm-chip">' + esc(bkRow?.course_label || menu) + '</span><button type="button" class="pm-plus" data-act="none">＋</button></div>' +
+        '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="edit">編集</button><button type="button" class="pm-red" data-act="cancel">予約取消</button></div>' +
         '<table class="pm-table"><tbody>' +
-          [["時間", hh + ":" + mm], ["ブース", esc(bkRow?.booth || "新規1(1)")], ["スタッフ", esc(staffName) + ' <span class="pm-star">★</span>'],
-           ["コース", esc((bkRow?.course_label || menu).slice(0, 24))], ["オプション", ""],
+          [["時間", hh + ":" + mm], ["ブース", esc(bkRow?.booth || "未登録")], ["スタッフ", esc(staffName)],
+           ...(bkRow?.nominated_staff_id ? [["指名", esc(bkRow.nominated_staff_name || staffName)],
+             ["指名料", Number(bkRow.nomination_fee || 0).toLocaleString("ja-JP") + "円"]] : []),
+           ["コース", esc(bkRow?.course_label || menu)], ["オプション", ""],
            ...(bkRow?.ticket_id ? [["回数券", esc(bkRow.ticket_name || "") + "（残り" + (bkRow.ticket_left_after ?? "-") + "回）"]] : []),
            ["こだわり", ""],
-           ["予約タグ", "TORICOM"], ["施術タグ", ""], ["施術コメント", ""]]
+           ["予約タグ", ""], ["施術タグ", ""], ["施術コメント", esc(bkRow?.comment || "")]]
             .map(([k, v]) => "<tr><th>" + k + "</th><td>" + v + "</td></tr>").join("") +
         "</tbody></table>" +
         '<div class="pm-move" id="pm-move" hidden>' +
@@ -1398,10 +1445,12 @@
       side.appendChild(pd);
       pd.addEventListener("click", (e) => {
         const act = e.target.closest("[data-act]")?.dataset.act;
-        const buttons = [...form.querySelectorAll(".ledger-form-actions button")];
+        const currentForm = document.querySelector(".ledger-side-form.pm-booking");
+        if (!currentForm) return;
+        const buttons = [...currentForm.querySelectorAll(".ledger-form-actions button")];
         if (act === "close") buttons.find((b) => b.textContent === "戻る")?.click();
         else if (act === "cancel") buttons.find((b) => b.textContent === "予約取消")?.click();
-        else if (act === "edit") form.classList.toggle("pm-editing");
+        else if (act === "edit") currentForm.classList.toggle("pm-editing");
         else if (act === "move") submitMove(pd);
         else if (act === "pay") openCheckout();
         else if (act === "customer") {
@@ -1417,7 +1466,16 @@
         }
       });
     }
-    if (pd.dataset.html !== html) { pd.dataset.html = html; pd.innerHTML = html; }
+    if (pd.dataset.html !== html) {
+      pd.dataset.html = html;
+      pd.innerHTML = html;
+      // 描き直した選択欄には、同じ予約でも候補を入れ直す。
+      delete pd.dataset.mvKey;
+      pd.querySelectorAll('button[data-act="none"]').forEach((button) => {
+        button.disabled = true;
+        button.title = "この機能は準備中です";
+      });
+    }
     fillMoveTargets(pd, bkRow, dateISO);
     // 顧客マスタ画面へ引き継ぐ情報
     pd.dataset.cname = name;
@@ -1425,7 +1483,8 @@
     pd.dataset.cemail = cEmail;
     pd.dataset.cref = bookingId;
     pd.dataset.ccomment = ((val("コメント")?.textContent || "").trim() === "なし" ? "" : (val("コメント")?.textContent || "").trim());
-    pd.dataset.cgender = menu.includes("女性") ? "f" : menu.includes("男性") ? "m" : "f";
+    // メニューの男女指定はスタッフの条件。お客様の性別として引き継がない。
+    pd.dataset.cgender = "";
   }
 
   // ---- 予約の移動（スタッフ振り分け） ----
@@ -1440,6 +1499,8 @@
     const key = bkRow.id + ":" + dateISO + ":" + version;
     if (pd.dataset.mvKey === key) return;
     pd.dataset.mvKey = key;
+    const moveButton = box.querySelector('[data-act="move"]');
+    if (moveButton) moveButton.disabled = true;
     let data = null;
     try {
       const r = await fetch(`/api/demo/move-targets?date=${dateISO}&id=${encodeURIComponent(bkRow.id)}`, { cache: "no-store" });
@@ -1453,13 +1514,14 @@
     pd.dataset.mvId = data.id;
     pd.dataset.mvDate = data.date;
     pd.dataset.mvDur = String(data.duration);
+    pd.dataset.mvStart = String(data.start);
+    pd.dataset.mvFrom = data.currentStaffId || data.staff.find((s) => s.current)?.id || "";
+    pd.dataset.mvVersion = String(version);
     if (!data.staff.length) {
       staffSel2.innerHTML = '<option value="">候補なし</option>';
       timeSel.innerHTML = "";
       staffSel2.disabled = timeSel.disabled = true;
-      note.textContent = data.nominated
-        ? "指名のお客様の予約は、別の時間・別のスタッフへ動かせません。"
-        : "この予約を移動できる空き候補がありません（対応メニュー・シフト・空き状況を満たすスタッフ不在）。";
+      note.textContent = "この予約を移動できる空き候補がありません（対応メニュー・シフト・空き状況を満たすスタッフ不在）。";
       applyMoveOptionGuards(data);
       return;
     }
@@ -1475,8 +1537,16 @@
         pmHM(t) + "〜" + pmHM(t + data.duration) + (t === data.start ? "（現在と同時刻）" : "") +
         "</option>").join("");
       if (!s.slots.includes(data.start)) timeSel.selectedIndex = 0;
+      updateMoveButton();
     };
-    if (!staffSel2.dataset.pmMv) { staffSel2.dataset.pmMv = "1"; staffSel2.addEventListener("change", fillTimes); }
+    const updateMoveButton = () => {
+      if (moveButton) moveButton.disabled = pd.dataset.mvBusy === "1" ||
+        !staffSel2.value || !timeSel.value ||
+        (staffSel2.value === pd.dataset.mvFrom && Number(timeSel.value) === data.start);
+    };
+    // 最新の候補に取り直したら、変更時に使う時刻一覧も入れ替える。
+    staffSel2.onchange = fillTimes;
+    timeSel.onchange = updateMoveButton;
     fillTimes();
     note.textContent = "対応メニュー・シフト・休憩・既存予約・受付停止を確認した候補だけを表示します。";
     applyMoveOptionGuards(data);
@@ -1496,19 +1566,27 @@
   }
 
   async function submitMove(pd) {
+    if (pd.dataset.mvBusy === "1") return;
     const staffId = pd.querySelector("#pm-mv-staff")?.value;
     const start = Number(pd.querySelector("#pm-mv-time")?.value);
     const dur = Number(pd.dataset.mvDur);
     const date = pd.dataset.mvDate;
     const id = pd.dataset.mvId;
     if (!staffId || !id || !Number.isFinite(start) || !dur) { alert("移動できる候補がありません。"); return; }
-    const version = (window.__pmSchedData?.days || []).find((d) => d.date === date)?.version ?? 0;
-    if (!await window.__pmConfirmBookingMove({ date, id, staffId, start, end: start + dur })) return;
+    const version = Number(pd.dataset.mvVersion);
+    const expect = { staffId: pd.dataset.mvFrom, start: Number(pd.dataset.mvStart) };
+    if (staffId === expect.staffId && start === expect.start) return;
+    const moveButton = pd.querySelector('[data-act="move"]');
+    pd.dataset.mvBusy = "1";
+    if (moveButton) moveButton.disabled = true;
     try {
+      if (!await window.__pmConfirmBookingMove({ date, id, staffId, start, end: start + dur,
+        before: { staffId: expect.staffId, start: expect.start, end: expect.start + dur } })) return;
       const r = await fetch("/api/demo/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "moveBooking", date, id, staffId, start, end: start + dur, revision: version }),
+        body: JSON.stringify({ action: "moveBooking", date, id, staffId, start, end: start + dur, revision: version, expect }),
+        signal: AbortSignal.timeout(15000),
       });
       const out = await r.json().catch(() => ({}));
       if (r.ok && out.ok) {
@@ -1531,14 +1609,20 @@
         staffCannotDoCourse: "このスタッフは選択されたメニューに対応していません（スタッフ情報の「コース」でこのメニューにチェックがありません）。",
         staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
         staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
-        nominatedLocked: "指名のお客様の予約は、別の時間・別のスタッフへ動かせません。",
+        nominatedConfirmationRequired: "指名予約の変更には確認が必要です。日時・担当を確認してから、もう一度移動してください。",
+        nominatedStaffUnavailable: "指名担当がその時間に対応できません。指名担当の枠から移動し、変更内容を確認してください。",
         notFound: "この予約は既に取消されています。",
       }[out.error] || "移動できませんでした。";
       alert(msg);
       delete pd.dataset.mvKey;
       await refreshSched(true);
     } catch {
-      alert("通信に失敗しました。もう一度お試しください。");
+      alert("保存結果を確認できませんでした。最新の台帳を確認してから、もう一度操作してください。");
+      delete pd.dataset.mvKey;
+      await refreshSched(true);
+    } finally {
+      delete pd.dataset.mvBusy;
+      if (moveButton?.isConnected) moveButton.disabled = false;
     }
   }
 
@@ -2290,7 +2374,7 @@
     wrap.id = "pm-ticket-modal";
     wrap.innerHTML =
       '<section role="dialog" aria-modal="true">' +
-      "<h2>店舗マスタ｜回数券管理</h2>" +
+      '<header class="pm-ticket-head"><h2>店舗マスタ｜回数券管理</h2><button type="button" id="pm-tk-close-top" aria-label="回数券管理を閉じる">閉じる ×</button></header>' +
       '<p class="pm-shop-sub">回数券の作成・編集・公開/非公開と、お客様が保有する回数券の残り回数・利用履歴・復活・期限前リマインドの確認ができます。残数の手動変更は必ず履歴に残ります。</p>' +
       "<h3 class=\"pm-tk-h\">回数券プラン</h3>" +
       '<div class="pm-menu-new">' +
@@ -2312,9 +2396,13 @@
       '<div class="pm-shop-actions"><button type="button" id="pm-tk-close">閉じる</button></div>' +
       "</section>";
     document.body.appendChild(wrap);
-    const close = () => wrap.remove();
+    const previousFocus = document.activeElement;
+    const close = () => { wrap.remove(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); };
     wrap.querySelector("#pm-tk-close").addEventListener("click", close);
+    wrap.querySelector("#pm-tk-close-top").addEventListener("click", close);
+    wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
     wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+    wrap.querySelector("#pm-tk-close-top").focus({ preventScroll: true });
     const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\'/g, "&#39;");
     const jd = (v) => {
       if (!v) return "";
@@ -2383,11 +2471,37 @@
     }
     function renderSite(j) {
       const st = j.settings || {};
+      const offer = st.monthlyOffer || { enabled: true, startDay: 8, endDay: 14, details: {} };
+      const languages = [["ja", "日本語"], ["en", "英語"], ["zh", "中国語"], ["ko", "韓国語"], ["fr", "フランス語"], ["es", "スペイン語"], ["it", "イタリア語"], ["de", "ドイツ語"]];
       wrap.querySelector(".pm-tk-site").innerHTML =
         '<div class="pm-tk-grid">' +
         '<label class="w2">予約・メニューページ最上部の見出し<input type="text" id="pm-tk-title" maxlength="60" value="' + esc(st.bannerTitle || "会員様向け 回数券") + '"></label>' +
         '<label class="w3">マイページの購入欄の案内文<textarea id="pm-tk-pnote" maxlength="400" rows="2">' + esc(st.purchaseNote || "") + "</textarea></label>" +
-        '</div><div class="pm-tk-cond"><span class="pm-tk-btns"><button type="button" class="pm-red" id="pm-tk-ssave">案内を保存</button></span></div>';
+        '</div><div class="pm-tk-cond"><span class="pm-tk-btns"><button type="button" class="pm-red" id="pm-tk-ssave">案内を保存</button></span></div>' +
+        '<div class="pm-tk-offer"><h4>回数券をお持ちの方への限定料金の案内</h4>' +
+        '<label class="pm-tk-pub"><input type="checkbox" id="pm-tk-offer-enabled"' + (offer.enabled ? " checked" : "") + '> 予約サイトに案内を表示する</label>' +
+        '<p class="pm-tk-note">会員メニュー・マイページ・予約とメニューの回数券欄に表示します。基本の案内は8か国語に自動で切り替わります。</p>' +
+        '<div class="pm-tk-grid"><label>毎月の開始日<input id="pm-tk-offer-start" type="number" min="1" max="31" step="1" value="' + offer.startDay + '"></label>' +
+        '<label>毎月の終了日<input id="pm-tk-offer-end" type="number" min="1" max="31" step="1" value="' + offer.endDay + '"></label></div>' +
+        '<details class="pm-tk-offer-details"><summary>追加の説明文（任意・8か国語）</summary>' +
+        '<p class="pm-tk-note">料金や対象メニューなどを補足できます。説明を加える場合は、同じ意味の文章を8か国語すべてに入力してください。空欄のままなら基本の案内だけ表示します。</p>' +
+        '<div class="pm-tk-grid">' + languages.map(([lang, name]) => '<label class="w3">' + name + '<textarea data-offer-lang="' + lang + '" rows="2" maxlength="400">' + esc(offer.details?.[lang] || "") + "</textarea></label>").join("") + "</div></details>" +
+        '<div class="pm-tk-preview pm-tk-offer-preview" aria-live="polite"></div>' +
+        '<p class="pm-tk-note">この設定は案内の表示用です。予約金額・回数券の価格・残り回数は変更しません。</p>' +
+        '<button type="button" class="pm-red" id="pm-tk-offer-save">限定料金の案内を保存</button></div>';
+      wrap.querySelector(".pm-tk-offer").addEventListener("input", previewOffer);
+      previewOffer();
+    }
+    function previewOffer() {
+      const start = Number(wrap.querySelector("#pm-tk-offer-start").value);
+      const end = Number(wrap.querySelector("#pm-tk-offer-end").value);
+      const enabled = wrap.querySelector("#pm-tk-offer-enabled").checked;
+      const valid = [start, end].every((d) => Number.isInteger(d) && d >= 1 && d <= 31) && start <= end;
+      const detail = wrap.querySelector('[data-offer-lang="ja"]').value.trim();
+      wrap.querySelector(".pm-tk-offer-preview").textContent = !valid ? "日付は1〜31日で、開始日が終了日以前になるように入力してください。" :
+        !enabled ? "現在の設定：案内を表示しません。" :
+        "予約サイトでの表示：毎月" + start + "〜" + end + "日は、回数券をお持ちの方限定料金でご案内します。" + (detail ? "\n" + detail : "");
+      wrap.querySelector("#pm-tk-offer-save").disabled = !valid;
     }
     // 期限前リマインド：送るタイミング（複数）と、定期処理の最終実行
     const REMIND_CHOICES = [60, 30, 14, 7, 3, 1];
@@ -2531,6 +2645,32 @@
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "settings", bannerTitle: wrap.querySelector("#pm-tk-title").value, purchaseNote: wrap.querySelector("#pm-tk-pnote").value }) });
         window.alert(r.ok ? "予約サイトの案内を保存しました。" : "保存できませんでした。");
+        return;
+      }
+      if (e.target.id === "pm-tk-offer-save") {
+        const button = e.target;
+        if (button.disabled) return;
+        const monthlyOffer = {
+          enabled: wrap.querySelector("#pm-tk-offer-enabled").checked,
+          startDay: Number(wrap.querySelector("#pm-tk-offer-start").value),
+          endDay: Number(wrap.querySelector("#pm-tk-offer-end").value),
+          details: Object.fromEntries([...wrap.querySelectorAll("[data-offer-lang]")].map((el) => [el.dataset.offerLang, el.value.trim()])),
+        };
+        const filled = Object.values(monthlyOffer.details).filter(Boolean).length;
+        if (filled && filled !== 8) { window.alert("追加の説明文は8か国語すべてに入力してください。基本の案内だけなら、すべて空欄で保存できます。"); return; }
+        button.disabled = true;
+        try {
+          const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "settings", monthlyOffer }), signal: AbortSignal.timeout(15000) });
+          const j = await r.json();
+          if (!r.ok) throw new Error({
+            invalidMonthlyOfferDays: "開始日・終了日を1〜31日で確認してください。",
+            monthlyOfferTranslationsRequired: "追加の説明文は8か国語すべてに入力してください。",
+          }[j.error] || "保存できませんでした。入力内容とログイン状態を確認してください。");
+          window.alert("限定料金の案内を保存しました。予約サイトを開き直すと反映されます。");
+        } catch (error) {
+          window.alert(error.name === "TimeoutError" ? "保存結果を確認できませんでした。画面を開き直して設定をご確認ください。" : error.message || "通信できませんでした。もう一度ご確認ください。");
+        } finally { button.disabled = false; }
         return;
       }
       if (e.target.id === "pm-tk-rsave") {
@@ -2873,11 +3013,6 @@
     } catch {}
   }
 
-  function dateISOMinus1(d) {
-    if (!d) return "";
-    return new Date(Date.parse(d + "T00:00:00Z") - 86400e3).toISOString().slice(0, 10);
-  }
-
   // 下部の集計バー（赤・黒・青の3段）
   setInterval(ensure, 600);
 
@@ -2981,6 +3116,7 @@
     }, 30000);
   }
   document.addEventListener("DOMContentLoaded", ensure);
+  window.addEventListener("cn:ledger-ready", ensure);
 })();
 
 // ---- シフト情報（台帳でスタッフ名を押したときの画面）：本物と同じ2列の項目＋勤怠（出勤・退勤・欠勤）----
@@ -3379,7 +3515,7 @@
 // 台帳の本体（AdminSchedule）は、枠を押したときに window.__pmLedgerDrag を呼ぶ（無ければ従来のドラッグのまま）
 (function () {
   "use strict";
-  const DAY0 = 600, SPAN = 1020, STEP = 5, THRESH = 6, EDGE = 44;
+  const DAY0 = 600, SPAN = 1020, STEP = 5, THRESH = 6, EDGE = 44, TOUCH_HOLD = 280;
   const PARK_KEY = "pm-parked-booking";
   const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
   const hm = (v) => String(Math.floor((v % 1440) / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
@@ -3388,7 +3524,13 @@
   const dayLabel = (d) => { const t = new Date(d + "T00:00:00Z"); return (t.getUTCMonth() + 1) + "/" + t.getUTCDate() + "（" + WEEK[t.getUTCDay()] + "）"; };
   const shownDate = () => document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime") || "";
   const still = () => !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  // 別タブへ切り替えた場合も、描画待ちのまま操作不能にしない。
+  const nextFrame = () => new Promise((resolve) => {
+    let frame, timer;
+    const done = () => { cancelAnimationFrame(frame); clearTimeout(timer); resolve(); };
+    frame = requestAnimationFrame(done);
+    timer = setTimeout(done, 80);
+  });
   const staffIn = (data, id) => [...(data?.staff || []), ...(data?.allStaff || [])].find((s) => s.id === id);
   const ERR = {
     soldOut: "その時間は、移動先のスタッフにほかの予約・休憩・業務があります（複数名の予約は、残りの担当の空きも必要です）。",
@@ -3401,7 +3543,8 @@
     courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
     staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
     staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
-    nominatedLocked: "指名のお客様の予約は、別の日・別の時間・別のスタッフへ動かせません。",
+    nominatedConfirmationRequired: "指名予約の変更には確認が必要です。日時・担当を確認してから、もう一度移動してください。",
+    nominatedStaffUnavailable: "指名担当がその時間に対応できません。指名担当の枠から移動し、変更内容を確認してください。",
     notFound: "この予約は取消されたか、見つかりませんでした。",
     invalid: "移動先の日時が正しくありません。",
     loginRequired: "ログインの有効期限が切れました。もう一度ログインしてください。",
@@ -3435,7 +3578,6 @@
     if (t.kind === "park") {
       if (it.type !== "booking") return { level: "ng", text: "✕ 休憩・業務は日付をまたいで動かせません", reason: "休憩・業務は日付をまたいで動かせません。" };
       if (p.kind === "chip") return { level: "same", text: "置き場に戻す" };
-      if (p.booking?.nominated_staff_id) return { level: "ng", text: "✕ 指名のお客様の予約は日付を変えられません", reason: ERR.nominatedLocked };
       return { level: "park", text: "ここに置いて、移動先の日の台帳を開いてください" };
     }
     const d = p.data || {};
@@ -3446,7 +3588,6 @@
     // why：札に出す短い理由／reason：離したときのお知らせの文
     const ng = (why, reason) => ({ level: "ng", text: where + "　✕ " + why, reason });
     if (!st) return ng("このスタッフには置けません", "このスタッフには移動できません。");
-    if (it.type === "booking" && p.booking?.nominated_staff_id) return ng("指名のお客様の予約です", ERR.nominatedLocked);
     // すでにこの予約を担当している人（複数名の予約のほかの担当も）のまま動かすなら、鍵・スタッフ情報の未入力・対応メニューで止めない（サーバーと同じ）
     const already = it.type === "booking" && sameDay && (d.assignments || []).some((a) => a.booking_id === it.id && a.staff_id === t.staffId);
     if ((st.info_missing || []).length && !already) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
@@ -3472,7 +3613,12 @@
   // ---- 押す → 動かす → 離す ----
   function startPress(e, src) {
     try { src.el.setPointerCapture(e.pointerId); } catch {}
-    press = { ...src, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, dragging: false, raf: 0 };
+    press = { ...src, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+      touch: e.pointerType === "touch", touchArmed: false, panning: false, dragging: false, raf: 0 };
+    if (press.touch) {
+      const p = press;
+      p.holdTimer = setTimeout(() => { if (press === p && !p.ending && !p.panning) p.touchArmed = true; }, TOUCH_HOLD);
+    }
     window.addEventListener("pointermove", onMove, true);
     window.addEventListener("pointerup", onUp, true);
     window.addEventListener("pointercancel", onCancel, true);
@@ -3489,8 +3635,23 @@
   function onMove(e) {
     const p = press;
     if (!p || e.pointerId !== p.pointerId) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY;
+    if (p.touch && !p.dragging && (p.panning || (!p.touchArmed && Math.hypot(p.x - p.x0, p.y - p.y0) >= THRESH))) {
+      // 指ですぐなぞったときは台帳をスクロール。長押ししてから動かしたときだけ予約を移す。
+      p.panning = true;
+      clearTimeout(p.holdTimer);
+      const scroller = p.el.closest(".ledger-grid-scroll");
+      if (scroller) {
+        scroller.scrollLeft -= dx;
+        const before = scroller.scrollTop;
+        scroller.scrollTop -= dy;
+        window.scrollBy(0, -dy - (scroller.scrollTop - before));
+      } else window.scrollBy(0, -dy);
+      return;
+    }
     if (!p.dragging) {
+      if (p.touch && !p.touchArmed) return;
       if (Math.hypot(p.x - p.x0, p.y - p.y0) < THRESH) return;
       beginDrag(p);
     }
@@ -3498,19 +3659,28 @@
   }
   function onUp(e) {
     const p = press;
-    if (!p || e.pointerId !== p.pointerId) return;
+    if (!p || p.ending || e.pointerId !== p.pointerId) return;
+    p.ending = true;
+    clearTimeout(p.holdTimer);
     stopListening();
-    if (!p.dragging) { press = null; p.open?.(); return; } // 動かしていない＝クリック（予約詳細を開く）
+    releasePointer(p);
+    if (!p.dragging) { press = null; if (!p.panning) p.open?.(); return; } // タップは詳細、スワイプはスクロールのみ
     p.x = e.clientX; p.y = e.clientY;
     drop(p).catch(() => back(p));
   }
   function onCancel() {
     const p = press;
-    if (!p) return;
+    if (!p || p.ending) return;
+    p.ending = true;
+    clearTimeout(p.holdTimer);
     stopListening();
+    releasePointer(p);
     if (!p.dragging) { press = null; return; }
     cancelAnimationFrame(p.raf);
     back(p);
+  }
+  function releasePointer(p) {
+    try { if (p.el.hasPointerCapture(p.pointerId)) p.el.releasePointerCapture(p.pointerId); } catch {}
   }
   function onKey(e) {
     if (e.key !== "Escape" || !press?.dragging) return;
@@ -3723,6 +3893,8 @@
   }
   // 取りやめ・置けない・保存できなかった：写しを今の位置（元の枠／置き場の札）へ戻す
   async function back(p) {
+    if (p.returning || p.finished) return;
+    p.returning = true;
     p.label?.remove();
     p.guide?.remove();
     let r = null;
@@ -3730,31 +3902,56 @@
     else {
       const d = window.__pmSchedData;
       const bk = p.item.type === "booking" ? d?.bookings?.find((b) => b.id === p.item.id && b.status === "confirmed") : null;
-      const sid = bk ? d.assignments?.find((a) => a.booking_id === bk.id)?.staff_id : null;
+      const ids = bk ? (d.assignments || []).filter((a) => a.booking_id === bk.id).map((a) => a.staff_id) : [];
+      const sid = ids.includes(p.item.staffId) ? p.item.staffId : ids[0];
       const el = bk && d.__date === shownDate() ? findCard(sid, minOf(d.__date, bk.start_at), minOf(d.__date, bk.end_at), "booking") : null;
       r = (el || (p.el.isConnected ? p.el : null))?.getBoundingClientRect() || null;
     }
-    if (r && r.width) await glide(p, r, 180);
-    finish(p);
+    try { if (r && r.width) await glide(p, r, 180); }
+    finally { finish(p); }
   }
   function glide(p, r, ms) {
     return new Promise((resolve) => {
       const c = p.clone;
       if (!c) return resolve();
-      const dur = still() ? 0 : ms;
+      const dur = still() || document.hidden ? 0 : ms;
       const set = (k, v) => c.style.setProperty(k, v, "important");
-      set("transition", dur ? "transform " + dur + "ms cubic-bezier(0.2, 0.8, 0.2, 1), width " + dur + "ms, height " + dur + "ms" : "none");
-      set("transform", "translate3d(" + (r.left - p.base.left) + "px," + (r.top - p.base.top) + "px,0) scale(1)");
+      // 幅・高さは最初に一度だけ決め、移動中は transform だけを変える。
+      // 毎コマのレイアウト計算と、拡大の中心を変えた際の位置ずれを避ける。
+      const from = c.getBoundingClientRect();
+      p.base = { left: from.left, top: from.top };
+      set("transition", "none");
+      set("transform-origin", "0 0");
+      set("left", from.left + "px"); set("top", from.top + "px");
       set("width", r.width + "px");
       set("height", r.height + "px");
+      set("transform", "scale(" + (from.width / r.width) + "," + (from.height / r.height) + ")");
+      if (dur) c.getBoundingClientRect(); // 開始位置を1回だけ確定する
+      set("transition", dur ? "transform " + dur + "ms cubic-bezier(0.2, 0.8, 0.2, 1)" : "none");
+      set("transform", "translate3d(" + (r.left - p.base.left) + "px," + (r.top - p.base.top) + "px,0) scale(1)");
       if (!dur) return resolve();
       let done = false;
-      const end = () => { if (!done) { done = true; resolve(); } };
-      c.addEventListener("transitionend", end, { once: true });
-      setTimeout(end, dur + 80);
+      const end = (ev) => {
+        if (ev && (ev.target !== c || ev.propertyName !== "transform")) return;
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        c.removeEventListener("transitionend", end);
+        c.removeEventListener("transitioncancel", end);
+        resolve();
+      };
+      const timer = setTimeout(end, dur + 80);
+      c.addEventListener("transitionend", end);
+      c.addEventListener("transitioncancel", end);
     });
   }
   function finish(p) {
+    if (p.finished) return;
+    p.finished = true;
+    clearTimeout(p.holdTimer);
+    stopListening();
+    releasePointer(p);
+    cancelAnimationFrame(p.raf);
     p.clone?.remove();
     p.label?.remove();
     p.guide?.remove();
@@ -3793,7 +3990,8 @@
     const it = p.item, bk = p.booking || {};
     setParked({
       id: it.id, date: p.date, staffId: it.staffId, staffName: staffIn(p.data, it.staffId)?.name || "", start: it.start, end: it.end,
-      booking: { name: bk.name || "", course: bk.course || "", course_name: bk.course_name || "", people: bk.people || 1, nominated_staff_id: bk.nominated_staff_id || null },
+      booking: { name: bk.name || "", course: bk.course || "", course_name: bk.course_name || "", people: bk.people || 1,
+        nominated_staff_id: bk.nominated_staff_id || null, nominated_staff_name: bk.nominated_staff_name || "", nomination_fee: bk.nomination_fee || 0 },
     });
     p.label.remove();
     const chip = document.querySelector(".pm-park-chip")?.getBoundingClientRect();
@@ -3847,6 +4045,7 @@
   // 台帳の本体から呼ばれる入口。引き受けたら true（台帳の本体の従来のドラッグは使わない）
   window.__pmLedgerDrag = (e, item, api) => {
     if (!item || (item.type !== "booking" && item.type !== "block")) return false;
+    if (e.isPrimary === false) return true;
     if (busy || press) return true; // 確認・保存の途中は新しいドラッグを始めない
     const el = e.currentTarget;
     if (!el || !el.isConnected) return false;

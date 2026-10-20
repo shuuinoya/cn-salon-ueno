@@ -383,7 +383,9 @@ main.ledger-app .pm-outline, .pm-outline {
   width: 8.5em;
   border-bottom: 4px solid #fff;
 }
-.pm-table td { font-size: 14px; font-weight: 700; padding: 4px 8px; }
+.pm-table td { font-size: 14px; font-weight: 700; padding: 4px 8px; overflow-wrap: anywhere; }
+.pm-chip { max-width: 100%; overflow-wrap: anywhere; box-sizing: border-box; }
+.pm-mobile-panel-head { display: none; }
 .pm-star { color: #e9625b; }
 
 /* スタッフ名セル左端の色バー（女性=ピンク／男性=ブルー） */
@@ -1483,6 +1485,9 @@ main.ledger-app .ledger-event.pm-ev .pm-ev-l3 {
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); font-size: 13px; color: #292929;
 }
 #pm-ticket-modal h2, #pm-account-modal h2 { margin: 0 0 6px; font-size: 20px; }
+.pm-ticket-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: -22px; z-index: 2; padding: 12px 0; background: #fff; border-bottom: 1px solid #e5d9cd; }
+#pm-ticket-modal .pm-ticket-head h2 { margin: 0; }
+#pm-ticket-modal .pm-ticket-head button { flex: none; min-height: 44px; }
 #pm-ticket-modal .pm-shop-sub, #pm-account-modal .pm-shop-sub { color: #6b5b4b; border-bottom: 1px solid #e5d9cd; padding-bottom: 10px; margin: 0 0 14px; }
 #pm-ticket-modal .pm-tk-h, #pm-account-modal .pm-tk-h { font-size: 14px; color: #8a6a33; margin: 16px 0 8px; }
 #pm-ticket-modal .pm-menu-new, #pm-account-modal .pm-menu-new { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -1537,7 +1542,9 @@ main.ledger-app .ledger-event.pm-ev-red { background: #f28b80 !important; border
 .pm-move-note { font-size: 10px; color: #8a8a8a; margin: 6px 0 0; line-height: 1.5; }
 
 /* ---- 左パネルはなめらかにスライドイン ---- */
-main.ledger-app .ledger-side { animation: pm-side-in 0.18s ease-out; }
+@media (prefers-reduced-motion: no-preference) {
+  main.ledger-app .ledger-side { animation: pm-side-in 0.18s ease-out; }
+}
 @keyframes pm-side-in {
   from { opacity: 0; transform: translateX(-14px); }
   to { opacity: 1; transform: none; }
@@ -1684,9 +1691,16 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
 /* （位置のはみ出し補正は pm-layout.js の toggle 処理で行う） */
 .ledger-nav-menu > div { max-width: calc(100vw - 16px); }
 .ledger-nav-menu > div button, .ledger-nav-menu > div a { white-space: normal; }
+/* 折り返したナビの overflow:auto が、開いた設定メニューの下半分を隠さないようにする。 */
+@media (max-width: 960px) {
+  main.ledger-app .ledger-nav nav { overflow: visible; }
+  main.ledger-app .ledger-nav-menu > div { max-height: calc(100dvh - 170px); overflow-y: auto; }
+  main.ledger-app .ledger-nav-menu > div button { min-height: 44px; }
+}
 
 /* 3) 〜960px：左パネルは引き出し（保存CSSで position:fixed）。幅・余白・背景を整える */
 @media (max-width: 960px) {
+  body:has(main.ledger-app .ledger-side), body:has(#pm-ticket-modal) { overflow: hidden; }
   main.ledger-app .ledger-side,
   main.ledger-app .ledger-side.pm-side {
     width: min(480px, calc(100vw - 48px));
@@ -1696,7 +1710,15 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
     margin: 0;
     border-radius: 0;
     overscroll-behavior: contain;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
+  .pm-mobile-panel-head {
+    display: flex; flex: none; order: -3; position: sticky; top: 0; z-index: 5;
+    justify-content: space-between; align-items: center; gap: 12px;
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px;
+    background: #fff; border-bottom: 1px solid #ccbfae;
+  }
+  .pm-mobile-panel-head button { min-height: 44px; padding: 8px 12px; border: 1px solid #987050; border-radius: 5px; color: #563d2b; background: #fff8f0; font: inherit; }
   /* 背景を暗くする（外側タップで閉じる処理は pm-layout.js） */
   main.ledger-app .ledger-workspace:has(> .ledger-side)::before {
     content: "";
@@ -1783,6 +1805,17 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
     border-radius: 0;
   }
   main.ledger-app .ledger-workspace:has(> .ledger-side)::before { display: none; }
+  main.ledger-app .ledger-side input:not([type="checkbox"]),
+  main.ledger-app .ledger-side select, main.ledger-app .ledger-side textarea {
+    font-size: 16px; min-height: 44px; max-width: 100%; box-sizing: border-box;
+  }
+  main.ledger-app .ledger-side button { min-height: 44px; }
+  main.ledger-app .ledger-overview > button { min-height: 44px; }
+  main.ledger-app .ledger-modes::after { content: "枠をタップで詳細・なぞってスクロール・長押しして移動"; flex-basis: 100%; font-size: 12px; line-height: 1.6; color: #654c35; }
+  .pm-move-row { flex-direction: column; }
+  .pm-move-row select { width: 100%; }
+  .pm-move [data-act="move"] { width: 100%; }
+  .pm-table th { width: 5em; }
   /* 日付ボックスは行いっぱいに。更新・天気は同じ行で折り返す */
   main.ledger-app .ledger-toolbar .ledger-date-picker { flex: 1 1 200px; min-width: 0; }
   main.ledger-app .ledger-toolbar .ledger-date-trigger { min-width: 0; width: 100%; }
@@ -1792,6 +1825,16 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
   main.ledger-app .ledger-summary { gap: 2px 12px; padding: 8px 10px; }
   /* お会計モーダル等：縦に長い内容は画面内でスクロール */
   #pm-checkout section, #pm-ticket-modal section, #pm-account-modal section, #pm-menu-modal section { max-height: calc(100vh - 16px); }
+  #pm-ticket-modal section { box-sizing: border-box; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 12px; overscroll-behavior: contain; }
+  #pm-ticket-modal .pm-ticket-head { top: -12px; }
+  #pm-ticket-modal .pm-ticket-head h2 { font-size: 17px; }
+  #pm-ticket-modal section .pm-tk-grid { grid-template-columns: 1fr; }
+  #pm-ticket-modal .pm-tk-grid label { grid-column: 1 / -1; font-size: 14px; }
+  #pm-ticket-modal input:not([type="checkbox"]), #pm-ticket-modal select, #pm-ticket-modal textarea {
+    min-height: 44px; font-size: 16px !important; max-width: 100%; box-sizing: border-box;
+  }
+  #pm-ticket-modal button { min-height: 44px; }
+  #pm-ticket-modal .pm-tk-menus label, #pm-ticket-modal .pm-tk-pub { min-height: 44px; display: flex; align-items: center; gap: 6px; }
 }
 
 /* 右下の固定表示（デモ注記：下から60px）とトーストが重ならないよう、トーストはその上に置く */
@@ -1976,6 +2019,9 @@ dialog.pm-move-confirm::backdrop { background: rgb(0 0 0 / 30%); }
 /* 対応メニュー外・性別指定の警告 */
 .pm-move-confirm-warn { margin: 12px 0 0; padding: 8px 12px; border: 1px solid #f0c36d; border-radius: 4px; background: #fff8e1; color: #6d4300; font-size: 14px; line-height: 1.6; }
 .pm-move-confirm-warn:empty { display: none; }
+.pm-move-confirm-nomination { padding: 10px 12px; border: 2px solid #b75b21; background: #fff6df; color: #743a18; font-weight: bold; line-height: 1.6; }
+.pm-move-confirm-ack:not([hidden]) { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
+.pm-move-confirm-ack input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; }
 .pm-move-confirm-actions button:focus-visible { outline: 3px solid #326cb4; outline-offset: 3px; }
 @media (max-width: 480px) {
   .pm-move-confirm h2 { padding: 12px 16px; font-size: 23px; }
@@ -2021,6 +2067,7 @@ main.ledger-app .ledger-event.pm-ev-warn { outline: 2px dashed #d13438; outline-
 
 /* ---- 予約カードの直接ドラッグ（pm-layout.js の最後のブロック）---- */
 body.pm-ledger-dragging, body.pm-ledger-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+main.ledger-app .ledger-event, .pm-park-chip { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 /* 掴んだ枠の元の位置は薄く残す（どこから動かしているか分かるように） */
 main.ledger-app .ledger-event.pm-drag-origin { opacity: 0.35; }
 /* 保存後、新しい位置に描かれた枠へ写しを重ねる間だけ隠す */
@@ -2081,3 +2128,8 @@ main.ledger-app .ledger-event.pm-parked-origin { outline: 2px dashed #6d4c33; ou
 @media (prefers-reduced-motion: reduce) {
   main.ledger-app .ledger-event.pm-drag-clone { transition: none !important; }
 }
+.pm-tk-offer { margin-top: 20px; border-top: 1px solid #dedede; padding-top: 12px; }
+.pm-tk-offer h4 { margin: 0 0 12px; }
+.pm-tk-offer-details { margin: 14px 0; }
+.pm-tk-offer-details summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
+.pm-tk-offer-preview { white-space: pre-line; overflow-wrap: anywhere; }

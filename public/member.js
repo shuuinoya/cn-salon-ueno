@@ -367,8 +367,9 @@
     const side = document.querySelector(".side-column");
     if (!side) return;
     const want = CNMember.me ? "member" : "login";
+    const memberKey = want === "member" ? JSON.stringify([CNMember.me.name, CNMember.data?.tickets, CNMember.data?.ticketSettings, I18N?.lang()]) : "";
     let card = side.querySelector(":scope > .cn-side");
-    if (card && card.dataset.cnState === want) return;
+    if (card && card.dataset.cnState === want && card.dataset.cnMemberKey === memberKey) return;
     ensureStyle();
     if (!card) {
       card = document.createElement("section");
@@ -376,6 +377,7 @@
       side.prepend(card);
     }
     card.dataset.cnState = want;
+    card.dataset.cnMemberKey = memberKey;
     if (want === "login") {
       card.innerHTML = "<h2></h2><div class=\"cn-auth\"></div>";
       const h2 = card.querySelector("h2");
@@ -394,9 +396,10 @@
       '<div class="cn-side-member">' +
       '<p class="cn-hello">' + esc(T.hello(me.name)) + "</p>" +
       (tks.length
-        ? "<p style=\"margin:0 0 4px;font-size:13px;color:#555\">" + esc(T.tickets) + "</p><ul>" +
-          tks.map((t) => "<li><span>" + esc(I18N ? I18N.plan(t.plan_name) : t.plan_name) + "</span><b>" + esc(T.left(t.uses_left)) + "</b></li>").join("") + "</ul>"
+        ? "<p style=\"margin:0 0 4px;font-size:13px;color:#555\">" + esc(T.tickets) + "</p>" +
+          tks.map((t) => window.CNTickets.summary(t)).join("")
         : '<p class="cn-none">' + esc(T.noTickets) + "</p>") +
+      window.CNTickets.offer(CNMember.data?.ticketSettings) +
       '<a class="cn-mp" href="/mypage">' + esc(T.mypage) + "</a>" +
       '<a class="cn-tk" href="/mypage?tab=tickets">' + esc(T.seeTickets) + "</a>" +
       '<button type="button" class="cn-out">' + esc(T.logout) + "</button>" +

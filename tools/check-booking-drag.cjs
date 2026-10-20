@@ -14,16 +14,16 @@ assert.equal(fs.existsSync(path.join(root, 'mail-config.json')), false, 'メー�
 const m = new Module(path.join(root, 'demo-api.js'));
 m.filename = path.join(root, 'demo-api.js'); m.paths = Module._nodeModulePaths(root);
 m._compile(fs.readFileSync(m.filename, 'utf8') +
-  '\nmodule.exports.checks={state,postSchedule,getSchedule,findBooking,minToMs,msToMin,todayJst,addDays};', m.filename);
+  '\nmodule.exports.checks={state,postSchedule,getSchedule,findBooking,minToMs,msToMin,todayJst,addDays,adminSessions};', m.filename);
 (async () => {
   await m.exports.ready;
-  const { state, postSchedule, getSchedule, findBooking, minToMs, msToMin, todayJst, addDays } = m.exports.checks;
+  const { state, postSchedule, getSchedule, findBooking, minToMs, msToMin, todayJst, addDays, adminSessions } = m.exports.checks;
   state.mailRelay = { url: '', secret: '' }; state.mails = [];
   const BODY = '364323-4822701';   // 全身整体 60分（性別の指定なし）
   const MALE = '364326-4822708';   // 【男性スタッフ】オイルリンパマッサージ 60分
   const day = addDays(todayJst(), 1), day2 = addDays(day, 2);
   const prof = JSON.stringify({ personalNomination: true, nominationFee: 500, message: '紹介文' });
-  const staff = (id, gender, courses, i) => ({ id, name: '確認 ' + id, gender, active: 1, locked: 0, sort_order: i, courses: JSON.stringify(courses), profile: prof, profile_revision: 1 });
+  const staff = (id, gender, courses, i) => ({ id, name: 'テスト 確認 ' + id, gender, active: 1, locked: 0, sort_order: i, courses: JSON.stringify(courses), profile: prof, profile_revision: 1 });
   const A = staff('chk-a', 'male', [], 1), B = staff('chk-b', 'female', [], 2), C = staff('chk-c', 'male', [MALE], 3), F = staff('chk-f', 'female', [], 4);
   state.staff = [A, B, C, F];
   state.photos = new Map(state.staff.map((s) => [s.id, 'data:image/jpeg;base64,/9j/']));
@@ -34,7 +34,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   const code = (c) => (e) => e.message === c;
   const manager = { user: 'chk-manager', role: 'manager' }, clerk = { user: 'chk-clerk', role: 'staff' };
   const make = (staffId, start, course = BODY) => {
-    postSchedule({ action: 'createBooking', date: day, revision: rev(), staffId, start, course, people: 1, consent: true, name: '確認 お客様' }, manager);
+    postSchedule({ action: 'createBooking', date: day, revision: rev(), staffId, start, course, people: 1, consent: true, name: 'テスト 確認 お客様' }, manager);
     return state.events.get(day).bookings.at(-1);
   };
   const where = (bk) => {
@@ -98,20 +98,54 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.ok(rev(day) > d0 && rev(day2) > t0, '両方の日の台帳に変更の合図');
   assert.deepEqual(bk.move_log.at(-1).from.date, day);
   assert.deepEqual(bk.move_log.at(-1).to, { date: day2, staff_id: A.id, start_at: minToMs(day2, 900), end_at: minToMs(day2, 960) });
-  // 移動先の日の版が古い・過去の日・指名の予約は断る
+  // 移動先の日の版が古い・過去の日は断る
   assert.throws(() => move(bk, { staffId: A.id, start: 600, end: 660, toDate: day, toRevision: rev(day) - 1 }), code('scheduleConflict'));
   assert.throws(() => move(bk, { staffId: A.id, start: 600, end: 660, toDate: addDays(todayJst(), -1), toRevision: 0 }), code('invalid'));
   const nom = make(B.id, 1100);
   nom.nominated_staff_id = B.id;
-  assert.throws(() => move(nom, { staffId: B.id, start: 1100, end: 1160, toDate: day2, toRevision: rev(day2) }), code('nominatedLocked'));
-  assert.throws(() => move(nom, { staffId: B.id, start: 1130, end: 1190 }), code('nominatedLocked'));
+  nom.nominated_staff_name = B.name;
+  nom.nomination_fee = 1500;
+  const nomBefore = JSON.stringify(nom), mailsBefore = state.mails.length;
+  assert.throws(() => move(nom, { staffId: B.id, start: 1100, end: 1160, toDate: day2, toRevision: rev(day2) }), code('nominatedConfirmationRequired'));
+  assert.throws(() => move(nom, { staffId: B.id, start: 1130, end: 1190 }), code('nominatedConfirmationRequired'));
+  assert.throws(() => move(nom, { staffId: F.id, start: 1100, end: 1160 }), code('nominatedConfirmationRequired'));
+  assert.throws(() => move(nom, { staffId: B.id, start: 1100, end: 1190, confirmNominationMove: 'true' }), code('nominatedConfirmationRequired'));
+  assert.equal(JSON.stringify(nom), nomBefore, '確認していない指名予約は変更しない');
+  assert.equal(state.mails.length, mailsBefore, '確認していない指名予約の変更メールは作らない');
+  assert.equal(move(nom, { staffId: B.id, start: 1130, end: 1190, confirmNominationMove: true }).ok, true);
+  assert.equal(nom.nominated_staff_id, B.id);
+  assert.equal(move(nom, { staffId: F.id, start: 1130, end: 1190, confirmNominationMove: true }).ok, true);
+  assert.equal(nom.nominated_staff_id, F.id, '確認した担当と指名の表示を一致させる');
+  assert.equal(nom.nominated_staff_name, F.name);
+  assert.equal(nom.nomination_fee, 1500, '指名料は予約時の金額を維持');
+  assert.equal(nom.move_log.at(-1).nomination_confirmed, true);
+  assert.equal(nom.move_log.at(-1).nominated_from, B.id);
+  assert.equal(move(nom, { staffId: F.id, start: 1100, end: 1160, toDate: day2, toRevision: rev(day2), confirmNominationMove: true }).ok, true);
+  assert.deepEqual(where(nom), { date: day2, staff: [F.id], start: 1100, end: 1160 });
+  assert.throws(() => move(nom, { staffId: C.id, start: 1100, end: 1160, confirmNominationMove: true }), code('staffCannotDoCourse'));
+  assert.equal(nom.nominated_staff_id, F.id, '対応外で失敗した場合は指名担当も変えない');
+
+  // 指名予約にも移動候補を返す（本物のAPIをメモリ上の依頼で呼ぶ。通信しない）
+  const session = 'ab'.repeat(32);
+  state.accounts.set(manager.user, { ...manager, active: true });
+  adminSessions.set(session, { user: manager.user, created: Date.now() });
+  const targets = (booking) => {
+    let status, result;
+    const req = { method: 'GET', headers: { cookie: 'pm_session=' + session }, socket: { remoteAddress: '127.0.0.1' } };
+    const res = { writeHead: (n) => { status = n; }, end: (b) => { result = JSON.parse(b); } };
+    m.exports.handleDemoApi(req, res, new URL('http://localhost/api/demo/move-targets?date=' + where(booking).date + '&id=' + booking.id));
+    assert.equal(status, 200);
+    return result;
+  };
+  assert.equal(targets(nom).nominated, true);
+  assert.ok(targets(nom).staff.some(s => s.id === F.id && s.slots.includes(1100)));
 
   // 10) 管理画面のアカウントの権限：スタッフ権限でも、対応メニュー内の通常の移動はできる
   assert.equal(move(other, { staffId: B.id, start: 630, end: 690, expect: { staffId: B.id, start: 600 } }, clerk).ok, true);
 
   // 11) 複数名の予約（A・B・D の3人）：担当の1人（B）に鍵（受付停止）がかかっていても、ほかの担当はそのまま一緒に移る
   //     （以前は全員を選び直していたため、鍵の人が外れて人数が足りず、どの時間にも動かせなかった）
-  postSchedule({ action: 'createBooking', date: day, revision: rev(), staffId: A.id, start: 1200, course: BODY, people: 3, consent: true, name: '確認 3名' }, manager);
+  postSchedule({ action: 'createBooking', date: day, revision: rev(), staffId: A.id, start: 1200, course: BODY, people: 3, consent: true, name: 'テスト 確認 3名' }, manager);
   const grp = state.events.get(day).bookings.at(-1);
   const sorted = (b) => [...where(b).staff].sort();
   assert.deepEqual(sorted(grp), [A.id, B.id, F.id].sort());
@@ -129,6 +163,28 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.equal(move(solo, { staffId: C.id, start: 720, end: 780, allowCourseMismatch: true }).ok, true);
   assert.equal(move(solo, { staffId: C.id, start: 750, end: 810, expect: { staffId: C.id, start: 720 } }, clerk).ok, true);
   assert.deepEqual([where(solo).staff, where(solo).start], [[C.id], 750]);
+  assert.ok(targets(solo).staff.some(s => s.id === C.id && s.slots.includes(750)), '現在の対応外担当の時間変更も候補に出る');
+
+  // 複数名の指名予約：別の人の枠を動かしたとき、指名担当を自動で入れ替えない
+  grp.nominated_staff_id = F.id;
+  grp.nominated_staff_name = F.name;
+  state.events.get(day).blocks.push({ id: 'test-nominee-busy', staff_id: F.id, start_at: minToMs(day, 900), end_at: minToMs(day, 960), kind: 'work' });
+  C.courses = '[]'; // 代わりのスタッフは空いているが、指名担当の自動変更は禁止
+  const groupBefore = JSON.stringify(grp);
+  assert.throws(() => move(grp, { staffId: A.id, start: 900, end: 960, expect: { staffId: A.id, start: 1230 }, confirmNominationMove: true }), code('nominatedStaffUnavailable'));
+  assert.equal(JSON.stringify(grp), groupBefore);
+  // 回数券の予約を移しても、回数券を消費し直さず、支払済みの金額・使用履歴を保つ。
+  postSchedule({ action: 'lockStaff', date: day, staffId: B.id, locked: false }, manager);
+  const ticketBooking = make(A.id, 600);
+  const ticket = { id: 'test-ticket', plan_name: 'テスト5回券', uses_total: 5, uses_left: 4, history: [{ type: 'use', booking_id: ticketBooking.id, delta: -1 }] };
+  state.tickets.set(ticket.id, ticket);
+  state.ticketUseByBooking.set(ticketBooking.id, ticket.id);
+  Object.assign(ticketBooking, { ticket_id: ticket.id, ticket_name: ticket.plan_name, ticket_left_after: 4, base_price: 0, total: 0 });
+  const ticketBefore = JSON.stringify(ticket);
+  assert.equal(move(ticketBooking, { staffId: B.id, start: 720, end: 780 }).ok, true);
+  assert.equal(JSON.stringify(ticket), ticketBefore);
+  assert.equal(state.ticketUseByBooking.get(ticketBooking.id), ticket.id);
+  assert.deepEqual([ticketBooking.ticket_id, ticketBooking.ticket_left_after, ticketBooking.base_price, ticketBooking.total], [ticket.id, 4, 0, 0]);
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
-  console.log('PASS: same-staff time, staff change, diagonal, other day, overlap/shift refusal, stale screen, double submit, course override (manager only), gender lock, nominated lock, move log, group booking with a locked co-staff, time change of an approved off-menu assignment; synthetic records only');
+  console.log('PASS: drag moves, checked skills, overlap/shift refusal, stale screen, double submit, overrides, gender, explicit nomination confirmation, nomination staff/time/date changes, unchanged nomination fees, move candidates, group nominee protection; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

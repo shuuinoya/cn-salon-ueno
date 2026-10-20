@@ -17,6 +17,18 @@
 
   /* 辞書 */
   const D = {
+    "対象メニュー": ["Eligible treatments", "适用项目", "대상 메뉴", "Soins éligibles", "Tratamientos incluidos", "Trattamenti inclusi", "Gültige Behandlungen"],
+    "すべてのメニュー": ["All treatments", "所有项目", "모든 메뉴", "Tous les soins", "Todos los tratamientos", "Tutti i trattamenti", "Alle Behandlungen"],
+    "記録なし": ["Not recorded", "无记录", "기록 없음", "Non enregistré", "Sin registro", "Non registrato", "Nicht erfasst"],
+    "対象メニューの情報を確認できません": ["The eligible treatment information is unavailable", "无法确认适用项目信息", "대상 메뉴 정보를 확인할 수 없습니다", "Les informations sur les soins éligibles sont indisponibles", "No se puede consultar la información de los tratamientos incluidos", "Le informazioni sui trattamenti inclusi non sono disponibili", "Die Informationen zu gültigen Behandlungen sind nicht verfügbar"],
+    "毎月{start}〜{end}日は、回数券をお持ちの方限定料金でご案内します。": [
+      "From day {start} through day {end} of each month, special rates are available exclusively to session ticket holders.",
+      "每月{start}日至{end}日，持有次卡的顾客可享专属价格。",
+      "매월 {start}일부터 {end}일까지 회수권을 보유하신 분께 한정 요금으로 안내해 드립니다.",
+      "Du {start} au {end} de chaque mois, des tarifs exclusifs sont proposés aux détenteurs d’un carnet de séances.",
+      "Del {start} al {end} de cada mes, ofrecemos tarifas exclusivas para titulares de bonos de sesiones.",
+      "Dal {start} al {end} di ogni mese, sono disponibili tariffe esclusive per i possessori di un carnet di sedute.",
+      "Vom {start}. bis zum {end}. jedes Monats bieten wir Inhabern einer Mehrfachkarte exklusive Preise an."],
     "このメニューは対応していません。対応メニューを選ぶ": ["Not available for this treatment. Choose an available treatment.","无法提供此项目。请选择可提供的项目。","이 메뉴는 담당하지 않습니다. 가능한 메뉴를 선택하세요.","Ce soin n’est pas disponible avec ce praticien. Choisissez un soin disponible.","Este tratamiento no está disponible con este terapeuta. Elija uno disponible.","Questo trattamento non è disponibile con questo terapista. Scegli un trattamento disponibile.","Diese Behandlung ist bei dieser Fachkraft nicht verfügbar. Wählen Sie eine verfügbare Behandlung."],
 
     // ---- 予約フォーム・回数券（booking-tweaks.js）----

@@ -41,13 +41,16 @@
   .ledger-modal-backdrop, #pm-shop-modal, #pm-menu-modal, #pm-checkout, #pm-ticket-modal, #pm-account-modal, #pm-shiftadd {
     animation: pm-fade var(--pm-base) var(--pm-ease);
   }
-  .ledger-modal, #pm-shop-modal > :first-child, #pm-menu-modal > :first-child, #pm-checkout > :first-child,
+  .ledger-modal, dialog.pm-move-confirm, #pm-shop-modal > :first-child, #pm-menu-modal > :first-child, #pm-checkout > :first-child,
   #pm-ticket-modal > :first-child, #pm-account-modal > :first-child, #pm-shiftadd > :first-child {
     animation: pm-lift var(--pm-slow) var(--pm-ease);
   }
+  dialog.pm-move-confirm::backdrop {
+    animation: pm-fade var(--pm-base) var(--pm-ease);
+  }
 
   /* 5) 横の入力欄（予約以外の登録など）・シフト情報：ふわっと出る */
-  main.ledger-app .ledger-side-form, main.ledger-app section.ledger-shift-detail {
+  main.ledger-app .ledger-side-form:not(.pm-booking), main.ledger-app section.ledger-shift-detail {
     animation: pm-fade-up var(--pm-base) var(--pm-ease);
   }
 
