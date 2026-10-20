@@ -36,7 +36,9 @@
     const afterTime = time(move.start);
     const newStaff = staffName(move.staffId);
     const oldStaff = (move.before && move.before.staffName) || staffName(beforeStaff);
-    const why = beforeStaff !== move.staffId ? window.__pmStaffMismatch(staffOf(move.staffId), booking) : null;
+    // すでにこの予約を担当している人のまま（同じ日）なら、担当できるかは問わない（サーバーと同じ）
+    const assigned = toDate === move.date ? (data?.assignments || []).filter((a) => a.booking_id === move.id).map((a) => a.staff_id) : [];
+    const why = beforeStaff !== move.staffId && !assigned.includes(move.staffId) ? window.__pmStaffMismatch(staffOf(move.staffId), booking) : null;
     const me = why === "course" ? await getWhoami() : null;
     const canOverride = !me || !me.role || me.role === "admin" || me.role === "manager";
     if (document.getElementById("pm-move-confirm")) return false;
@@ -80,7 +82,7 @@
       }
       const staff = dialog.querySelector(".pm-move-confirm-staff");
       staff.textContent = booking?.people > 1 && newStaff
-        ? "移動先の担当スタッフ：" + newStaff + "（ほかの担当は空き状況から割り当てます）" : "";
+        ? "複数名の予約です。ほかの担当は、いまの担当のまま一緒に移ります（新しい時間に入れない人だけ、空いているスタッフに替わります）。" : "";
       const ok = dialog.querySelector(".pm-move-confirm-ok");
       if (why === "course") {
         dialog.querySelector(".pm-move-confirm-warn").textContent = "⚠ " + (newStaff || "移動先のスタッフ") +
@@ -1271,7 +1273,7 @@
           window.alert(j.error === "scheduleConflict"
             ? "その時間帯の外に予約・予定が残っているため登録できません。\n（画面を再読込して最新の状態をご確認ください）"
             : j.error === "staffInfoMissing"
-              ? "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには、シフトを入れられません。先に「スタッフ情報」で入力してください。"
+              ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには、シフトを入れられません。先に「スタッフ情報」で入力してください。"
               : "登録できませんでした。時間をご確認ください。");
           return;
         }
@@ -1523,7 +1525,7 @@
         outsideShift: "移動先スタッフのシフト時間外です。",
         scheduleConflict: "画面の情報が古くなっています。最新の状態で再度お試しください。",
         staffUnavailable: "そのスタッフには移動できません。",
-        staffInfoMissing: "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。先に「スタッフ情報」で入力してください。",
+        staffInfoMissing: "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。先に「スタッフ情報」で入力してください。",
         courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
         bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の台帳を確認してください。",
         staffCannotDoCourse: "このスタッフは選択されたメニューに対応していません（スタッフ情報の「コース」でこのメニューにチェックがありません）。",
@@ -3177,7 +3179,7 @@
         const r1 = await post({ action: "shift", staffId: sid, start, end, note: box.querySelector('[name="note"]').value });
         if (!r1.ok) {
           showMsg(r1.j.error === "scheduleConflict" ? "予約・休憩・業務がシフトの時間の外に出るため、保存できません。"
-            : r1.j.error === "staffInfoMissing" ? "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
+            : r1.j.error === "staffInfoMissing" ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
             : "シフトを保存できませんでした。");
           btn.disabled = false; return;
         }
@@ -3394,7 +3396,7 @@
     scheduleConflict: "ほかの画面で台帳が変更されていました。最新の状態にしたので、もう一度動かしてください。",
     bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の状態にしました。",
     staffUnavailable: "そのスタッフには移動できません。",
-    staffInfoMissing: "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。",
+    staffInfoMissing: "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。",
     staffCannotDoCourse: "このスタッフは、この予約のメニューの対応メニュー（スタッフ情報の「コース」）にチェックがありません。",
     courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
     staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
@@ -3445,8 +3447,10 @@
     const ng = (why, reason) => ({ level: "ng", text: where + "　✕ " + why, reason });
     if (!st) return ng("このスタッフには置けません", "このスタッフには移動できません。");
     if (it.type === "booking" && p.booking?.nominated_staff_id) return ng("指名のお客様の予約です", ERR.nominatedLocked);
-    if ((st.info_missing || []).length && !(it.type === "booking" && sameDay && t.staffId === it.staffId)) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
-    if (it.type === "booking" && st.locked) return ng("受付停止（鍵）中です", ERR.staffLocked);
+    // すでにこの予約を担当している人（複数名の予約のほかの担当も）のまま動かすなら、鍵・スタッフ情報の未入力・対応メニューで止めない（サーバーと同じ）
+    const already = it.type === "booking" && sameDay && (d.assignments || []).some((a) => a.booking_id === it.id && a.staff_id === t.staffId);
+    if ((st.info_missing || []).length && !already) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
+    if (it.type === "booking" && st.locked && !already) return ng("受付停止（鍵）中です", ERR.staffLocked);
     const sh = (d.shifts || []).find((x) => x.staff_id === t.staffId && x.date === t.date);
     if (!sh || t.start < minOf(t.date, sh.start_at) || t.end > minOf(t.date, sh.end_at)) return ng("シフトの時間外です", ERR.outsideShift);
     const mine = (b) => (d.assignments || []).some((a) => a.booking_id === b.id && a.staff_id === t.staffId);
@@ -3457,7 +3461,7 @@
     if (others.some((x) => minOf(t.date, x.start_at) < t.end && minOf(t.date, x.end_at) > t.start)) {
       return ng("ほかの予約・休憩・業務と重なります", "移動先の時間に、ほかの予約・休憩・業務が入っています。");
     }
-    if (it.type === "booking" && t.staffId !== it.staffId) {
+    if (it.type === "booking" && !already) {
       const why = window.__pmStaffMismatch?.(st, p.booking);
       if (why === "gender") return ng("性別指定のメニューです", ERR.staffGenderOnly);
       if (why === "course") return { level: "warn", text: where + "　⚠ 対応メニュー外（確認画面で承認が必要）" };
@@ -3644,9 +3648,9 @@
     const move = { date: p.date, id: it.id, staffId: t.staffId, start: t.start, end: t.end };
     if (cross) move.toDate = t.date;
     if (it.type === "booking") {
-      const ok = await window.__pmConfirmBookingMove(cross
-        ? { ...move, before: { staffId: it.staffId, staffName: p.staffName, start: it.start, end: it.end }, booking: p.booking }
-        : move, p.data);
+      // 変更前は「動かした枠」の担当・時刻（複数名の予約でも、動かした人から動かした先へ）
+      const before = { staffId: it.staffId, staffName: p.staffName, start: it.start, end: it.end };
+      const ok = await window.__pmConfirmBookingMove(cross ? { ...move, before, booking: p.booking } : { ...move, before }, p.data);
       if (!ok) return back(p);
     }
     p.clone.classList.add("pm-drag-saving");

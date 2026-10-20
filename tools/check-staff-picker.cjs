@@ -11,9 +11,9 @@ mod._compile(fs.readFileSync(mod.filename,'utf8')+'\nmodule.exports.checks={stat
  state.mailRelay={url:'',secret:''};state.mails=[];
  const publicRows=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).staff;
  state.staff=publicRows.map((s,i)=>({id:s.id,name:s.name,gender:s.gender,active:1,locked:0,sort_order:i,courses:JSON.stringify(s.courses),profile:JSON.stringify({personalNomination:true,nominationFee:s.nominationFee,message:s.message,email:'private@example.test'})}));
- // Public copies carry no photos, so give everyone one; staff still missing gender or message stay off the booking site.
+ // Public copies carry no photos, so give everyone one; staff still missing a message stay off the booking site.
  for(const s of state.staff)state.photos.set(s.id,'data:image/jpeg;base64,/9j/');
- const ready=publicRows.filter(s=>['male','female'].includes(s.gender)&&String(s.message||'').trim());
+ const ready=publicRows.filter(s=>String(s.message||'').trim()); // 性別は条件にしない
  const isReady=s=>ready.some(r=>r.id===s.id);
  const date=addDays(todayJst(),1),target=state.staff.find(s=>s.name==='豊'),other=state.staff.find(s=>s.gender==='female'&&isReady(s)),hidden=state.staff.find(s=>!isReady(s));
  assert.ok(target&&other&&hidden);state.days=new Map();state.shifts=new Map();state.events=new Map();

@@ -24,19 +24,21 @@ m._compile(fs.readFileSync(m.filename, 'utf8') + '\nmodule.exports.checks={state
     gender:'none',courses:['364321-4822671'],profile:{personalNomination:true,nominationFee:500,message:'テスト紹介文'},sortOrder:30 };
   const saved = postSchedule(body);
   assert.equal(saved.ok,true);
-  // 性別・画像が未入力：保存はできるが、足りない項目を知らせ、予約サイトには出さない（2026-10-20 お店の人の指定）
-  assert.match(saved.warning,/「性別・画像」が未入力/);
+  // 画像が未入力：保存はできるが、足りない項目を知らせ、予約サイトには出さない（2026-10-20 お店の人の指定。性別は条件にしない）
+  assert.match(saved.warning,/「画像」が未入力/);
   const added = state.staff.find(s=>s.name===body.name);
   assert.ok(added); assert.equal(added.gender,'none');
   assert.equal(JSON.stringify(state.staff.filter(s=>s!==added)),before,'既存スタッフを維持');
   assert.ok(!publicStaffList().some(s=>s.id===added.id),'情報が未入力の人はスタッフ紹介に出さない');
   assert.ok(!nominatableStaff('364321-4822671','none').some(s=>s.id===added.id),'情報が未入力の人は指名候補に出さない');
-  // 性別と画像を入れて保存すると出る
-  const done = postSchedule({...body,id:added.id,gender:'male',photo:'data:image/jpeg;base64,/9j/'});
+  // 画像を入れて保存すると、性別が未設定のままでも出る（男性・女性の希望には出ない）
+  const done = postSchedule({...body,id:added.id,photo:'data:image/jpeg;base64,/9j/'});
   assert.equal(done.warning,undefined);
   const pub = publicStaffList().find(s=>s.id===added.id);
   assert.equal(pub.name,body.name); assert.equal(pub.nominationFee,500); assert.equal(pub.message,'テスト紹介文');
   assert.ok(nominatableStaff('364321-4822671','none').some(s=>s.id===added.id));
+  assert.ok(!nominatableStaff('364321-4822671','male').some(s=>s.id===added.id));
+  postSchedule({...body,id:added.id,gender:'male'});
   assert.ok(nominatableStaff('364321-4822671','male').some(s=>s.id===added.id));
   assert.ok(!nominatableStaff('364321-4822671','female').some(s=>s.id===added.id));
   postSchedule({...body,id:added.id,gender:undefined,profile:{...body.profile,nominationFee:2000}});
@@ -47,5 +49,5 @@ m._compile(fs.readFileSync(m.filename, 'utf8') + '\nmodule.exports.checks={state
   assert.equal(ownsBooking({customer_token:'test-token'},'test-token',null),true);
   assert.equal(ownsBooking({customer_token:'test-token'},'',null),false);
   assert.equal(ownsBooking({customer_token:'test-token'},'wrong',null),false);
-  console.log('PASS: display-name-only creation (hidden until gender/photo are entered), public listing, nomination fees, gender constraints, existing records, receipt authentication; public production copy:',input.length);
+  console.log('PASS: display-name-only creation (hidden until the photo is entered; gender optional), public listing, nomination fees, gender constraints, existing records, receipt authentication; public production copy:',input.length);
 })().then(()=>process.exit(0),e=>{console.error(e);process.exit(1)});

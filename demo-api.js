@@ -788,14 +788,14 @@ function withinShift(date, staffId, start, end) {
 }
 
 // スタッフ情報の入力がそろっているか（2026-10-20 お店の人の指定）。
-// 性別（女性・男性）・コース（対応メニュー）・画像（写真）・フリーメッセージ（紹介文）が全部ある人だけを
+// コース（対応メニュー）・画像（写真）・フリーメッセージ（紹介文）が全部ある人だけを
 // 台帳・月間シフト作成・予約サイト（空き枠・指名・スタッフ紹介）・ホットペッパーの割り当てに出し、シフト・休憩・業務・予約を入れられる。
 // 足りない人のシフトは消さずに隠すだけ（入力して保存すれば元に戻る）。
 // 以前は名前だけで登録したスタッフにもシフトが入り、スタッフ情報の一覧（20人ずつ）で見つからないまま台帳に出ていた
 function staffInfoMissing(st) {
   if (!st) return ["スタッフ情報"];
   const missing = [];
-  if (st.gender !== "male" && st.gender !== "female") missing.push("性別");
+  // 性別は条件にしない（お店の人の指定。性別は「女性限定・男性限定」のメニューを担当できるかの判定だけに使う）
   let courses = null;
   try { courses = JSON.parse(st.courses || "[]"); } catch {}
   if (!Array.isArray(courses)) missing.push("コース");
@@ -973,22 +973,26 @@ function postSchedule(body, actor) {
       const ev = ensureEvents(date);
       const bk = ev.bookings.find((b) => b.id === id && b.status === "confirmed");
       if (!bk) throw err(404, "notFound");
-      const curStaff = ev.assignments.find((a) => a.booking_id === id)?.staff_id || null;
+      // いまの担当（複数名の予約は人数分）。動かした枠の担当（dragged）は、ドラッグを始めたときの担当（expect.staffId）。無ければ1人目
+      const cur = ev.assignments.filter((a) => a.booking_id === id).map((a) => a.staff_id);
+      const dragged = body.expect && cur.includes(body.expect.staffId) ? body.expect.staffId : cur[0] || null;
       // ドラッグを始めたときの担当・開始時刻（expect）と今の予約が違えば、ほかの画面で先に変えられている → 動かさない
-      if (body.expect && (body.expect.staffId !== curStaff || body.expect.start !== msToMin(date, bk.start_at))) throw err(409, "bookingChanged");
+      if (body.expect && (!cur.includes(body.expect.staffId) || body.expect.start !== msToMin(date, bk.start_at))) throw err(409, "bookingChanged");
       // 指名のお客様の予約は、別の日・別の時間・別のスタッフへ動かせない（お客様が担当と時間を指定して予約しているため）
       if (bk.nominated_staff_id && (staffId !== bk.nominated_staff_id || start !== msToMin(date, bk.start_at) || toDate !== date)) throw err(409, "nominatedLocked");
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
       if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
-      // スタッフ情報がそろっていない人には移せない（いまの担当のまま同じ日の時間を変えるのはよい）
-      if (!staffReady(mvTarget) && !(toDate === date && ev.assignments.some((a) => a.booking_id === id && a.staff_id === staffId))) throw err(409, "staffInfoMissing");
-      if (staffLockedOn(staffId, toDate)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
+      // すでにこの予約を担当している人（同じ日）は、スタッフ情報の未入力・鍵（受付停止＝新しい予約を止めるもの）があっても、そのまま時間を変えられる
+      const already = toDate === date && cur.includes(staffId);
+      if (!staffReady(mvTarget) && !already) throw err(409, "staffInfoMissing");
+      if (staffLockedOn(staffId, toDate) && !already) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(Number.isInteger(start) && Number.isInteger(end) && end > start && end - start <= 600)) throw err(400, "invalid");
       // 担当メニュー外のスタッフ：確認画面で警告を見たうえで、マネージャー以上が承認したとき（allowCourseMismatch）だけ移せる。
-      // スタッフ情報の「コース」は変えない（台帳に「対応外」の印が付く）。性別指定のメニューは承認しても移せない
-      const mvWhy = bookingMismatch(mvTarget, bk);
+      // スタッフ情報の「コース」は変えない（台帳に「対応外」の印が付く）。性別指定のメニューは承認しても移せない。
+      // すでにこの予約を担当している人のまま時間を変えるだけなら、担当できるかは問わない（新しく担当させるわけではないため）
+      const mvWhy = already ? null : bookingMismatch(mvTarget, bk);
       let courseOverride = false;
       if (mvWhy === "course" && body.allowCourseMismatch === true) {
         if (!actor || (ROLE_LV[actor.role] || 0) < ROLE_LV.manager) throw err(403, "courseOverrideForbidden");
@@ -998,12 +1002,20 @@ function postSchedule(body, actor) {
       const mvGender = courseGender(bk.course);
       if (!withinShift(toDate, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(toDate, staffId, start, end, id)) throw err(409, "soldOut");
-      // 複数名の予約は残りの担当も、新しい時間帯に対応可能なスタッフから割り当て直す
-      const others = bk.people > 1
-        ? freeStaffIds(toDate, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId).slice(0, bk.people - 1)
-        : [];
+      // 複数名の予約：残りの担当は、いまの担当（動かした枠の人以外）がそのまま新しい時間へ移る（鍵・スタッフ情報の未入力でも外さない）。
+      // その人がシフト外・重なりで入れないときだけ、新しい時間帯に対応可能で空いているスタッフから割り当て直す
+      // （以前は全員を選び直していたため、担当の1人に鍵がかかっていると、どの時間にも動かせなかった）
+      let others = [];
+      if (bk.people > 1) {
+        others = cur.filter((sid) => sid !== staffId && sid !== dragged &&
+          withinShift(toDate, sid, start, end) && !overlaps(toDate, sid, start, end, id)).slice(0, bk.people - 1);
+        if (others.length < bk.people - 1) {
+          const extra = freeStaffIds(toDate, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId && !others.includes(sid));
+          others = [...others, ...extra].slice(0, bk.people - 1);
+        }
+      }
       if (others.length < bk.people - 1) throw err(409, "soldOut");
-      const from = { date, staff_id: curStaff, start_at: bk.start_at, end_at: bk.end_at };
+      const from = { date, staff_id: dragged, start_at: bk.start_at, end_at: bk.end_at };
       bk.start_at = minToMs(toDate, start);
       bk.end_at = minToMs(toDate, end);
       // 料金の再計算（深夜料金・指名料）。ホットペッパーの予約はホットペッパー側の確定金額なので変えない
@@ -4658,17 +4670,24 @@ function handleDemoApi(req, res, url) {
     const dur = msToMin(date, bk.end_at) - start;
     const gender = courseGender(bk.course);
     const people = bk.people || 1;
-    // 5分刻みで一日を走査し、その時刻に予約全体（人数分）が成立するスタッフだけを拾う
+    // 5分刻みで一日を走査し、その時刻に予約全体（人数分）が成立するスタッフだけを拾う（移動の保存 moveBooking と同じ考え方）：
+    // 移動先は、空いているスタッフか、すでにこの予約を担当している人（鍵・スタッフ情報の未入力があっても、そのまま時間を変えられる）。
+    // 複数名の予約の残りの担当は、いまの担当（移動元の1人目以外）がそのまま移れるならその人、足りなければ空いているスタッフ
+    const cur = ev.assignments.filter((a) => a.booking_id === bk.id).map((a) => a.staff_id);
+    const current = cur[0] || null;
     const slotsByStaff = new Map();
     for (let t = 600; t + dur <= 1620; t += 5) {
-      const ids = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id);
-      if (ids.length < people) continue; // 複数名予約は人数分の空きが必要
-      for (const sid of ids) {
+      const free = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id);
+      const curOk = cur.filter((sid) => withinShift(date, sid, t, t + dur) && !overlaps(date, sid, t, t + dur, bk.id));
+      const targets = [...new Set([...free, ...curOk.filter((sid) => !bookingMismatch(state.staff.find((s) => s.id === sid), bk))])];
+      for (const sid of targets) {
+        const pool = new Set([...curOk.filter((x) => x !== current), ...free]);
+        pool.delete(sid);
+        if (pool.size < people - 1) continue; // 複数名予約は人数分の空きが必要
         if (!slotsByStaff.has(sid)) slotsByStaff.set(sid, []);
         slotsByStaff.get(sid).push(t);
       }
     }
-    const current = ev.assignments.find((a) => a.booking_id === bk.id)?.staff_id || null;
     const list = state.staff
       .filter((st) => slotsByStaff.has(st.id))
       .sort((a, b) => a.sort_order - b.sort_order)

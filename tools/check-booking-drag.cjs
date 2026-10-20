@@ -108,6 +108,27 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
 
   // 10) 管理画面のアカウントの権限：スタッフ権限でも、対応メニュー内の通常の移動はできる
   assert.equal(move(other, { staffId: B.id, start: 630, end: 690, expect: { staffId: B.id, start: 600 } }, clerk).ok, true);
+
+  // 11) 複数名の予約（A・B・D の3人）：担当の1人（B）に鍵（受付停止）がかかっていても、ほかの担当はそのまま一緒に移る
+  //     （以前は全員を選び直していたため、鍵の人が外れて人数が足りず、どの時間にも動かせなかった）
+  postSchedule({ action: 'createBooking', date: day, revision: rev(), staffId: A.id, start: 1200, course: BODY, people: 3, consent: true, name: '確認 3名' }, manager);
+  const grp = state.events.get(day).bookings.at(-1);
+  const sorted = (b) => [...where(b).staff].sort();
+  assert.deepEqual(sorted(grp), [A.id, B.id, F.id].sort());
+  postSchedule({ action: 'lockStaff', date: day, staffId: B.id, locked: true }, manager);
+  assert.equal(move(grp, { staffId: A.id, start: 1260, end: 1320, expect: { staffId: A.id, start: 1200 } }).ok, true);
+  assert.deepEqual([where(grp).start, sorted(grp)], [1260, [A.id, B.id, F.id].sort()], '鍵の人も担当のまま一緒に移る');
+  // 2人目（鍵の B）の枠を動かす：誤って「ほかの画面で変更」と断らず、B のまま時間だけ変わる
+  assert.equal(move(grp, { staffId: B.id, start: 1230, end: 1290, expect: { staffId: B.id, start: 1260 } }).ok, true);
+  assert.deepEqual([where(grp).start, sorted(grp)], [1230, [A.id, B.id, F.id].sort()]);
+  assert.equal(grp.move_log.at(-1).from.staff_id, B.id, '記録の移動元は動かした枠の担当');
+  // 鍵の人へ新しく担当させることはできない
+  const solo = make(A.id, 720);
+  assert.throws(() => move(solo, { staffId: B.id, start: 720, end: 780 }), code('staffLocked'));
+  // 12) 対応外として承認して移した担当のまま、時間だけ変えるのは承認なしでできる
+  assert.equal(move(solo, { staffId: C.id, start: 720, end: 780, allowCourseMismatch: true }).ok, true);
+  assert.equal(move(solo, { staffId: C.id, start: 750, end: 810, expect: { staffId: C.id, start: 720 } }, clerk).ok, true);
+  assert.deepEqual([where(solo).staff, where(solo).start], [[C.id], 750]);
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
-  console.log('PASS: same-staff time, staff change, diagonal, other day, overlap/shift refusal, stale screen, double submit, course override (manager only), gender lock, nominated lock, move log; synthetic records only');
+  console.log('PASS: same-staff time, staff change, diagonal, other day, overlap/shift refusal, stale screen, double submit, course override (manager only), gender lock, nominated lock, move log, group booking with a locked co-staff, time change of an approved off-menu assignment; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

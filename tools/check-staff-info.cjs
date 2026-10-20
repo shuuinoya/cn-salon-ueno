@@ -1,5 +1,5 @@
 'use strict';
-// スタッフ情報（性別・コース・画像・フリーメッセージ）がそろっていない人には、シフト・休憩・業務・予約を入れられず、
+// スタッフ情報（コース・画像・フリーメッセージ。性別は条件にしない）がそろっていない人には、シフト・休憩・業務・予約を入れられず、
 // 台帳・月間シフト作成・予約サイト・ホットペッパーの割り当てに出ないことを確かめる（2026-10-20 お店の人の指定）。
 // 記録はすべて架空。メール設定のない検証用チェックアウトで実行する（メールは送らない）
 const fs = require('node:fs');
@@ -35,13 +35,13 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   const rev = (d = date) => state.days.get(d)?.version ?? 0;
   const code = (c) => (e) => e.message === c;
 
-  assert.deepEqual(staffInfoMissing(bare), ['性別', '画像', 'フリーメッセージ']);
+  assert.deepEqual(staffInfoMissing(bare), ['画像', 'フリーメッセージ']);
   assert.deepEqual(staffInfoMissing(ready), []);
 
   // 台帳：未入力の人の行・シフト・業務は出さない。スタッフ情報の画面用の一覧（allStaff）には全員と未入力の項目
   let sc = getSchedule(date);
   assert.deepEqual(sc.staff.map((s) => s.id), [ready.id]);
-  assert.deepEqual(sc.allStaff.map((s) => [s.id, s.info_missing]), [[ready.id, []], [bare.id, ['性別', '画像', 'フリーメッセージ']]]);
+  assert.deepEqual(sc.allStaff.map((s) => [s.id, s.info_missing]), [[ready.id, []], [bare.id, ['画像', 'フリーメッセージ']]]);
   assert.ok(!sc.shifts.some((x) => x.staff_id === bare.id), '未入力の人のシフトは台帳に出さない');
   assert.ok(!sc.blocks.some((x) => x.staff_id === bare.id), '未入力の人の業務は台帳に出さない');
 
