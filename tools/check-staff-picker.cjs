@@ -11,12 +11,18 @@ mod._compile(fs.readFileSync(mod.filename,'utf8')+'\nmodule.exports.checks={stat
  state.mailRelay={url:'',secret:''};state.mails=[];
  const publicRows=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).staff;
  state.staff=publicRows.map((s,i)=>({id:s.id,name:s.name,gender:s.gender,active:1,locked:0,sort_order:i,courses:JSON.stringify(s.courses),profile:JSON.stringify({personalNomination:true,nominationFee:s.nominationFee,message:s.message,email:'private@example.test'})}));
- const date=addDays(todayJst(),1),target=state.staff.find(s=>s.name==='豊'),other=state.staff.find(s=>s.name==='高橋');
- assert.ok(target&&other);state.days=new Map();state.shifts=new Map();state.events=new Map();
+ // Public copies carry no photos, so give everyone one; staff still missing gender or message stay off the booking site.
+ for(const s of state.staff)state.photos.set(s.id,'data:image/jpeg;base64,/9j/');
+ const ready=publicRows.filter(s=>['male','female'].includes(s.gender)&&String(s.message||'').trim());
+ const isReady=s=>ready.some(r=>r.id===s.id);
+ const date=addDays(todayJst(),1),target=state.staff.find(s=>s.name==='豊'),other=state.staff.find(s=>s.gender==='female'&&isReady(s)),hidden=state.staff.find(s=>!isReady(s));
+ assert.ok(target&&other&&hidden);state.days=new Map();state.shifts=new Map();state.events=new Map();
  for(let i=0;i<7;i++){const d=addDays(date,i);state.shifts.set(d,[]);state.events.set(d,{bookings:[],blocks:[],assignments:[]});}
  const query=(id,course='364321-4822710')=>getAvailability(new URLSearchParams({course,date,people:'1',staff:'none',staffId:id||''}));
- const all=query('');assert.equal(all.staffDirectory.length,publicRows.length);assert.equal(all.staff.length,5);
+ const all=query('');assert.equal(all.staffDirectory.length,ready.length);
+ assert.equal(all.staff.length,ready.filter(s=>s.gender==='male'&&(!s.courses.length||s.courses.includes('364321-4822710'))).length);
  assert.ok(all.staffDirectory.find(s=>s.id===other.id).eligible===false);
+ assert.ok(!all.staffDirectory.some(s=>s.id===hidden.id),'Staff with missing profile info must not be listed');
  assert.doesNotMatch(JSON.stringify(all),/private@example|imageKey|employeeNumber/);
  for(const s of state.staff)assert.ok(query(s.id).days.every(d=>d.slots.every(s=>!s.available)),'No configured shift must mean unavailable');
  state.shifts.set(date,[{staff_id:target.id,date,start_at:minToMs(date,600),end_at:minToMs(date,900)}]);
@@ -26,5 +32,5 @@ mod._compile(fs.readFileSync(mod.filename,'utf8')+'\nmodule.exports.checks={stat
  for(const m of [610,660,700,750,800,850,900])assert.equal(available(m),false,'Break, appointment or shift boundary '+m);
  assert.ok(query(other.id).days[0].slots.every(s=>!s.available));
  assert.equal(state.mails.length,0);
- console.log('PASS: '+publicRows.length+' public staff; all profiles, menu eligibility, no-shift closure, 60-minute shift/break/booking boundaries; no mail');
+ console.log('PASS: '+publicRows.length+' public staff ('+ready.length+' with complete profiles); complete profiles only, menu eligibility, no-shift closure, 60-minute shift/break/booking boundaries; no mail');
 })().then(()=>process.exit(0),e=>{console.error(e);process.exit(1)});

@@ -358,6 +358,14 @@
       row.classList.toggle("pm-acc-m", !female && lockInfo?.gender !== "none");
       row.classList.toggle("pm-blue", !!lockInfo?.locked);
       row.classList.toggle("pm-locked", !!lockInfo?.locked);
+      // スタッフ情報が未入力でも、その日の予約の担当があるため台帳に残している行（新しいシフト・予約は入れられない）
+      const miss = (window.__pmSchedData?.staff || []).find((x) => x.name === name)?.info_missing || [];
+      row.classList.toggle("pm-info-missing", miss.length > 0);
+      const missTitle = miss.length ? "スタッフ情報が未入力（" + miss.join("・") + "）。この日の予約があるため表示しています。新しいシフト・予約は入れられません" : "";
+      if (cell.dataset.pmMissTitle !== missTitle) {
+        cell.dataset.pmMissTitle = missTitle;
+        if (missTitle) cell.title = missTitle; else cell.removeAttribute("title");
+      }
       if (lockInfo && !cell.querySelector(".pm-lockbtn")) {
         const b = document.createElement("span");
         b.className = "pm-lockbtn";
@@ -1146,7 +1154,8 @@
   async function openShiftAdd() {
     document.getElementById("pm-shiftadd")?.remove();
     await refreshSched(true);
-    const staff = (window.__pmSchedData?.staff || []);
+    // スタッフ情報が未入力の人（予約があるため台帳に残っている人）はシフトを入れられないので、選択肢に出さない
+    const staff = (window.__pmSchedData?.staff || []).filter((st) => !(st.info_missing || []).length);
     const date = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime")
       || new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
     const hourOpts = Array.from({ length: 18 }, (_, i) => 10 + i)  // 10〜27時（27=翌3時）
@@ -1191,7 +1200,9 @@
         if (!r.ok) {
           window.alert(j.error === "scheduleConflict"
             ? "その時間帯の外に予約・予定が残っているため登録できません。\n（画面を再読込して最新の状態をご確認ください）"
-            : "登録できませんでした。時間をご確認ください。");
+            : j.error === "staffInfoMissing"
+              ? "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには、シフトを入れられません。先に「スタッフ情報」で入力してください。"
+              : "登録できませんでした。時間をご確認ください。");
           return;
         }
         close();
@@ -1442,6 +1453,7 @@
         outsideShift: "移動先スタッフのシフト時間外です。",
         scheduleConflict: "画面の情報が古くなっています。最新の状態で再度お試しください。",
         staffUnavailable: "そのスタッフには移動できません。",
+        staffInfoMissing: "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。先に「スタッフ情報」で入力してください。",
         staffCannotDoCourse: "このスタッフは選択されたメニューに対応していません（スタッフ情報の「コース」でこのメニューにチェックがありません）。",
         staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
         staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
@@ -3089,7 +3101,12 @@
       btn.disabled = true; showMsg("");
       try {
         const r1 = await post({ action: "shift", staffId: sid, start, end, note: box.querySelector('[name="note"]').value });
-        if (!r1.ok) { showMsg(r1.j.error === "scheduleConflict" ? "予約・休憩・業務がシフトの時間の外に出るため、保存できません。" : "シフトを保存できませんでした。"); btn.disabled = false; return; }
+        if (!r1.ok) {
+          showMsg(r1.j.error === "scheduleConflict" ? "予約・休憩・業務がシフトの時間の外に出るため、保存できません。"
+            : r1.j.error === "staffInfoMissing" ? "スタッフ情報（性別・画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
+            : "シフトを保存できませんでした。");
+          btn.disabled = false; return;
+        }
         const r2 = await post({ action: "attendance", staffId: sid, clockIn: cin2, clockOut: cout2, absent: box.querySelector('[name="absent"]').checked,
           addProposals: n("addProposals"), addApproved: n("addApproved"), nextProposals: n("nextProposals"), nextApproved: n("nextApproved"), transport: n("transport") });
         if (!r2.ok) { showMsg("勤怠を保存できませんでした。"); btn.disabled = false; return; }

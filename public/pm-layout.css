@@ -1995,3 +1995,17 @@ main.ledger-app .ledger-event.pm-ev-warn { outline: 2px dashed #d13438; outline-
 #pm-capwarn-list .pm-capwarn-close { margin-top: 12px; padding: 6px 16px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
 /* スタッフ情報「コース」の案内 */
 .pm-course-note { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: #6b5a4c; }
+
+/* ---- スタッフ情報が未入力の人（性別・画像・フリーメッセージ・コースのどれかが無い）---- */
+/* スタッフ情報の一覧：名前の前の「未」の印（重ねると足りない項目）と、一覧の上の案内。編集画面の「入力状況」 */
+.staff-master .staff-missing-badge {
+  display: inline-block; margin-right: 4px; padding: 0 4px; border-radius: 3px;
+  background: #d13438; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; vertical-align: 1px;
+}
+.staff-master .staff-missing-note { margin: 0 0 8px; color: #b3261e; font-size: 12px; line-height: 1.6; white-space: normal; }
+.staff-master td .staff-missing-note { margin: 0; display: block; }
+/* 台帳：情報は未入力だが、その日の予約があるため残している行 */
+.ledger-row.pm-info-missing > .ledger-staff-cell b::after {
+  content: "情報未入力"; display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 3px;
+  background: #d13438; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; vertical-align: 1px;
+}

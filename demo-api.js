@@ -787,23 +787,60 @@ function withinShift(date, staffId, start, end) {
   return !!sh && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at);
 }
 
+// スタッフ情報の入力がそろっているか（2026-10-20 お店の人の指定）。
+// 性別（女性・男性）・コース（対応メニュー）・画像（写真）・フリーメッセージ（紹介文）が全部ある人だけを
+// 台帳・月間シフト作成・予約サイト（空き枠・指名・スタッフ紹介）・ホットペッパーの割り当てに出し、シフト・休憩・業務・予約を入れられる。
+// 足りない人のシフトは消さずに隠すだけ（入力して保存すれば元に戻る）。
+// 以前は名前だけで登録したスタッフにもシフトが入り、スタッフ情報の一覧（20人ずつ）で見つからないまま台帳に出ていた
+function staffInfoMissing(st) {
+  if (!st) return ["スタッフ情報"];
+  const missing = [];
+  if (st.gender !== "male" && st.gender !== "female") missing.push("性別");
+  let courses = null;
+  try { courses = JSON.parse(st.courses || "[]"); } catch {}
+  if (!Array.isArray(courses)) missing.push("コース");
+  if (!state.photos.has(st.id)) missing.push("画像");
+  if (!String(profileOf(st).message || "").trim()) missing.push("フリーメッセージ");
+  return missing;
+}
+const staffReady = (st) => staffInfoMissing(st).length === 0;
+// 台帳・月間シフト作成に出すスタッフ：情報がそろっている人。そろっていなくても、その日に予約の担当がある人は出す
+// （本物の予約が台帳から見えなくならないように。新しいシフト・予約は入れられない）
+function ledgerStaffIds(date) {
+  const ev = ensureEvents(date);
+  const booked = new Set(ev.assignments
+    .filter((a) => ev.bookings.some((b) => b.id === a.booking_id && b.status === "confirmed"))
+    .map((a) => a.staff_id));
+  return new Set(state.staff.filter((st) => booked.has(st.id) || staffReady(st)).map((st) => st.id));
+}
+const visibleShifts = (date) => {
+  const shown = ledgerStaffIds(date);
+  return ensureShifts(date).filter((x) => shown.has(x.staff_id));
+};
+
 // ---- リクエスト処理 ----------------------------------------------------
 
 function getSchedule(date) {
   const today = todayJst();
+  const shown = ledgerStaffIds(date);
   const days = [], shifts = [];
   for (let i = -1; i <= 62; i++) {
     const d = addDays(date, i);
     const day = ensureDay(d);
     days.push({ date: d, version: day.version, enabled: day.enabled });
-    if (d >= today) shifts.push(...ensureShifts(d));
+    if (d >= today) shifts.push(...ensureShifts(d).filter((x) => shown.has(x.staff_id)));
   }
   const ev = ensureEvents(date);
+  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st) });
+  const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
   return {
-    staff: [...state.staff].sort((a, b) => a.sort_order - b.sort_order).map((st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0 })),
+    // 台帳・月間シフト作成の行（スタッフ情報の入力がそろっている人＋その日に予約の担当がある人）
+    staff: sorted.filter((st) => shown.has(st.id)).map(staffRow),
+    // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
+    allStaff: sorted.map(staffRow),
     shifts,
     bookings: ev.bookings,
-    blocks: ev.blocks,
+    blocks: ev.blocks.filter((b) => shown.has(b.staff_id)),
     assignments: ev.assignments,
     days,
     // 今の設定（スタッフ情報の対応メニューのチェック・性別）では担当できない担当がついている予約。
@@ -834,7 +871,9 @@ function postSchedule(body) {
     case "shift": {
       checkRevision();
       const { staffId, start, end, remove } = body;
-      if (!state.staff.some((s) => s.id === staffId)) throw err(400, "invalid");
+      const shiftStaff = state.staff.find((s) => s.id === staffId);
+      if (!shiftStaff) throw err(400, "invalid");
+      if (!remove && !staffReady(shiftStaff)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろうまでシフトは入れられない
       const list = ensureShifts(date);
       const idx = list.findIndex((s) => s.staff_id === staffId);
       if (remove) {
@@ -862,6 +901,10 @@ function postSchedule(body) {
       if (!Array.isArray(cells) || !cells.length) throw err(400, "invalid");
       if (!remove && !(Number.isFinite(start) && Number.isFinite(end) && start < end)) throw err(400, "invalid");
       for (const c of cells) {
+        // 実在するスタッフ・日付だけ（以前はここを確かめておらず、どんなスタッフIDでもシフトが入った）
+        const cellStaff = state.staff.find((s) => s.id === c.staffId);
+        if (!cellStaff || !/^\d{4}-\d{2}-\d{2}$/.test(String(c.date || ""))) throw err(400, "invalid");
+        if (!remove && !staffReady(cellStaff)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろうまでシフトは入れられない
         if (c.revision !== ensureDay(c.date).version) throw err(409, "scheduleConflict");
       }
       // 先に全部のマスを確認してから、まとめて保存する（途中のマスがぶつかったら、どのマスも変えない）
@@ -905,7 +948,9 @@ function postSchedule(body) {
         bump();
         return { ok: true };
       }
-      if (!state.staff.some((s) => s.id === staffId) || !(start < end) || ![`break`, `work`].includes(kind)) throw err(400, "invalid");
+      const blockStaff = state.staff.find((s) => s.id === staffId);
+      if (!blockStaff || !(start < end) || ![`break`, `work`].includes(kind)) throw err(400, "invalid");
+      if (!staffReady(blockStaff)) throw err(409, "staffInfoMissing");
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end, id)) throw err(409, "scheduleConflict");
       const rec = { id: id || "blk-" + Date.now(), staff_id: staffId, date, start_at: minToMs(date, start), end_at: minToMs(date, end), kind, note: String(body.note ?? "") };
@@ -925,6 +970,8 @@ function postSchedule(body) {
       const mvTarget = state.staff.find((s) => s.id === staffId);
       if (!mvTarget) throw err(400, "invalid");
       if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
+      // スタッフ情報がそろっていない人には移せない（いまの担当のまま時間を変えるのはよい）
+      if (!staffReady(mvTarget) && !ev.assignments.some((a) => a.booking_id === id && a.staff_id === staffId)) throw err(409, "staffInfoMissing");
       if (staffLockedOn(staffId, date)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(Number.isInteger(start) && Number.isInteger(end) && end > start && end - start <= 600)) throw err(400, "invalid");
@@ -961,6 +1008,7 @@ function postSchedule(body) {
       if (!consent || !c || !cbTarget) throw err(400, "invalid");
       rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない（管理画面から入れる予約も同じ）
       if (cbTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中のスタッフには入れられない（移動と同じ）
+      if (!staffReady(cbTarget)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろっていない人には入れられない
       if (staffLockedOn(staffId, date)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       const cbWhy = staffMismatch(cbTarget, course); // 担当メニュー外・性別の合わないスタッフには入れられない（管理者でも同じ）
       if (cbWhy) throw mismatchError(cbWhy);
@@ -1096,14 +1144,18 @@ function postSchedule(body) {
           }
         }
       }
-      if (affected.length) {
-        return {
-          ok: true,
-          warning: `保存しました。ただし、このスタッフが担当できないメニュー（対応メニューのチェック・性別）の予約が ${affected.length}件 入っています。\n` +
-            affected.slice(0, 5).join("\n") + (affected.length > 5 ? "\nほか" : "") +
-            "\n既存の予約はそのまま維持されます（台帳に「対応外」の印が付きます）。必要に応じて担当変更または取消をしてください。",
-        };
+      const warnings = [];
+      const missing = staffInfoMissing(rec);
+      if (missing.length) {
+        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、このスタッフは台帳・月間シフト作成・予約サイトに出ません（シフトも入れられません）。\n` +
+          "すべて入力して保存すると表示されます。");
       }
+      if (affected.length) {
+        warnings.push(`保存しました。ただし、このスタッフが担当できないメニュー（対応メニューのチェック・性別）の予約が ${affected.length}件 入っています。\n` +
+          affected.slice(0, 5).join("\n") + (affected.length > 5 ? "\nほか" : "") +
+          "\n既存の予約はそのまま維持されます（台帳に「対応外」の印が付きます）。必要に応じて担当変更または取消をしてください。");
+      }
+      if (warnings.length) return { ok: true, warning: warnings.join("\n\n") };
       return { ok: true };
     }
     case "checkout": {
@@ -2511,12 +2563,12 @@ function staffPhotoVersion(id) {
 }
 
 // スタッフ紹介ページ用：指名できるスタッフ全員（写真・指名料・紹介文と、指名して予約できるメニュー）
-// 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・個人指名あり・メニュー対応・メニューの性別指定。
+// 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・スタッフ情報の入力がそろっている・個人指名あり・メニュー対応・メニューの性別指定。
 // 毎回いまの登録内容から作るので、管理画面の「スタッフ情報」を保存すると次に開いたとき（開いたままのページも1分以内）に反映される
 function publicStaffList() {
   const courses = [...courseStore.values()];
   return state.staff
-    .filter((st) => st.active === 1 && profileOf(st).personalNomination)
+    .filter((st) => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((st) => {
       const pr = profileOf(st);
@@ -2541,10 +2593,10 @@ function nominationOf(staffId) {
   return rest;
 }
 
-// 指名候補スタッフ一覧（受付中・個人指名あり・コース対応・性別条件）
+// 指名候補スタッフ一覧（受付中・スタッフ情報の入力がそろっている・個人指名あり・コース対応・性別条件）
 function nominatableStaff(courseId, genderPref) {
   return state.staff
-    .filter((st) => st.active === 1 && staffCanDo(st, courseId))
+    .filter((st) => st.active === 1 && staffReady(st) && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => profileOf(st).personalNomination)
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -2564,7 +2616,7 @@ function nominatableStaff(courseId, genderPref) {
 // プロフィールは全員を案内する。予約できるかは選択メニューと勤務予定で別に判定する。
 function staffPickerDirectory(courseId, genderPref) {
   const eligible = new Set(nominatableStaff(courseId, genderPref).map(s => s.id));
-  return state.staff.filter(st => st.active === 1 && profileOf(st).personalNomination)
+  return state.staff.filter(st => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .sort((a,b) => a.sort_order - b.sort_order).map(st => {
       const pr = profileOf(st);
       return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
@@ -2573,7 +2625,7 @@ function staffPickerDirectory(courseId, genderPref) {
 }
 
 // 指定時間帯に施術できるスタッフID一覧
-// 対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
+// スタッフ情報の入力→対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
 function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId) {
   const shifts = ensureShifts(date);
   const ev = ensureEvents(date);
@@ -2585,7 +2637,7 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
     return items.some((it) => msToMin(date, it.start_at) < endMin && msToMin(date, it.end_at) > startMin);
   };
   return state.staff
-    .filter((st) => st.active === 1 && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
+    .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => {
       const sh = shifts.find((x) => x.staff_id === st.id);
@@ -2649,11 +2701,11 @@ function hpNotify(b, via) {
   const course = [...courseStore.values()].find((c) => c.name === menu) || null;
   const gender = course ? courseGender(course.id) : (menu.includes("女性") ? "female" : menu.includes("男性") ? "male" : "none");
   // 担当できるスタッフ：受付中・鍵なし・担当メニューのチェック・性別指定（メニュー名がこちらのメニューと一致しないときは
-  // メニューを特定できないので「全て」にチェックのスタッフだけ）。担当できないスタッフに割り当てて受け付けることはしない
+  // メニューを特定できないので「全て」にチェックのスタッフだけ）。担当できないスタッフ・スタッフ情報が未入力のスタッフに割り当てて受け付けることはしない
   const bkLike = { course: course ? course.id : "", course_name: menu };
   const wantName = String(b.staffName || "").trim();
   const capable = state.staff
-    .filter((st) => st.active === 1 && !staffLockedOn(st.id, date) && !bookingMismatch(st, bkLike))
+    .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && !bookingMismatch(st, bkLike))
     .filter((st) => !wantName || st.name === wantName);
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
@@ -3162,7 +3214,7 @@ function reportStats(date) {
   const daysInMonth = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
   const forecast = dayN ? Math.round(cumNet / dayN * daysInMonth) : 0;
   // シフト状況
-  const shifts = ensureShifts(date);
+  const shifts = visibleShifts(date); // 台帳と同じ（スタッフ情報が未入力の人のシフトは数えない）
   const shiftMin = shifts.reduce((s, x) => s + (x.end_at - x.start_at) / 60000, 0);
   const ev = ensureEvents(date);
   let treatMin = 0;
@@ -3173,7 +3225,7 @@ function reportStats(date) {
   const tomorrow = addDays(date, 1);
   const names = {};
   for (const st of state.staff) names[st.id] = st.name;
-  const tomorrowShifts = ensureShifts(tomorrow)
+  const tomorrowShifts = visibleShifts(tomorrow)
     .map((x) => ({
       name: names[x.staff_id] || "",
       label: `${Number(tomorrow.slice(8))}日${fmtTime(tomorrow, x.start_at)}〜` +
@@ -3773,7 +3825,7 @@ function handleDemoApi(req, res, url) {
       const d = addDays(from, i);
       days.push({
         date: d,
-        shifts: ensureShifts(d).length,
+        shifts: visibleShifts(d).length,
         bookings: ensureEvents(d).bookings.filter((b) => b.status === "confirmed").length,
         enabled: ensureDay(d).enabled,
       });
