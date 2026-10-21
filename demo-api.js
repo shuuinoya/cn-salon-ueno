@@ -801,6 +801,20 @@ function staffInfoMissing(st) {
   return missing;
 }
 const staffReady = (st) => staffInfoMissing(st).length === 0;
+// 管理画面の照合欄も、予約サイトと同じ保存済み設定から作る。
+function staffBookingStatus(st) {
+  const pr = profileOf(st), missing = staffInfoMissing(st);
+  const reasons = [];
+  if (st.active !== 1) reasons.push("予約受付が停止中");
+  if (!pr.personalNomination) reasons.push("個人指名がオフ");
+  if (missing.length) reasons.push(missing.join("・") + "の入力が必要");
+  return {
+    listed: reasons.length === 0,
+    display_name: pr.nickname || st.name,
+    reasons,
+    course_ids: [...courseStore.values()].filter(c => !staffMismatch(st, c.id)).map(c => c.id),
+  };
+}
 // 管理用の台帳・月間シフト・スタッフ情報は、同じ登録済みスタッフを参照する。
 // 未入力の項目があっても既存の記録を隠さない。新規受付の可否は staffReady で別に判定する。
 function ledgerStaffIds() {
@@ -826,7 +840,7 @@ function getSchedule(date) {
     shifts.push(...scheduleShifts(d).filter((x) => shown.has(x.staff_id)));
   }
   const ev = ensureEvents(date);
-  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st) });
+  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_status: staffBookingStatus(st) });
   const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
   return {
     // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。

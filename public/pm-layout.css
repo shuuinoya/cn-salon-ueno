@@ -2126,3 +2126,110 @@ main.ledger-app .ledger-event.pm-parked-origin { outline: 2px dashed #6d4c33; ou
 .staff-registry-summary{padding:10px 12px;margin:0 0 10px;background:#f7f3eb;border:1px solid #e5d9c5;color:#5f4a2f;line-height:1.6}
 .staff-shift-status{display:block;margin-top:4px;font-size:12px;font-weight:400;color:#625b4f;white-space:normal}
 .pm-shift-staff-open{display:inline-block;margin:0 0 14px;padding:10px 16px;min-height:44px;border:1px solid #b89862;border-radius:6px;background:#fff;color:#654e2b;font:inherit;cursor:pointer}
+
+/* スタッフ照合と月間シフト：同じ登録IDを確認しながら操作する。 */
+.ledger-app .staff-master-body { grid-template-columns: minmax(0, 73%) minmax(0, 27%); }
+.ledger-app .staff-directory { border-right-width: 1px; padding: 24px 10px 18px; }
+.ledger-app .staff-master .staff-directory td, .ledger-app .staff-master .staff-directory td button { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+.ledger-app .staff-master-editing .staff-master-body { display: block; }
+.ledger-app .staff-master-editing .staff-directory { display: none; }
+.ledger-app .staff-master-editing .staff-editor { padding: 10px; box-shadow: none; }
+.ledger-app .staff-detail-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0 12px; }
+.ledger-app .staff-master .staff-fields th, .ledger-app .staff-master .staff-fields td { font-size: 14px; line-height: 1.6; padding: 7px 8px; }
+.ledger-app .staff-master .staff-fields input:not([type=checkbox]):not([type=radio]):not([type=file]), .ledger-app .staff-master .staff-fields select { height: 34px; }
+.ledger-app .staff-master .staff-course-groups label, .ledger-app .staff-master .staff-course-groups legend { font-size: 14px; }
+.ledger-app .staff-master .staff-course-groups fieldset > div { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.ledger-app .staff-master .staff-course-groups fieldset > div > label { min-width: 0; }
+.ledger-app .staff-audit { margin: 0 12px 12px; border: 1px solid #d8c6b8; border-radius: 3px; }
+.ledger-app .staff-audit > summary { cursor: pointer; padding: 12px; background: #f4eee8; font-weight: 600; font-size: 14px; }
+.ledger-app .staff-audit > p { margin: 10px 12px; line-height: 1.7; }
+.ledger-app .staff-audit-scroll { overflow: auto; max-height: 480px; }
+.ledger-app .staff-audit table { width: 100%; border-collapse: collapse; min-width: 740px; }
+.ledger-app .staff-audit th, .ledger-app .staff-audit td { text-align: left; padding: 10px 12px; border: 1px solid #ded6cf; font-size: 13px; white-space: normal; }
+.ledger-app .staff-audit thead th { position: sticky; top: 0; z-index: 1; background: #f4eee8; }
+.ledger-app .staff-audit small { display: block; margin-top: 4px; color: #645e57; line-height: 1.5; }
+.ledger-app .staff-audit td:first-child button { color: #b63737; border: 0; padding: 0; background: transparent; text-align: left; }
+.ledger-app .staff-audit tr:nth-child(even) { background: #faf8f6; }
+.ledger-app .pm-month .ledger-month-scroll { max-height: 70vh; overflow: auto; overscroll-behavior: contain; }
+.ledger-app .pm-month thead { position: sticky; top: 0; z-index: 4; }
+.ledger-app .pm-month thead th { background: #f1ebe5; min-width: 150px; }
+.ledger-app .pm-month thead th:first-child { color: #977051; }
+.ledger-app .pm-month thead th.pm-shift-total::after { content: none; }
+.ledger-app .pm-month th:first-child { position: sticky; left: 0; z-index: 2; background: #f4eee8; min-width: 130px; }
+.ledger-app .pm-month tbody td { min-width: 150px; }
+.ledger-app .pm-month .month-staff-name { background: transparent; border: 0; padding: 0; color: #977051; white-space: normal; text-align: left; font-weight: 600; }
+.ledger-app .pm-month .month-staff-name:hover { text-decoration: underline; }
+.ledger-app .pm-month tfoot th, .ledger-app .pm-month tfoot td { padding: 12px; white-space: nowrap; border: 1px solid #c6b9ad; background: #f4eee8; font-weight: 600; }
+.ledger-app .pm-month tbody .month-past { background: #f4f4f4; }
+.ledger-app .pm-month tbody .month-past input[type=checkbox] { opacity: .35; cursor: default; }
+.ledger-app .pm-month tbody .month-today > th { background: #ffedc6; font-weight: 700; }
+.ledger-app .pm-month .pm-shift-total { white-space: nowrap; text-align: right; }
+@media (max-width: 720px) {
+  .ledger-app .staff-master-body { display: block; }
+  .ledger-app .staff-directory { max-height: 60vh; }
+  .ledger-app .staff-editor:has(.staff-editor-heading) { display: none; }
+  .ledger-app .staff-detail-toolbar { flex-wrap: wrap; }
+  .ledger-app .staff-master .staff-fields th, .ledger-app .staff-master .staff-fields td { padding: 8px 6px; font-size: 13px; }
+  .ledger-app .staff-master .staff-fields input:not([type=checkbox]):not([type=radio]):not([type=file]), .ledger-app .staff-master .staff-fields select { min-height: 40px; font-size: 16px; }
+  .ledger-app .staff-master .staff-course-groups fieldset > div { display: block; }
+  .ledger-app .staff-master .staff-course-groups fieldset > div > label { padding: 6px 0; line-height: 1.6; }
+  .ledger-app .staff-audit { margin: 0 6px 10px; }
+  .ledger-app .pm-month .ledger-month-scroll { max-height: 65vh; }
+  .ledger-app .pm-month th:first-child { min-width: 100px; }
+  .ledger-app .pm-month .ledger-month-heading > b { font-size: 20px; }
+  #pm-bulk-group { flex-wrap: wrap; }
+  #pm-month-tools { width: 100%; gap: 6px; }
+}
+
+/* PeakManagerのスタッフマスタで確認した一覧・詳細の配置。追加の照合は下部に置く。 */
+.ledger-app .staff-master { position: relative; margin: 20px 15px 0; border-color: #a27450; font-size: 15px; }
+.ledger-app .staff-master h1 { height: 40px; padding: 10px 15px; font-size: 18px; line-height: 20px; background: #ffdf9f; color: #9c6d47; }
+.ledger-app .staff-master .staff-master-toolbar { justify-content: flex-start; padding: 15px 30px 10px; gap: 10px; min-height: 68px; }
+.ledger-app .staff-master .staff-master-toolbar form { gap: 10px; }
+.ledger-app .staff-master .staff-master-toolbar input:not([type=checkbox]):not([type=radio]):not([type=file]) { width: 190px; height: 34px; font-size: 15px; }
+.ledger-app .staff-master .staff-master-toolbar button, .ledger-app .staff-master .staff-primary { min-height: 40px; padding: 10px; font-size: 14px; border-radius: 3px; }
+.ledger-app .staff-master-body { margin: 0 15px 12px; }
+.ledger-app .staff-master .staff-directory { padding: 30px 10px 20px; }
+.ledger-app .staff-master .staff-registry-summary, .ledger-app .staff-master .staff-shift-status { display: none; }
+.ledger-app .staff-master .staff-directory th { padding: 7px 3px; font-size: 15px; height: 32px; border-color: #d9c7ba; background: #f2ede7; color: #9c6d47; }
+.ledger-app .staff-master .staff-directory td { padding: 8px 5px; height: 45px; border-color: #d9c7ba; font-size: 15px; }
+.ledger-app .staff-master .staff-directory td button { font-size: 15px; line-height: 22px; }
+.ledger-app .staff-master .staff-editor-heading { height: 40px; padding: 10px; font-size: 15px; }
+.ledger-app .staff-master-editing .staff-master-body { border: 0; }
+.ledger-app .staff-master-editing .staff-editor { padding: 0 10px 12px; }
+.ledger-app .staff-detail-toolbar { position: absolute; right: 10px; top: 3px; margin: 0; padding: 0; border: 0; }
+.ledger-app .staff-detail-toolbar > b { display: none; }
+.ledger-app .staff-detail-toolbar button { padding: 5px 9px; font-size: 12px; }
+.ledger-app .staff-master .staff-fields { margin-top: 10px; }
+.ledger-app .staff-master .staff-fields th, .ledger-app .staff-master .staff-fields td { padding: 5px; font-size: 15px; line-height: 1.5; height: 45px; border-color: #d9c7ba; }
+.ledger-app .staff-master .staff-fields textarea { min-height: 72px; line-height: 1.5; font-size: 15px; }
+.ledger-app .staff-master .staff-inline { display: grid; gap: 10px; padding: 5px 0; }
+.ledger-app .staff-gender-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ledger-app .staff-gender-options label { display: inline-flex; align-items: center; }
+.ledger-app .staff-gender-options label:last-child { margin-left: 8px; color: #666; font-size: 12px; }
+.ledger-app .staff-master .staff-course-groups label, .ledger-app .staff-master .staff-course-groups legend { font-size: 15px; }
+.ledger-app .staff-master .staff-pagination button { min-width: 30px; height: 30px; font-size: 14px; }
+.ledger-app .staff-master .staff-audit { margin: 12px 15px; }
+.ledger-app .staff-master .staff-audit summary { font-size: 13px; font-weight: 400; }
+@media (prefers-reduced-motion: no-preference) {
+  .ledger-app .staff-editor form, .ledger-app .staff-audit[open] .staff-audit-scroll { animation: staff-detail-in 140ms ease-out; }
+  .ledger-app .staff-master button, .ledger-app .ledger-month button { transition: background-color 120ms ease, box-shadow 120ms ease; }
+  @keyframes staff-detail-in { from { opacity: .6; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+}
+@media (max-width:720px) {
+  .ledger-app .staff-master { margin: 10px 6px; }
+  .ledger-app .staff-master .staff-master-toolbar { padding: 10px; flex-wrap: wrap; }
+  .ledger-app .staff-master .staff-master-toolbar form { flex: 1 1 100%; gap: 6px; }
+  .ledger-app .staff-master .staff-master-toolbar input:not([type=checkbox]):not([type=radio]):not([type=file]) { flex: 1 1 130px; width: 130px; min-width: 0; }
+  .ledger-app .staff-master .staff-directory { padding: 12px 6px; }
+  .ledger-app .staff-master .staff-directory th, .ledger-app .staff-master .staff-directory td, .ledger-app .staff-master .staff-directory td button { font-size: 12px; }
+  .ledger-app .staff-master-body { margin: 0 6px; }
+  .ledger-app .staff-master-editing .staff-editor { padding: 0 0 10px; }
+  .ledger-app .staff-master h1 { font-size: 16px; }
+  .ledger-app .staff-detail-toolbar button { max-width: 130px; font-size: 11px; }
+  .ledger-app .staff-master .staff-fields th, .ledger-app .staff-master .staff-fields td { font-size: 13px; height: auto; padding: 6px; }
+  .ledger-app .staff-master .staff-course-groups label, .ledger-app .staff-master .staff-course-groups legend { font-size: 14px; }
+  .ledger-app .staff-master .staff-audit { margin: 12px 6px; }
+  .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) { display: block; }
+  .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) > th, .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) > td { display: block; }
+}

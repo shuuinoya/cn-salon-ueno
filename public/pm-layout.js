@@ -1930,28 +1930,26 @@
         left.id = "pm-month-left";
         const goal = document.createElement("button");
         goal.type = "button"; goal.className = "pm-red"; goal.textContent = "目標保存";
-        goal.title = "デモ版では使用できません";
+        goal.disabled = true; goal.title = "目標保存は現在の管理画面では利用できません";
         const grp = document.createElement("span");
         grp.id = "pm-bulk-group";
         const cnt = document.createElement("select");
         cnt.id = "pm-bulk-count";
         cnt.innerHTML = [1, 2, 3, 4, 5].map((n) => `<option>${n}</option>`).join("");
+        cnt.disabled = true; cnt.title = "登録済みスタッフ1人につき1枠を選びます";
         const sel = document.createElement("select");
         sel.id = "pm-bulk-staff";
         const bulk = document.createElement("button");
         bulk.type = "button"; bulk.className = "pm-red"; bulk.textContent = "一括作成";
         bulk.title = "選んだスタッフの1か月分のマスをまとめて選択します";
         bulk.addEventListener("click", () => {
-          const name = sel.value;
+          const staffId = sel.value;
           const table = month.querySelector("table");
           if (!table) return;
-          const heads = [...table.querySelectorAll("thead th")].map((th) => th.childNodes[0]?.textContent || th.textContent);
           table.querySelectorAll("tbody tr").forEach((tr) => {
-            [...tr.children].forEach((td, i) => {
-              if (i === 0) return;
-              if (name !== "全員" && heads[i] !== name) return;
-              const cb = td.querySelector('input[type="checkbox"]');
-              if (cb && !cb.checked) cb.click();
+            tr.querySelectorAll('input[type="checkbox"][data-staff-id]').forEach((cb) => {
+              if (staffId !== "all" && cb.dataset.staffId !== staffId) return;
+              if (!cb.disabled && !cb.checked) cb.click();
             });
           });
         });
@@ -1965,7 +1963,7 @@
           const b = document.createElement("button");
           b.type = "button"; b.className = cls; b.textContent = label;
           if (fn) b.addEventListener("click", fn);
-          if (deco) b.title = "デモ版では使用できません";
+          if (deco) { b.disabled = true; b.title = "他店舗からのヘルプ設定はありません"; }
           return b;
         };
         const openModal = () => month.querySelector(".ledger-create")?.click();
@@ -1976,12 +1974,18 @@
       }
       // スタッフ選択肢を最新化
       const sel = document.getElementById("pm-bulk-staff");
-      if (sel && window.__pmLocks) {
-        const names = ["全員", ...Object.keys(window.__pmLocks)];
-        if (sel.options.length !== names.length) {
-          sel.innerHTML = names.map((n) => `<option>${n}</option>`).join("");
+      if (sel) {
+        const staff = [...month.querySelectorAll('thead th[data-staff-id]')].map(th => [th.dataset.staffId, th.dataset.staffName]);
+        const signature = JSON.stringify(staff);
+        if (sel.dataset.staffSignature !== signature) {
+          const selected = sel.value;
+          sel.replaceChildren(new Option("全員", "all"), ...staff.map(([id, name]) => new Option(name, id)));
+          if ([...sel.options].some(o => o.value === selected)) sel.value = selected;
+          sel.dataset.staffSignature = signature;
         }
       }
+      const canEdit = !month.querySelector('.ledger-create')?.disabled;
+      heading.querySelectorAll('#pm-month-tools .pm-green, #pm-month-tools .pm-blue').forEach(b => { b.disabled = !canEdit; });
     }
 
     // 表：本物と同じ「日次予算(目標)・目標コメント」列を追加し、日付表記を合わせる
@@ -1997,10 +2001,10 @@
       if (!tr.querySelector(".pm-goal")) {
         const budget = document.createElement("td");
         budget.className = "pm-goal";
-        budget.innerHTML = '<input type="text" inputmode="numeric" value="0" title="日次予算（デモ）">';
+        budget.innerHTML = '<input type="text" inputmode="numeric" value="0" readonly title="日次予算の保存は現在利用できません">';
         const comment = document.createElement("td");
         comment.className = "pm-goal";
-        comment.innerHTML = '<input type="text" title="目標コメント（デモ）">';
+        comment.innerHTML = '<input type="text" readonly title="目標コメントの保存は現在利用できません">';
         tr.children[0].after(budget, comment);
       }
       // 「9月26日（土）」→「09月26日 (土)」
@@ -2030,7 +2034,7 @@
         const b = document.createElement("button");
         b.type = "button"; b.className = cls; b.textContent = label;
         if (fn) b.addEventListener("click", fn);
-        if (deco) b.title = "デモ版では使用できません";
+        if (deco) { b.disabled = true; b.title = "目標保存は現在の管理画面では利用できません"; }
         return b;
       };
       bar.append(
@@ -2039,6 +2043,40 @@
         mk("シフト出力", "pm-orange", exportShiftsCsv),
       );
       month.appendChild(bar);
+    }
+    const bottomCreate = month.querySelector('#pm-month-bottom .pm-green');
+    if (bottomCreate) bottomCreate.disabled = !!month.querySelector('.ledger-create')?.disabled;
+    // 日別・スタッフ別の勤務合計は、画面に表示する同じシフトから計算する。
+    const staffHeads = [...month.querySelectorAll('thead th[data-staff-id]')];
+    const totals = new Map(staffHeads.map(th => [th.dataset.staffId, 0]));
+    let grandTotal = 0;
+    if (headRow && !headRow.querySelector('.pm-shift-total')) {
+      const th = document.createElement('th'); th.className = 'pm-shift-total'; th.textContent = '合計'; headRow.append(th);
+    }
+    month.querySelectorAll('tbody tr[data-date]').forEach(tr => {
+      let total = 0;
+      tr.querySelectorAll('td[data-staff-id]').forEach(td => {
+        const minutes = Math.max(0, Number(td.dataset.shiftEnd) - Number(td.dataset.shiftStart));
+        total += minutes;
+        totals.set(td.dataset.staffId, (totals.get(td.dataset.staffId) || 0) + minutes);
+      });
+      grandTotal += total;
+      let td = tr.querySelector('.pm-shift-total');
+      if (!td) { td = document.createElement('td'); td.className = 'pm-shift-total'; tr.append(td); }
+      const value = total.toLocaleString('ja-JP') + '分';
+      if (td.textContent !== value) td.textContent = value;
+    });
+    const table = month.querySelector('table');
+    if (table) {
+      let foot = table.querySelector('tfoot');
+      if (!foot) { foot = document.createElement('tfoot'); table.append(foot); }
+      const values = ['合計', '—', '—', ...staffHeads.map(th => totals.get(th.dataset.staffId).toLocaleString('ja-JP') + '分'), grandTotal.toLocaleString('ja-JP') + '分'];
+      const signature = JSON.stringify(values);
+      if (foot.dataset.totalSignature !== signature) {
+        const row = document.createElement('tr');
+        values.forEach((v, i) => { const cell = document.createElement(i ? 'td' : 'th'); cell.textContent = v; row.append(cell); });
+        foot.replaceChildren(row); foot.dataset.totalSignature = signature;
+      }
     }
 
     // 一括登録モーダル：タイトルを本物に合わせ、「削除」ボタンを追加
@@ -2054,21 +2092,18 @@
         del.type = "button"; del.className = "pm-red pm-bulk-del"; del.textContent = "削除";
         del.title = "選択した枠のシフトを削除します（休憩・業務も一緒に削除。予約が残る日は削除できません）";
         del.addEventListener("click", async () => {
+          if (del.disabled) return;
           if (!window.confirm("選択した枠のシフトを削除しますか？")) return;
           const cells = [...document.querySelectorAll('.ledger-month tbody input[type="checkbox"]:checked')]
-            .map((cb) => (cb.getAttribute("aria-label") || "").split(" "))
-            .filter((a) => a.length >= 2);
+            .map((cb) => ({ date: cb.dataset.date, staffId: cb.dataset.staffId, revision: Number(cb.dataset.revision) }))
+            .filter((cell) => cell.date && cell.staffId);
           if (!cells.length) return;
+          del.disabled = true;
           try {
             const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
-            const sched = await (await fetch("/api/demo/schedule?date=" + cells[0][0], { cache: "no-store" })).json();
-            const rev = {};
-            for (const d of sched.days) rev[d.date] = d.version;
-            const ids = {};
-            for (const st of sched.staff) ids[st.name] = st.id;
             const payload = {
               action: "bulkShift", remove: true, date: today, revision: 0,
-              cells: cells.map(([d, ...n]) => ({ date: d, staffId: ids[n.join(" ")], revision: rev[d] ?? 0 })),
+              cells,
             };
             const r = await fetch("/api/demo/schedule", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -2079,10 +2114,13 @@
             [...modal.querySelectorAll("button")].find((b) => b.textContent === "閉じる")?.click();
             // 選択を解除する（画面は数秒以内の自動再取得で最新になる）
             document.querySelectorAll('.ledger-month tbody input:checked').forEach((cb) => cb.click());
+            requestAnimationFrame(() => document.querySelector('.ledger-refresh')?.click());
           } catch (e) {
             alert(e.message === "scheduleConflict"
-              ? "お客様の予約が残っている日が含まれているため削除できませんでした。"
+              ? "予約が残っているか、別の画面でシフトが更新されています。再読込して確認してください。"
               : "削除できませんでした。");
+          } finally {
+            del.disabled = false;
           }
         });
         actions.insertBefore(del, actions.lastElementChild);
@@ -2964,7 +3002,7 @@
     if (!m) return;
     const ym = `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
     const today = new Date(Date.now() + 9 * 3600e3 - 108e5).toISOString().slice(0, 10);
-    const from = ym === today.slice(0, 7) ? today : ym + "-01";
+    const from = ym + "-01";
     const sched = await (await fetch("/api/demo/schedule?date=" + from, { cache: "no-store" })).json();
     const names = {};
     for (const st of sched.staff) names[st.id] = st.name;
@@ -2977,7 +3015,7 @@
     for (const sh of sched.shifts.filter((x) => x.date.startsWith(ym)).sort((a, b) => a.date.localeCompare(b.date))) {
       rows.push([sh.date, names[sh.staff_id] || sh.staff_id, hhmm(sh.start_at, sh.date), hhmm(sh.end_at, sh.date)]);
     }
-    const csv = "﻿" + rows.map((r) => r.join(",")).join("\r\n");
+    const csv = "﻿" + rows.map((r) => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = `shift_${ym}.csv`;
@@ -3392,7 +3430,7 @@
 (function () {
   "use strict";
   let base = null, pending = false;
-  const busy = () => !!document.querySelector(".ledger-side-form, section.ledger-shift-detail, #pm-np, .ledger-modal-backdrop, #cn-login-ov, #pm-move-confirm") ||
+  const busy = () => !!document.querySelector(".staff-editor form, .ledger-side-form, section.ledger-shift-detail, #pm-np, .ledger-modal-backdrop, #cn-login-ov, #pm-move-confirm") ||
     !!(document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
   async function check() {
     if (document.hidden) return;
