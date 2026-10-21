@@ -44,8 +44,9 @@ async function confirmation() {
     },
     body: { appendChild() {} },
   };
-  const context = vm.createContext({ window: {}, document, Map, Date, WEEK: [], getWhoami: async () => ({ role: "staff" }) });
-  vm.runInContext(extract("  window.__pmMoveApprovals =", "  // 保存APIの応答"), context);
+  let role = "staff";
+  const context = vm.createContext({ window: {}, document, Map, Date, WEEK: [], getWhoami: async () => ({ role }) });
+  vm.runInContext(extract("  window.__pmNominationMoveApprovals =", "  // 保存APIの応答"), context);
   const move = { id: "test", date: "2026-10-20", staffId: "b", start: 840, end: 900,
     before: { staffId: "a", start: 780, end: 840 } };
   const data = { staff: [{ id: "a", name: "テストA", courses: "[]" }, { id: "b", name: "テストB", courses: "[]" }],
@@ -72,23 +73,85 @@ async function confirmation() {
   await new Promise((resolve) => setImmediate(resolve));
   const forbiddenAck = active.querySelector(".pm-move-confirm-ack input");
   forbiddenAck.checked = true; forbiddenAck.listeners.change();
-  assert.equal(active.querySelector(".pm-move-confirm-ok").disabled, true, "指名確認で対応外の権限を解除しない");
+  assert.equal(active.querySelector(".pm-move-confirm-ok").disabled, true, "指名確認でも対応外へは移動できない");
   active.querySelector(".pm-move-confirm-cancel").listeners.click();
   assert.equal(await forbidden, false);
   checks += 4;
 
+  delete data.bookings[0].nominated_staff_id;
+  for (role of ["staff", "manager", "admin"]) {
+    const blocked = context.window.__pmConfirmBookingMove(move, data);
+    const blockedOk = active.querySelector(".pm-move-confirm-ok");
+    assert.equal(blockedOk.disabled, true, role + "も対応外へは移動できない");
+    assert.equal(blockedOk.textContent, "移動できません");
+    assert.ok(!active.querySelector(".pm-move-confirm-warn").textContent.includes("承認"), "例外承認を案内しない");
+    blockedOk.listeners.click();
+    assert.equal(active.isConnected, true, "無効なボタン操作でも保存に進まない");
+    active.querySelector(".pm-move-confirm-cancel").listeners.click();
+    assert.equal(await blocked, false);
+    checks++;
+  }
+  data.assignments = [{ booking_id: "test", staff_id: "b" }];
+  const sameStaff = context.window.__pmConfirmBookingMove({ ...move, before: { ...move.before, staffId: "b" } }, data);
+  assert.equal(active.querySelector(".pm-move-confirm-ok").disabled, true, "現在の担当の時間変更も現在のチェックを必須にする");
+  active.querySelector(".pm-move-confirm-cancel").listeners.click();
+  assert.equal(await sameStaff, false);
+  data.staff[1].courses = '["course"]';
+  const supported = context.window.__pmConfirmBookingMove(move, data);
+  assert.equal(active.querySelector(".pm-move-confirm-ok").disabled, false, "指名なしの対応可能スタッフへは通常確認で進める");
+  active.querySelector(".pm-move-confirm-ok").listeners.click();
+  assert.equal(await supported, true);
+  assert.equal(context.window.__pmNominationMoveApprovals.size, 0, "指名なしに指名承認は付けない");
+  assert.equal(context.window.__pmMoveApprovals, undefined, "対応外承認の状態を作らない");
+  checks += 3;
+
   const posts = [];
   context.window.fetch = async (_url, init) => { posts.push(JSON.parse(init.body)); return { ok: false }; };
   vm.runInContext(extract("  const origFetch =", "  // 狭い画面"), context);
-  const send = () => context.window.fetch("/api/demo/schedule", { method: "POST", body: JSON.stringify({ action: "moveBooking", ...move, confirmNominationMove: true }) });
+  const send = () => context.window.fetch("/api/demo/schedule", { method: "POST", body: JSON.stringify({ action: "moveBooking", ...move, allowCourseMismatch: true, confirmNominationMove: true }) });
   await send();
   assert.equal(posts.at(-1).confirmNominationMove, false, "確認印だけを渡しても承認にはならない");
+  assert.equal(Object.hasOwn(posts.at(-1), "allowCourseMismatch"), false, "対応外承認の指定は送らない");
   context.window.__pmNominationMoveApprovals.set(context.window.__pmMoveKey(move), Date.now());
   await send(); assert.equal(posts.at(-1).confirmNominationMove, true);
   await send(); assert.equal(posts.at(-1).confirmNominationMove, false, "確認は1回限り");
   context.window.__pmNominationMoveApprovals.set(context.window.__pmMoveKey(move), Date.now() - 120001);
   await send(); assert.equal(posts.at(-1).confirmNominationMove, false, "古い確認は再利用しない");
-  checks += 4;
+  checks += 5;
+}
+
+function dragSkills() {
+  const date = "2026-10-22", dayMs = Date.parse(date + "T00:00:00+09:00");
+  const staff = [
+    { id: "a", name: "テストA", gender: "male", courses: '["course"]' },
+    { id: "b", name: "テストB", gender: "male", courses: '["course"]' },
+  ];
+  const data = { staff, assignments: [{ booking_id: "test", staff_id: "a" }],
+    shifts: staff.map(s => ({ date, staff_id: s.id, start_at: dayMs + 600 * 60000, end_at: dayMs + 1080 * 60000 })) };
+  const context = vm.createContext({ window: {},
+    staffIn: (d, id) => d.staff.find(s => s.id === id), dayLabel: d => d, hm: String,
+    minOf: (_d, ms) => (ms - dayMs) / 60000,
+    ERR: { staffCannotDoCourse: "対応外", staffGenderOnly: "性別条件", staffInfoMissing: "情報不足", staffLocked: "受付停止" } });
+  vm.runInContext(extract("  window.__pmStaffMismatch =", "  window.__pmConfirmBookingMove =") +
+    extract("  function judge(", "  // ---- 押す") + ";this.judge=judge;", context);
+  const p = { date, data, item: { type: "booking", id: "test", staffId: "a", start: 780, end: 840 },
+    booking: { course: "course", course_name: "テスト整体" } };
+  const t = { kind: "row", date, staffId: "b", start: 840, end: 900 };
+  assert.equal(context.judge(p, t).level, "ok", "チェックありの別担当に移動可能");
+  staff[1].courses = '["other"]';
+  assert.equal(context.judge(p, t).level, "ng", "チェックなしは警告ではなく移動不可");
+  data.assignments.push({ booking_id: "test", staff_id: "b" });
+  assert.equal(context.judge(p, t).level, "ng", "既に同じ予約を担当していてもチェックなしは移動不可");
+  staff[0].courses = '["other"]';
+  assert.equal(context.judge(p, { ...t, staffId: "a" }).level, "ng", "同じ担当の時間変更もチェックなしは不可");
+  staff[0].courses = '["course"]';
+  p.booking.course_name = "女性スタッフオイル";
+  assert.equal(context.judge(p, { ...t, staffId: "a" }).level, "ng", "現在の担当でも性別条件を再確認");
+  p.booking.course_name = "テスト整体";
+  assert.equal(context.judge(p, { ...t, staffId: "a" }).level, "ok", "対応可能な現在担当の時間変更は可能");
+  assert.equal(context.judge({ ...p, booking: null }, t).level, "ng", "メニュー情報を確認できないときは移動不可");
+  assert.equal(context.judge({ ...p, item: { ...p.item, type: "block" } }, t).level, "ok", "業務枠は施術スキルによる制限を受けない");
+  checks += 8;
 }
 
 function touch() {
@@ -204,6 +267,6 @@ function hoverTip() {
 }
 
 (async () => {
-  await confirmation(); touch(); detail(); hoverTip();
-  console.log(`PASS admin interactions: ${checks} checks (nomination, touch, detail, tickets, hover dismissal); synthetic data only`);
+  await confirmation(); dragSkills(); touch(); detail(); hoverTip();
+  console.log(`PASS admin interactions: ${checks} checks (skills, nomination, touch, detail, tickets, hover dismissal); synthetic data only`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

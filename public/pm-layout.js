@@ -7,14 +7,12 @@
   // お客様の予約を動かす前に、画像の見本と同じ確認画面で承認を受ける。
   // OK まで保存しない。キャンセル・Esc・画面を閉じた場合は変更しない。
   // 変更前→変更後の日時・担当、メニュー、施術時間を並べる。移動先のスタッフの対応メニュー（スタッフ情報の「コース」）に
-  // チェックがない予約は、警告を出して「対応外を承知で移動」を押したときだけ承認する（マネージャー以上。サーバーでも確かめる）。
-  // 承認した移動は __pmMoveApprovals に覚え、保存のとき allowCourseMismatch を付けて送る（下の fetch の上書き）
-  window.__pmMoveApprovals = window.__pmMoveApprovals || new Map();
+  // チェックがないスタッフには移動できない。同じ担当の時間変更でも、現在の対応メニューを確かめる。
   window.__pmNominationMoveApprovals = window.__pmNominationMoveApprovals || new Map();
   window.__pmMoveKey = (m) => [m.id, m.staffId, m.start, m.end, m.date, m.toDate || m.date].join("|");
   // スタッフがその予約を担当できるか（サーバーの bookingMismatch と同じ判定）：null＝できる／"course"＝対応メニュー外／"gender"＝性別指定が合わない
   window.__pmStaffMismatch = (st, bk) => {
-    if (!st || !bk) return null;
+    if (!st || !bk) return "course";
     let list;
     try { list = JSON.parse(st.courses || "[]"); } catch { return "course"; }
     if (!Array.isArray(list)) return "course";
@@ -39,11 +37,7 @@
     const afterTime = time(move.start);
     const newStaff = staffName(move.staffId);
     const oldStaff = (move.before && move.before.staffName) || staffName(beforeStaff);
-    // すでにこの予約を担当している人のまま（同じ日）なら、担当できるかは問わない（サーバーと同じ）
-    const assigned = toDate === move.date ? (data?.assignments || []).filter((a) => a.booking_id === move.id).map((a) => a.staff_id) : [];
-    const why = beforeStaff !== move.staffId && !assigned.includes(move.staffId) ? window.__pmStaffMismatch(staffOf(move.staffId), booking) : null;
-    const me = why === "course" ? await getWhoami() : null;
-    const canOverride = !me || !me.role || me.role === "admin" || me.role === "manager";
+    const why = window.__pmStaffMismatch(staffOf(move.staffId), booking);
     if (document.getElementById("pm-move-confirm")) return false;
     return new Promise((resolve) => {
       const previousFocus = document.activeElement;
@@ -93,15 +87,13 @@
       }
       const staff = dialog.querySelector(".pm-move-confirm-staff");
       staff.textContent = booking?.people > 1 && newStaff
-        ? "複数名の予約です。ほかの担当は、いまの担当のまま一緒に移ります（新しい時間に入れない人だけ、空いているスタッフに替わります）。" : "";
+        ? "複数名の予約です。ほかの担当も対応メニューと空き時間を確認します。対応できない人は、このメニューに対応する空きスタッフに替わります。指名された担当を自動で替えることはありません。" : "";
       const ok = dialog.querySelector(".pm-move-confirm-ok");
       if (why === "course") {
         dialog.querySelector(".pm-move-confirm-warn").textContent = "⚠ " + (newStaff || "移動先のスタッフ") +
-          "は、このメニューの対応メニュー（スタッフ情報の「コース」）にチェックがありません。移動すると台帳に「対応外」の印が付きます（スタッフ情報は変わりません）。" +
-          (canOverride ? "内容を確認し、承認する場合だけ「対応外を承知で移動」を押してください。"
-            : "対応外の移動を承認できるのは、マネージャー以上の権限のアカウントです。");
-        ok.textContent = "対応外を承知で移動";
-        ok.disabled = !canOverride;
+          "は、このメニューの対応メニュー（スタッフ情報の「コース」）にチェックがないため、移動できません。対応できるスタッフを選び直してください。";
+        ok.textContent = "移動できません";
+        ok.disabled = true;
       } else if (why === "gender") {
         dialog.querySelector(".pm-move-confirm-warn").textContent = "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、" + (newStaff || "このスタッフ") + "には移動できません。";
         ok.disabled = true;
@@ -115,7 +107,7 @@
         ack.parentElement.hidden = false;
         const forbidden = ok.disabled;
         ok.disabled = true;
-        ok.textContent = why === "course" ? "確認して対応外へ移動" : "確認して移動";
+        ok.textContent = forbidden ? "移動できません" : "確認して移動";
         ack.addEventListener("change", () => { ok.disabled = forbidden || !ack.checked; });
       }
       let settled = false;
@@ -126,7 +118,6 @@
         if (dialog.open) dialog.close();
         dialog.remove();
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
-        if (approved && why === "course") window.__pmMoveApprovals.set(window.__pmMoveKey(move), Date.now());
         if (approved && nominated) window.__pmNominationMoveApprovals.set(window.__pmMoveKey(move), Date.now());
         resolve(approved);
       };
@@ -156,20 +147,13 @@
             init = { ...init, body: JSON.stringify(b) };
           }
         }
-        // 確認画面で「対応外を承知で移動」を押した移動だけ、承認の印を付けて送る（2分以内・1回限り）
-        if (b && b.action === "moveBooking" && !b.allowCourseMismatch) {
-          const k = window.__pmMoveKey(b), at = window.__pmMoveApprovals.get(k);
-          if (at) {
-            window.__pmMoveApprovals.delete(k);
-            if (Date.now() - at < 120000) init = { ...init, body: JSON.stringify({ ...b, allowCourseMismatch: true }) };
-          }
-        }
         if (b && b.action === "moveBooking") {
+          delete b.allowCourseMismatch;
           const k = window.__pmMoveKey(b), at = window.__pmNominationMoveApprovals.get(k);
           window.__pmNominationMoveApprovals.delete(k);
           const confirmed = !!at && Date.now() - at < 120000;
           // この画面でチェックして承認した移動だけに確認済みの印を付ける（1回限り）。
-          init = { ...init, body: JSON.stringify({ ...JSON.parse(init.body), confirmNominationMove: confirmed }) };
+          init = { ...init, body: JSON.stringify({ ...b, confirmNominationMove: confirmed }) };
         }
       }
     } catch {}
@@ -1623,7 +1607,6 @@
         scheduleConflict: "画面の情報が古くなっています。最新の状態で再度お試しください。",
         staffUnavailable: "そのスタッフには移動できません。",
         staffInfoMissing: "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。先に「スタッフ情報」で入力してください。",
-        courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
         bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の台帳を確認してください。",
         staffCannotDoCourse: "このスタッフは選択されたメニューに対応していません（スタッフ情報の「コース」でこのメニューにチェックがありません）。",
         staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
@@ -3597,7 +3580,6 @@
     staffUnavailable: "そのスタッフには移動できません。",
     staffInfoMissing: "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには移動できません。",
     staffCannotDoCourse: "このスタッフは、この予約のメニューの対応メニュー（スタッフ情報の「コース」）にチェックがありません。",
-    courseOverrideForbidden: "対応メニュー外のスタッフへの移動を承認できるのは、マネージャー以上の権限のアカウントです。",
     staffGenderOnly: "このメニューは性別が指定されたメニュー（女性限定・男性限定）のため、このスタッフには移動できません。",
     staffLocked: "このスタッフはこの日、受付停止（鍵）になっています。",
     nominatedConfirmationRequired: "指名予約の変更には確認が必要です。日時・担当を確認してから、もう一度移動してください。",
@@ -3645,7 +3627,7 @@
     // why：札に出す短い理由／reason：離したときのお知らせの文
     const ng = (why, reason) => ({ level: "ng", text: where + "　✕ " + why, reason });
     if (!st) return ng("このスタッフには置けません", "このスタッフには移動できません。");
-    // すでにこの予約を担当している人（複数名の予約のほかの担当も）のまま動かすなら、鍵・スタッフ情報の未入力・対応メニューで止めない（サーバーと同じ）
+    // 既存の担当は鍵・情報の未入力だけでは止めない。現在の対応メニュー・性別条件は毎回確かめる。
     const already = it.type === "booking" && sameDay && (d.assignments || []).some((a) => a.booking_id === it.id && a.staff_id === t.staffId);
     if ((st.info_missing || []).length && !already) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
     if (it.type === "booking" && st.locked && !already) return ng("受付停止（鍵）中です", ERR.staffLocked);
@@ -3659,10 +3641,10 @@
     if (others.some((x) => minOf(t.date, x.start_at) < t.end && minOf(t.date, x.end_at) > t.start)) {
       return ng("ほかの予約・休憩・業務と重なります", "移動先の時間に、ほかの予約・休憩・業務が入っています。");
     }
-    if (it.type === "booking" && !already) {
+    if (it.type === "booking") {
       const why = window.__pmStaffMismatch?.(st, p.booking);
       if (why === "gender") return ng("性別指定のメニューです", ERR.staffGenderOnly);
-      if (why === "course") return { level: "warn", text: where + "　⚠ 対応メニュー外（確認画面で承認が必要）" };
+      if (why === "course") return ng("対応メニューにチェックがありません", ERR.staffCannotDoCourse);
     }
     return { level: "ok", text: where };
   }
@@ -3896,7 +3878,7 @@
     if (status === 200 && out.ok) {
       if (p.kind === "chip") setParked(null);
       await land(p, t);
-      toast(it.type !== "booking" ? "保存しました。" : out.courseOverride ? "予約を移動しました（対応メニュー外として承認）。" : "予約を移動しました。", "ok");
+      toast(it.type !== "booking" ? "保存しました。" : "予約を移動しました。", "ok");
       return;
     }
     toast(ERR[out.error] || (out.error === "network"

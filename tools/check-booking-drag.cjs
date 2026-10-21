@@ -1,7 +1,7 @@
 'use strict';
 // 台帳の予約カードのドラッグで使うサーバー側の移動（moveBooking）を確かめる（2026-10-20）。
 // 同じスタッフの別時間・別スタッフ・両方同時・別の日、重なり・シフト外、ほかの画面での先の変更、二重送信、
-// 対応メニュー外の承認（マネージャー以上）、性別指定、移動の記録。記録はすべて架空。メール設定のない検証用チェックアウトで実行する
+// チェックのある担当間だけ移動・権限による例外なし、性別指定、移動の記録。記録はすべて架空。メール設定のない検証用チェックアウトで実行する
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -24,7 +24,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   const day = addDays(todayJst(), 1), day2 = addDays(day, 2);
   const prof = JSON.stringify({ personalNomination: true, nominationFee: 500, message: '紹介文' });
   const staff = (id, gender, courses, i) => ({ id, name: 'テスト 確認 ' + id, gender, active: 1, locked: 0, sort_order: i, courses: JSON.stringify(courses), profile: prof, profile_revision: 1 });
-  const A = staff('chk-a', 'male', [], 1), B = staff('chk-b', 'female', [], 2), C = staff('chk-c', 'male', [MALE], 3), F = staff('chk-f', 'female', [], 4);
+  const A = staff('chk-a', 'male', [BODY, MALE], 1), B = staff('chk-b', 'female', [BODY], 2), C = staff('chk-c', 'male', [MALE], 3), F = staff('chk-f', 'female', [], 4);
   state.staff = [A, B, C, F];
   state.photos = new Map(state.staff.map((s) => [s.id, 'data:image/jpeg;base64,/9j/']));
   state.days = new Map(); state.events = new Map(); state.bookingIndex = new Map();
@@ -70,17 +70,14 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.throws(() => move(bk, { staffId: A.id, start: 1290, end: 1350 }), code('outsideShift'));
   assert.deepEqual(where(other), { date: day, staff: [B.id], start: 600, end: 660 });
 
-  // 7) 対応メニュー外（C は男性メニューだけ）：承認なし→断る／スタッフ権限で承認→断る／マネージャーが承認→移す（記録・対応外の印）
+  // 7) 対応メニュー外（C は男性メニューだけ）：スタッフ・マネージャー・管理者の例外承認でも移せない。
+  const skillBefore = JSON.stringify({ where: where(bk), booking: bk, mails: state.mails, staff: state.staff });
   assert.throws(() => move(bk, { staffId: C.id, start: 780, end: 840 }), code('staffCannotDoCourse'));
-  assert.throws(() => move(bk, { staffId: C.id, start: 780, end: 840, allowCourseMismatch: true }, clerk), code('courseOverrideForbidden'));
-  assert.throws(() => move(bk, { staffId: C.id, start: 780, end: 840, allowCourseMismatch: true }, null), code('courseOverrideForbidden'));
+  for (const actor of [clerk, manager, { user: 'chk-admin', role: 'admin' }, null]) {
+    assert.throws(() => move(bk, { staffId: C.id, start: 780, end: 840, allowCourseMismatch: true }, actor), code('staffCannotDoCourse'));
+  }
+  assert.equal(JSON.stringify({ where: where(bk), booking: bk, mails: state.mails, staff: state.staff }), skillBefore, 'チェックなしへの移動では予約・メール・スタッフ情報を変えない');
   assert.deepEqual(where(bk).staff, [A.id], '断ったときは変えない');
-  const ov = move(bk, { staffId: C.id, start: 780, end: 840, allowCourseMismatch: true });
-  assert.equal(ov.ok, true); assert.equal(ov.courseOverride, true);
-  assert.deepEqual(where(bk).staff, [C.id]);
-  assert.equal(bk.move_log.at(-1).course_override, true);
-  assert.equal(bk.move_log.at(-1).by, 'chk-manager');
-  assert.ok(getSchedule(day).capabilityWarnings.some((w) => w.booking_id === bk.id && w.staff_id === C.id && w.reason === 'course'), '台帳に「対応外」の印');
   assert.equal(state.staff.find((s) => s.id === C.id).courses, JSON.stringify([MALE]), 'スタッフ情報の「コース」は変えない');
   // 8) 性別指定のメニュー（男性メニュー）は、承認しても女性スタッフへは移せない
   const maleBk = make(A.id, 1000, MALE);
@@ -89,7 +86,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
 
   // 9) 別の日へ（置き場から別の日の台帳へ）：予約IDはそのまま、日付・時間・担当だけ変わる
   const d0 = rev(day), t0 = rev(day2);
-  const x = move(bk, { staffId: A.id, start: 900, end: 960, toDate: day2, toRevision: t0, expect: { staffId: C.id, start: 780 } });
+  const x = move(bk, { staffId: A.id, start: 900, end: 960, toDate: day2, toRevision: t0, expect: { staffId: A.id, start: 780 } });
   assert.equal(x.ok, true); assert.equal(x.date, day2);
   assert.deepEqual(where(bk), { date: day2, staff: [A.id], start: 900, end: 960 });
   assert.equal(bk.service_date, day2);
@@ -123,6 +120,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.equal(move(nom, { staffId: F.id, start: 1100, end: 1160, toDate: day2, toRevision: rev(day2), confirmNominationMove: true }).ok, true);
   assert.deepEqual(where(nom), { date: day2, staff: [F.id], start: 1100, end: 1160 });
   assert.throws(() => move(nom, { staffId: C.id, start: 1100, end: 1160, confirmNominationMove: true }), code('staffCannotDoCourse'));
+  assert.throws(() => move(nom, { staffId: C.id, start: 1100, end: 1160, confirmNominationMove: true, allowCourseMismatch: true }, { user: 'chk-admin', role: 'admin' }), code('staffCannotDoCourse'));
   assert.equal(nom.nominated_staff_id, F.id, '対応外で失敗した場合は指名担当も変えない');
 
   // 指名予約にも移動候補を返す（本物のAPIをメモリ上の依頼で呼ぶ。通信しない）
@@ -156,14 +154,26 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.equal(move(grp, { staffId: B.id, start: 1230, end: 1290, expect: { staffId: B.id, start: 1260 } }).ok, true);
   assert.deepEqual([where(grp).start, sorted(grp)], [1230, [A.id, B.id, F.id].sort()]);
   assert.equal(grp.move_log.at(-1).from.staff_id, B.id, '記録の移動元は動かした枠の担当');
+  // 一緒に時間が動く残りの担当にもチェックが必要。人数分を確保できなければ全体を動かさない。
+  B.courses = JSON.stringify(['364323-4822664']);
+  const groupSkillsBefore = JSON.stringify({ where: where(grp), booking: grp, mails: state.mails });
+  assert.throws(() => move(grp, { staffId: A.id, start: 1260, end: 1320, expect: { staffId: A.id, start: 1230 } }), code('soldOut'));
+  assert.equal(JSON.stringify({ where: where(grp), booking: grp, mails: state.mails }), groupSkillsBefore);
+  assert.equal(targets(grp).staff.length, 0, 'チェックありの担当が人数分そろわない移動先は出さない');
+  B.courses = JSON.stringify([BODY]);
   // 鍵の人へ新しく担当させることはできない
   const solo = make(A.id, 720);
   assert.throws(() => move(solo, { staffId: B.id, start: 720, end: 780 }), code('staffLocked'));
-  // 12) 対応外として承認して移した担当のまま、時間だけ変えるのは承認なしでできる
-  assert.equal(move(solo, { staffId: C.id, start: 720, end: 780, allowCourseMismatch: true }).ok, true);
-  assert.equal(move(solo, { staffId: C.id, start: 750, end: 810, expect: { staffId: C.id, start: 720 } }, clerk).ok, true);
-  assert.deepEqual([where(solo).staff, where(solo).start], [[C.id], 750]);
-  assert.ok(targets(solo).staff.some(s => s.id === C.id && s.slots.includes(750)), '現在の対応外担当の時間変更も候補に出る');
+  // 12) 予約後にチェックが外れた場合は、同じ担当の時間変更も断る。元の予約は勝手に消さない。
+  A.courses = JSON.stringify([MALE]);
+  const uncheckedBefore = JSON.stringify({ where: where(solo), booking: solo, mails: state.mails });
+  assert.throws(() => move(solo, { staffId: A.id, start: 750, end: 810, expect: { staffId: A.id, start: 720 } }, clerk), code('staffCannotDoCourse'));
+  assert.equal(JSON.stringify({ where: where(solo), booking: solo, mails: state.mails }), uncheckedBefore);
+  assert.ok(!targets(solo).staff.some(s => s.id === A.id), 'チェックなしの既存担当も移動候補に出さない');
+  assert.ok(!targets(solo).staff.some(s => s.id === C.id), 'チェックなしの別担当も移動候補に出さない');
+  A.courses = JSON.stringify([BODY, MALE]);
+  assert.ok(targets(solo).staff.some(s => s.id === A.id && s.slots.includes(750)), 'チェックありの担当は移動候補に出る');
+  assert.equal(move(solo, { staffId: A.id, start: 750, end: 810, expect: { staffId: A.id, start: 720 } }, clerk).ok, true);
 
   // 複数名の指名予約：別の人の枠を動かしたとき、指名担当を自動で入れ替えない
   grp.nominated_staff_id = F.id;
@@ -186,5 +196,5 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.equal(state.ticketUseByBooking.get(ticketBooking.id), ticket.id);
   assert.deepEqual([ticketBooking.ticket_id, ticketBooking.ticket_left_after, ticketBooking.base_price, ticketBooking.total], [ticket.id, 4, 0, 0]);
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
-  console.log('PASS: drag moves, checked skills, overlap/shift refusal, stale screen, double submit, overrides, gender, explicit nomination confirmation, nomination staff/time/date changes, unchanged nomination fees, move candidates, group nominee protection; synthetic records only');
+  console.log('PASS: drag moves only between checked skills, no role override, current staff rechecked, overlap/shift refusal, stale screen, double submit, gender, explicit nomination confirmation, nomination staff/time/date changes, unchanged nomination fees, move candidates, group nominee protection; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

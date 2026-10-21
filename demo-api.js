@@ -1012,28 +1012,24 @@ function postSchedule(body, actor) {
       if (staffLockedOn(staffId, toDate) && !already) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(Number.isInteger(start) && Number.isInteger(end) && end > start && end - start <= 600)) throw err(400, "invalid");
-      // 担当メニュー外のスタッフ：確認画面で警告を見たうえで、マネージャー以上が承認したとき（allowCourseMismatch）だけ移せる。
-      // スタッフ情報の「コース」は変えない（台帳に「対応外」の印が付く）。性別指定のメニューは承認しても移せない。
-      // すでにこの予約を担当している人のまま時間を変えるだけなら、担当できるかは問わない（新しく担当させるわけではないため）
-      const mvWhy = already ? null : bookingMismatch(mvTarget, bk);
-      let courseOverride = false;
-      if (mvWhy === "course" && body.allowCourseMismatch === true) {
-        if (!actor || (ROLE_LV[actor.role] || 0) < ROLE_LV.manager) throw err(403, "courseOverrideForbidden");
-        if (genderMismatch(mvTarget, bk)) throw mismatchError("gender");
-        courseOverride = true;
-      } else if (mvWhy) throw mismatchError(mvWhy);
+      // 現在の対応メニューのチェックは、権限や指名確認にかかわらず必須。
+      // 同じ担当の時間変更でも再確認し、古い画面からの例外承認では回避できない。
+      const mvWhy = bookingMismatch(mvTarget, bk);
+      if (mvWhy) throw mismatchError(mvWhy);
       const mvGender = courseGender(bk.course);
       if (!withinShift(toDate, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(toDate, staffId, start, end, id)) throw err(409, "soldOut");
-      // 複数名の予約：残りの担当は、いまの担当（動かした枠の人以外）がそのまま新しい時間へ移る（鍵・スタッフ情報の未入力でも外さない）。
-      // その人がシフト外・重なりで入れないときだけ、新しい時間帯に対応可能で空いているスタッフから割り当て直す
+      // 複数名の予約：残りの担当も、現在の対応メニューにチェックがあり受付中ならそのまま新しい時間へ移る（鍵・写真等の未入力では外さない）。
+      // 担当外・受付停止・シフト外・重なりで入れないときは、新しい時間帯に対応可能で空いているスタッフから割り当て直す
       // （以前は全員を選び直していたため、担当の1人に鍵がかかっていると、どの時間にも動かせなかった）
       let others = [];
       if (bk.people > 1) {
         others = cur.filter((sid) => sid !== staffId && sid !== dragged &&
+          state.staff.find((s) => s.id === sid)?.active === 1 && !bookingMismatch(state.staff.find((s) => s.id === sid), bk) &&
           withinShift(toDate, sid, start, end) && !overlaps(toDate, sid, start, end, id)).slice(0, bk.people - 1);
         if (others.length < bk.people - 1) {
-          const extra = freeStaffIds(toDate, start, end, bk.course, mvGender, id).filter((sid) => sid !== staffId && !others.includes(sid));
+          const extra = freeStaffIds(toDate, start, end, bk.course, mvGender, id).filter((sid) =>
+            sid !== staffId && !others.includes(sid) && !bookingMismatch(state.staff.find((s) => s.id === sid), bk));
           others = [...others, ...extra].slice(0, bk.people - 1);
         }
       }
@@ -1065,18 +1061,17 @@ function postSchedule(body, actor) {
         state.bookingIndex.set(id, toDate);
       }
       for (const sid of [staffId, ...others]) evTo.assignments.push({ booking_id: id, staff_id: sid });
-      // 移動の記録（いつ・誰が・どこからどこへ。対応メニュー外を承認して移したか）。新しい20件まで
+      // 移動の記録（いつ・誰が・どこからどこへ）。新しい20件まで
       bk.move_log = [...(Array.isArray(bk.move_log) ? bk.move_log : []), {
         at: Date.now(), by: actor?.user || "", from,
         to: { date: toDate, staff_id: staffId, start_at: bk.start_at, end_at: bk.end_at },
-        ...(courseOverride ? { course_override: true } : {}),
         ...(nominationMove ? { nomination_confirmed: true, nominated_from: oldNominee, nominated_to: bk.nominated_staff_id } : {}),
       }].slice(-20);
       if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
       queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
       bump();
       if (toDate !== date) bump(toDate);
-      return { ok: true, date: toDate, ...(courseOverride ? { courseOverride: true } : {}) };
+      return { ok: true, date: toDate };
     }
     case "createBooking": {
       checkRevision();
@@ -2646,13 +2641,6 @@ function bookingMismatch(st, bk) {
   if (g !== "none" && st.gender !== g) return "gender";
   return null;
 }
-// 予約のメニューの性別指定（女性限定・男性限定）にスタッフの性別が合わないか（担当メニューのチェックとは別に確かめる）
-function genderMismatch(st, bk) {
-  const nm = String(bk.course_name || "");
-  const g = bk.course ? courseGender(bk.course) : nm.includes("女性") ? "female" : nm.includes("男性") ? "male" : "none";
-  return g !== "none" && st.gender !== g;
-}
-
 // コース名に性別指定がある場合は、リクエストの希望より優先する
 // （画面を経由しないPOSTでも、女性コースが男性スタッフに割り当たらないようにする）
 function effectivePref(courseId, pref) {
@@ -2817,14 +2805,22 @@ function hpNotify(b, via) {
   // 担当できるスタッフ：受付中・鍵なし・担当メニューのチェック・性別指定（メニュー名がこちらのメニューと一致しないときは
   // メニューを特定できないので「全て」にチェックのスタッフだけ）。担当できないスタッフ・スタッフ情報が未入力のスタッフに割り当てて受け付けることはしない
   const bkLike = { course: course ? course.id : "", course_name: menu };
-  const wantName = String(b.staffName || "").trim();
+  // スタッフ情報の登録名と台帳・予約サイトの表示名は、同じ登録IDに結び付ける。
+  // 勤務やスキルで絞る前に本人を特定し、同名の別人へ勝手に振り替えない。
+  const normalizeStaffName = (value) => String(value || "").normalize("NFKC").replace(/\s+/g, "");
+  const wantName = normalizeStaffName(b.staffName);
+  const named = wantName ? state.staff.filter((st) =>
+    [st.name, profileOf(st).nickname].some((name) => normalizeStaffName(name) === wantName)) : null;
+  const when = { rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu };
+  if (named && named.length !== 1) return failed(409, "noCapableStaff", {
+    ...when, note: named.length ? "指定のスタッフ名が複数の登録と一致するため、担当者を特定できません" : "指定のスタッフ名に一致する登録がありません",
+  });
   const capable = state.staff
     .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && !bookingMismatch(st, bkLike))
-    .filter((st) => !wantName || st.name === wantName);
+    .filter((st) => !named || st.id === named[0].id);
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
     .sort((a, c) => a.sort_order - c.sort_order);
-  const when = { rid, date, time: fmtTime2(start) + "〜" + fmtTime2(end), menu };
   if (!capable.length) return failed(409, "noCapableStaff", when); // このメニューを担当できるスタッフがいない
   if (!candidates.length) return failed(409, "slotTaken", when);
 
@@ -4741,8 +4737,11 @@ function handleDemoApi(req, res, url) {
     const current = cur[0] || null;
     const slotsByStaff = new Map();
     for (let t = 600; t + dur <= 1620; t += 5) {
-      const free = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id);
-      const curOk = cur.filter((sid) => withinShift(date, sid, t, t + dur) && !overlaps(date, sid, t, t + dur, bk.id));
+      const free = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id)
+        .filter((sid) => !bookingMismatch(state.staff.find((st) => st.id === sid), bk));
+      const curOk = cur.filter((sid) => state.staff.find((st) => st.id === sid)?.active === 1 &&
+        !bookingMismatch(state.staff.find((st) => st.id === sid), bk) &&
+        withinShift(date, sid, t, t + dur) && !overlaps(date, sid, t, t + dur, bk.id));
       const targets = [...new Set([...free, ...curOk.filter((sid) => state.staff.find((s) => s.id === sid)?.active === 1)])];
       for (const sid of targets) {
         if (bk.nominated_staff_id && current !== bk.nominated_staff_id &&
@@ -4759,7 +4758,7 @@ function handleDemoApi(req, res, url) {
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((st) => ({
         id: st.id,
-        name: st.name,
+        name: profileOf(st).nickname || st.name,
         current: st.id === current,
         sameTime: slotsByStaff.get(st.id).includes(start),
         slots: slotsByStaff.get(st.id),
