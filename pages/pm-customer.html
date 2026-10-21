@@ -75,7 +75,7 @@
   .birth { display: flex; align-items: center; gap: 10px; }
   .birth select { width: 92px; }
   .mailrecv p { margin: 6px 0; }
-  .actions { display: flex; justify-content: flex-end; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .actions button {
     font: inherit;
     font-weight: 700;
@@ -103,12 +103,15 @@
     .radios { flex-wrap: wrap; gap: 10px 22px; }
     .radios label { min-height: 36px; }
     .actions button { min-height: 44px; width: 100%; }
+    .actions { flex-direction: column; }
+    header.top { flex-wrap: wrap; }
+    input[type="date"] { width: 100%; min-height: 44px; font: inherit; font-size: 16px; }
   }
 </style>
 </head>
 <body>
   <header class="top">
-    <b>顧客マスタ（操作デモ）</b>
+    <b>顧客マスタ</b>
     <a href="/admin">← 予約受付へ戻る</a>
     <a href="/admin/report">営業実績</a>
   </header>
@@ -120,80 +123,89 @@
       <tr><th>氏名<span class="req">*</span></th><td><input type="text" id="name"></td></tr>
       <tr><th>フリガナ</th><td><input type="text" id="kana"></td></tr>
       <tr><th>性別</th><td><div class="radios">
+        <label><input type="radio" name="g" value=""> 未設定</label>
         <label><input type="radio" name="g" value="m"> 男性</label>
         <label><input type="radio" name="g" value="f"> 女性</label>
+        <label><input type="radio" name="g" value="other"> その他</label>
       </div></td></tr>
       <tr><th>生年月日</th><td><div class="birth">
-        <select><option></option></select> - <select><option></option></select> - <select><option></option></select> <span>(歳)</span>
+        <input type="date" id="birthday" aria-label="生年月日">
       </div></td></tr>
       <tr><th>TEL(半角)</th><td><input type="tel" id="tel"></td></tr>
-      <tr><th>予備TEL1(半角)</th><td><input type="tel"></td></tr>
-      <tr><th>予備TEL2(半角)</th><td><input type="tel"></td></tr>
-      <tr><th>予備TEL3(半角)</th><td><input type="tel"></td></tr>
+      <tr><th>予備TEL1(半角)</th><td><input type="tel" id="tel2"></td></tr>
+      <tr><th>予備TEL2(半角)</th><td><input type="tel" id="tel3"></td></tr>
+      <tr><th>予備TEL3(半角)</th><td><input type="tel" id="tel4"></td></tr>
       <tr><th>メールアドレス1(半角)</th><td><input type="email" id="email"></td></tr>
-      <tr><th>メールアドレス2(半角)</th><td><input type="email" disabled></td></tr>
-      <tr><th>メール受け取り</th><td class="mailrecv">
-        <p>本部:</p>
-        <div class="radios"><label><input type="radio" name="hq" checked> 有効</label><label><input type="radio" name="hq"> 無効</label></div>
-        <p>Ueno spa&amp;massage CN Health &amp; Beauty SALON:</p>
-        <div class="radios"><label><input type="radio" name="shop"> 有効</label><label><input type="radio" name="shop" checked> 無効</label></div>
-      </td></tr>
-      <tr><th>郵便番号</th><td><input type="text"></td></tr>
-      <tr><th>都道府県</th><td><select><option></option><option>東京都</option><option>神奈川県</option><option>埼玉県</option><option>千葉県</option></select></td></tr>
-      <tr><th>住所</th><td><input type="text"></td></tr>
-      <tr><th>住所2</th><td><input type="text"></td></tr>
-      <tr><th>DM(郵送物)受け取り</th><td><div class="radios">
-        <label><input type="radio" name="dm"> 有効</label><label><input type="radio" name="dm" checked> 無効</label>
-      </div></td></tr>
+      <tr><th>メールアドレス2(半角)</th><td><input type="email" id="email2"></td></tr>
+      <tr><th>郵便番号</th><td><input type="text" id="zip"></td></tr>
+      <tr><th>都道府県</th><td><input type="text" id="prefecture"></td></tr>
+      <tr><th>住所</th><td><input type="text" id="address"></td></tr>
+      <tr><th>住所2</th><td><input type="text" id="address2"></td></tr>
     </table>
 
     <table>
-      <tr><th>職業選択</th><td><select><option></option><option>会社員</option><option>自営業</option><option>学生</option><option>その他</option></select></td></tr>
-      <tr><th>顧客タグ選択</th><td class="ro">&nbsp;</td></tr>
-      <tr><th>顧客ランク</th><td><select id="rank"><option>★</option><option>★★</option><option selected>★★★</option><option>★★★★</option><option>★★★★★</option></select></td></tr>
+      <tr><th>職業選択</th><td><select id="job"><option></option><option>会社員</option><option>自営業</option><option>学生</option><option>その他</option></select></td></tr>
+      <tr><th>顧客タグ</th><td><input type="text" id="tags"></td></tr>
+      <tr><th>顧客ランク</th><td><select id="rank"><option value="">未設定</option><option value="1">★</option><option value="2">★★</option><option value="3">★★★</option><option value="4">★★★★</option><option value="5">★★★★★</option></select></td></tr>
       <tr><th>コメント</th><td><textarea id="comment"></textarea></td></tr>
-      <tr><th>備考1</th><td><textarea></textarea></td></tr>
-      <tr><th>備考2</th><td><textarea></textarea></td></tr>
+      <tr><th>備考1</th><td><textarea id="note1"></textarea></td></tr>
+      <tr><th>備考2</th><td><textarea id="note2"></textarea></td></tr>
       <tr><th>母店</th><td><select><option>Ueno spa&amp;massage CN Health &amp; Beauty SALON</option></select></td></tr>
     </table>
-    <div class="actions"><button type="button" id="save">保存</button></div>
-    <p class="note">操作デモ：この画面の変更は保存ボタンでこのブラウザ内にのみ記録されます。</p>
+    <p id="status" role="status"></p><div class="actions"><button type="button" id="reload">最新情報を読み込む</button><button type="button" id="save" disabled>保存</button></div>
+    <p class="note">この予約に紐付く顧客記録を保存し、Mac・スマホで共有します。予約済みの連絡先やメール送信設定は変更しません。</p>
   </div>
 
 <script>
 (function () {
   "use strict";
-  const q = new URLSearchParams(location.search);
-  const g = (id) => document.getElementById(id);
-  // 予約情報から引き継いだ値を反映
-  const ref = q.get("ref") || "";
-  let h = 0;
-  for (const c of ref) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  g("cid").value = ref ? String(30000000 + (h % 69999999)) : "";
-  g("name").value = q.get("name") || "";
-  g("kana").value = q.get("kana") || "";
-  g("tel").value = (q.get("tel") || "").replace(/\D/g, "");
-  g("email").value = q.get("email") || "";
-  const gender = q.get("gender");
-  if (gender) {
-    const r = document.querySelector('input[name="g"][value="' + gender + '"]');
-    if (r) r.checked = true;
-  }
-  if (q.get("comment")) g("comment").value = q.get("comment");
-  // 一時保存（ブラウザ内のみ・失敗しても動作に影響しない）
-  const key = "pm-customer-" + (g("cid").value || "new");
-  try {
-    const saved = JSON.parse(localStorage.getItem(key) || "null");
-    if (saved) for (const [k, v] of Object.entries(saved)) { if (g(k)) g(k).value = v; }
-  } catch {}
-  g("save").addEventListener("click", () => {
+  const incoming = new URLSearchParams(location.search), query = new URLSearchParams(), g = id => document.getElementById(id);
+  for (const key of ["bookingId", "ref"]) if (incoming.get(key)) query.set(key, incoming.get(key));
+  const cleanUrl = location.pathname + (query.size ? "?" + query.toString() : "");
+  if (location.pathname + location.search + location.hash !== cleanUrl) history.replaceState(null, "", cleanUrl);
+  const fields = ["member","name","kana","tel","tel2","tel3","tel4","email","email2","birthday","zip","prefecture","address","address2","job","tags","rank","comment","note1","note2"];
+  for (const id of fields) { const el=g(id); el.setAttribute("aria-label",el.closest("tr").querySelector("th").textContent); }
+  let data, pending, busy=false, dirty=false;
+  const message = text => {g("status").textContent=text;};
+  const lockInputs = locked => {
+    for (const el of document.querySelectorAll("input,select,textarea")) if(el.id!=="cid") el.disabled=locked;
+    g("reload").disabled=locked; g("save").disabled=locked || !data;
+  };
+  g("cid").setAttribute("aria-label","予約番号");
+  const homeShop=document.querySelector(".wrap table:last-of-type tr:last-child select");
+  homeShop.setAttribute("aria-label","母店"); homeShop.disabled=true;
+  for(const el of document.querySelectorAll("input,select,textarea"))el.addEventListener("input",()=>{dirty=true;pending=null;});
+  async function load() {
+    if (busy) return;
+    if (!query.get("bookingId") && !query.get("ref")) {message("予約台帳でお客様の予約を選び、「顧客」から開いてください。");return;}
+    busy=true;lockInputs(true);
     try {
-      const data = {};
-      for (const id of ["member", "name", "kana", "tel", "email", "comment"]) data[id] = g(id).value;
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch {}
-    alert("保存しました（デモ）。");
+      const q=new URLSearchParams(query.get("bookingId")?{bookingId:query.get("bookingId")}:{reference:query.get("ref")});
+      const r=await fetch("/api/demo/customer-records?"+q,{cache:"no-store"});if(!r.ok)throw new Error();data=await r.json();
+      g("cid").value=data.reference || data.bookingId;
+      const savedJob=data.fields.job || "";
+      if(savedJob&&!Array.from(g("job").options).some(o=>o.value===savedJob)){const o=document.createElement("option");o.textContent=savedJob;g("job").appendChild(o);}
+      for(const id of fields) g(id).value=data.fields[id] || "";
+      for(const el of document.querySelectorAll('input[name="g"]'))el.checked=el.value===data.fields.gender;
+      dirty=false;pending=null;message(data.updatedAt?"保存済みの顧客記録を読み込みました。":"予約情報を読み込みました。編集して保存できます。");
+    } catch {data=null;message("読み込めませんでした。接続とログイン状態を確認してください。");}
+    finally {busy=false;lockInputs(false);homeShop.disabled=true;}
+  }
+  g("save").addEventListener("click",async()=>{
+    if(busy||!data)return;
+    const values=Object.fromEntries(fields.map(id=>[id,g(id).value])); values.gender=document.querySelector('input[name="g"]:checked')?.value || "";
+    if(!values.name.trim()){message("氏名を入力してください。");g("name").focus();return;}
+    pending=pending || {bookingId:data.bookingId,revision:data.revision,requestKey:crypto.randomUUID(),fields:values};
+    busy=true;lockInputs(true);
+    try {
+      const r=await fetch("/api/demo/customer-records",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(pending)});
+      if(r.status===409)throw new Error("conflict");if(r.status===400)throw new Error("invalid");if(r.status===401||r.status===403)throw new Error("forbidden");if(!r.ok)throw new Error();const result=await r.json();
+      data.revision=result.revision;dirty=false;pending=null;message("保存しました。ほかの端末からも確認できます。");
+    } catch(e){const messages={conflict:"別の端末で更新されています。入力内容は残しています。内容を控えてから最新情報を読み込んでください。",invalid:"入力内容を確認してください。氏名・メールアドレス・生年月日や入力文字数に誤りがある場合は保存できません。",forbidden:"ログイン状態と、顧客記録を編集できる権限を確認してください。"};message(messages[e.message]||"保存結果を確認できません。同じ内容でもう一度保存すると、二重登録せず確認できます。");}
+    finally{busy=false;lockInputs(false);homeShop.disabled=true;}
   });
+  g("reload").addEventListener("click",()=>{if(dirty&&!confirm("入力中の内容を保存済み情報で置き換えますか？"))return;load();});
+  load();
 })();
 </script>
 </body>

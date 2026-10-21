@@ -98,7 +98,7 @@
   </header>
   <main>
     <div class="status wait" id="status">設定を確認しています…</div>
-    <p class="lead">予約完了・リマインド・店舗への新着通知などのメールを、お店のGmailから送れるようにする設定です。<br>
+    <p class="lead">予約確認・変更・取消・店舗への新着通知などのメールを、お店のGmailから送れるようにする設定です。予約後の自動リマインドは停止しています。<br>
       下の①〜④を順番に行ってください（10分ほど・無料）。Renderの設定を変える必要はありません。</p>
 
     <section class="step">
@@ -222,7 +222,7 @@
         ? '<small class="warnline">※ ただし、' + (j.via === "relay-env" ? "Render の環境変数 MAIL_RELAY_URL" : "手元の mail-config.json") + " の設定が優先されているため、実際のメールはここで登録した中継からは送られません。</small>" : "";
       if (j.test && j.test.ok) {
         out.innerHTML = '<div class="status ok"><b>✓ 登録しました。テストメールを ' + esc(j.test.to) + ' に送りました。</b>' +
-          "<small>メールが届いていれば設定は完了です（届かないときは迷惑メールフォルダも見てください）。これからの予約完了・リマインド・店舗への通知は、このGmailから送られます。</small>" + other + "</div>";
+          "<small>メールが届いていれば設定は完了です（届かないときは迷惑メールフォルダも見てください）。これからの予約確認・変更・取消・店舗への通知は、このGmailから送られます。予約後の自動リマインドは停止しています。</small>" + other + "</div>";
       } else {
         const m = String((j.test && j.test.error) || "");
         out.innerHTML = '<div class="status ng"><b>URLは登録しましたが、テストメールを送れませんでした。</b><small>理由：' + esc(m) + "</small>" +

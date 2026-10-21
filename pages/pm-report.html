@@ -129,11 +129,20 @@
   .req { color: #e9625b; }
   .note { color: #8d8d8d; font-size: 12px; margin: 6px 2px 0; }
   @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  @media (max-width: 480px) {
+    header.top { flex-wrap: wrap; gap: 8px; }
+    .sheet { margin: 8px; padding: 18px 10px 24px; }
+    h1 { font-size: 22px; }
+    .card .inner { padding: 10px; }
+    td { padding: 10px 8px; }
+    .actions { flex-direction: column; gap: 8px; }
+    textarea, select { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
   <header class="top">
-    <b>営業実績（操作デモ）</b>
+    <b>営業実績</b>
     <a href="/admin">← 予約台帳へ戻る</a>
     <a href="/admin/mails">メール管理</a>
   </header>
@@ -145,22 +154,22 @@
         <section class="card">
           <h2>本日の結果</h2>
           <div class="inner"><table>
-            <tr><td class="l">日次予算（目標）</td><td class="v">0 円</td></tr>
+            <tr><td class="l">日次予算（目標）</td><td class="v"><span data-v="goal"></span> 円</td></tr>
             <tr><td class="l">総売上（税抜）</td><td class="v"><span data-v="salesNet"></span> 円</td></tr>
-            <tr><td class="l"><label><input type="checkbox" checked> 預かり金（税込）</label></td><td class="v">0 円</td></tr>
-            <tr><td class="l"><label><input type="checkbox" checked> レジ金差異</label></td><td class="v">0 円</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> 預かり金（税込）</label></td><td class="v">未記録 円</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> レジ金差異</label></td><td class="v">未記録 円</td></tr>
             <tr><td class="l"><label><input type="checkbox" checked> 利益</label></td><td class="v"><span data-v="profit"></span> 円</td></tr>
           </table></div>
         </section>
         <section class="card">
           <h2>本日の予算達成度</h2>
           <div class="inner"><table>
-            <tr><td class="l">予算（目標）当月累計</td><td class="v">0 円</td></tr>
+            <tr><td class="l">予算（目標）当月累計</td><td class="v"><span data-v="cumGoal"></span> 円</td></tr>
             <tr><td class="l">当月累計売上（税抜）</td><td class="v"><span data-v="cumNet"></span> 円</td></tr>
             <tr><td class="l"><label><input type="checkbox" checked> 当月累計<br/>　レジ金売上（税込）</label></td><td class="v"><span data-v="cumGross"></span> 円</td></tr>
-            <tr><td class="l">達成度</td><td class="v">0 %</td></tr>
-            <tr><td class="l">進捗率</td><td class="v">0 %</td></tr>
-            <tr><td class="l">当月着地予測（税抜）</td><td class="v"><span data-v="forecast"></span> 円</td></tr>
+            <tr><td class="l">達成度</td><td class="v"><span data-v="achievement"></span> %</td></tr>
+            <tr><td class="l">進捗率</td><td class="v"><span data-v="progress"></span> %</td></tr>
+            <tr><td class="l">当月着地予測（税込）</td><td class="v"><span data-v="forecast"></span> 円</td></tr>
           </table></div>
         </section>
         <div class="plain">
@@ -183,16 +192,16 @@
             <tr><td class="l"><span class="indent">指名顧客数</span></td><td class="v"><span data-v="nominated"></span> 人</td></tr>
             <tr><td class="l">オンライン予約数合計</td><td class="v"><span data-v="online"></span> 件</td></tr>
             <tr><td class="l">客単価</td><td class="v"><span data-v="avgSpend"></span> 円</td></tr>
-            <tr><td class="l">返客数</td><td class="v">0 人</td></tr>
+            <tr><td class="l">返客数</td><td class="v"><span data-ledger="returns"></span> 人</td></tr>
           </table></div>
         </section>
         <section class="card">
           <h2>本日のスタッフ提案数</h2>
           <div class="inner"><table>
-            <tr><td class="l"><label><input type="checkbox" checked> 追加提案数</label></td><td class="v">0 件</td></tr>
-            <tr><td class="l"><label><input type="checkbox" checked> 追加承認数</label></td><td class="v">0 件</td></tr>
-            <tr><td class="l"><label><input type="checkbox" checked> 次回予約提案数</label></td><td class="v">0 件</td></tr>
-            <tr><td class="l"><label><input type="checkbox" checked> 次回予約承認数</label></td><td class="v">0 件</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> 追加提案数</label></td><td class="v">未記録 件</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> 追加承認数</label></td><td class="v">未記録 件</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> 次回予約提案数</label></td><td class="v">未記録 件</td></tr>
+            <tr><td class="l"><label><input type="checkbox" checked> 次回予約承認数</label></td><td class="v">未記録 件</td></tr>
           </table></div>
         </section>
         <section class="card">
@@ -222,9 +231,9 @@
         <section class="card">
           <h2>明日の予算</h2>
           <div class="inner"><table>
-            <tr><td class="l">日次予算（目標）</td><td class="v">0 円</td></tr>
-            <tr><td class="l">売上予測（税抜）</td><td class="v">0 円</td></tr>
-            <tr><td class="l">差異</td><td class="v">0 円</td></tr>
+            <tr><td class="l">日次予算（目標）</td><td class="v"><span data-t="goal"></span> 円</td></tr>
+            <tr><td class="l">売上予測（税抜）</td><td class="v">未設定 円</td></tr>
+            <tr><td class="l">差異</td><td class="v">未設定 円</td></tr>
           </table></div>
         </section>
         <section class="card">
@@ -251,11 +260,13 @@
             <select id="manager"><option value=""></option></select>
           </div>
         </section>
+        <p id="report-status" role="status"></p>
         <div class="actions">
+          <button type="button" id="reload-saved">最新の入力内容を読み込む</button>
           <button type="button" id="save">一時保存</button>
-          <button type="button" id="send">日報送信</button>
+          <button type="button" id="send">日報を確定</button>
         </div>
-        <p class="note">操作デモ：数値は予約台帳・シフトの実データから自動集計されます（数秒ごとに更新）。</p>
+        <p class="note">会計記録・予約台帳・シフトから集計します（30秒ごとに更新）。税区分や経費が未設定の項目は「未設定」と表示します。日報の確定ではメールを送信しません。</p>
       </div>
     </div>
   </div>
@@ -265,8 +276,13 @@
   "use strict";
   const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
   const today = new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
-  const fmt = (n) => Number(n || 0).toLocaleString("ja-JP");
-  let loadedSaved = false;
+  const fmt = (n) => n == null ? "未設定" : Number(n).toLocaleString("ja-JP");
+  let loadedSaved = false, formRevision = null, saving = false, pending = null, loadEpoch = 0;
+  const notify = text => { document.getElementById("report-status").textContent = text; };
+  const lockForm = locked => {
+    for (const el of document.querySelectorAll("textarea,select,.weather input,.actions button")) el.disabled=locked;
+  };
+  for (const [id,label] of [["todayPlan","本日の実施プラン"],["review","本日の振り返り"],["tomorrowPlan","明日の実施プラン"],["manager","担当者"]]) document.getElementById(id).setAttribute("aria-label",label);
 
   const titleDate = () => {
     const [y, m, d] = today.split("-").map(Number);
@@ -276,10 +292,20 @@
   document.getElementById("title-date").textContent = titleDate();
 
   async function load() {
+    const initial = !loadedSaved, epoch = ++loadEpoch;
+    if (initial) lockForm(true);
     try {
       const r = await fetch("/api/demo/report?date=" + today, { cache: "no-store" });
+      if (!r.ok) throw new Error();
       const data = await r.json();
-      for (const el of document.querySelectorAll("[data-v]")) el.textContent = fmt(data.today[el.dataset.v]);
+      if (epoch !== loadEpoch) return;
+      for (const el of document.querySelectorAll("[data-ledger]")) el.textContent = fmt(data.today.ledgerSummary?.[el.dataset.ledger]);
+      for (const el of document.querySelectorAll("[data-v]")) {
+        const incomplete = el.dataset.v === "cumGoal" && data.today.cumGoal != null && data.today.cumGoalComplete === false;
+        el.textContent = incomplete ? "一部未設定" : fmt(data.today[el.dataset.v]);
+        if (incomplete) el.title = "設定済みの日の合計：" + fmt(data.today.cumGoal) + "円";
+        else el.removeAttribute("title");
+      }
       for (const el of document.querySelectorAll("[data-t]")) el.textContent = fmt(data.tomorrow[el.dataset.t]);
       document.getElementById("staffbox").textContent =
         data.tomorrow.shifts.map((s) => s.name + "（" + s.label + "）").join("\n") || "（明日のシフトは未登録です）";
@@ -295,17 +321,26 @@
       // 保存済みの入力内容は初回だけ反映（入力中に上書きしない）
       if (!loadedSaved) {
         loadedSaved = true;
+        formRevision = data.revision;
         const s = data.saved || {};
         for (const k of ["todayPlan", "review", "tomorrowPlan"]) {
-          if (s[k]) document.getElementById(k).value = s[k];
+          document.getElementById(k).value = s[k] || "";
         }
-        if (s.manager) sel.value = s.manager;
-        const w = s.weather || "晴れ";
-        const radio = document.querySelector('.weather input[value="' + w + '"]');
-        if (radio) radio.checked = true;
-        document.getElementById("title-weather").textContent = w;
+        if (s.manager && !Array.from(sel.options).some(o => o.value === s.manager)) {
+          const option = document.createElement("option"); option.textContent = s.manager; sel.appendChild(option);
+        }
+        sel.value = s.manager || "";
+        const w = s.weather || "";
+        for (const radio of document.querySelectorAll(".weather input")) radio.checked = radio.value === w;
+        document.getElementById("title-weather").textContent = w || "未設定";
       }
-    } catch {}
+    } catch {
+      if (epoch !== loadEpoch) return;
+      notify("日報を読み込めませんでした。接続と、管理者またはマネージャーの権限を確認してください。");
+      if (initial) for (const el of document.querySelectorAll("[data-v],[data-t],[data-ledger]")) el.textContent="未取得";
+    } finally {
+      if (initial && epoch === loadEpoch) { lockForm(!loadedSaved); document.getElementById("reload-saved").disabled=false; }
+    }
   }
 
   document.getElementById("weather").addEventListener("change", (e) => {
@@ -313,8 +348,10 @@
   });
 
   async function post(send) {
+    if (saving) return;
+    if (!loadedSaved || !Number.isSafeInteger(formRevision)) { notify("読み込みが完了してから保存してください。"); return; }
     const body = {
-      date: today,
+      date: today, revision: formRevision,
       weather: document.querySelector('.weather input:checked')?.value || "",
       todayPlan: document.getElementById("todayPlan").value,
       review: document.getElementById("review").value,
@@ -322,26 +359,50 @@
       manager: document.getElementById("manager").value,
     };
     if (send) {
-      if (!body.manager) { alert("担当者を選択してください。"); return; }
+      if (!body.manager) { notify("担当者を選択してください。"); return; }
       body.send = true;
     }
+    const signature = JSON.stringify(body);
+    if (!pending || pending.signature !== signature) pending = { signature, body: { ...body, requestKey: crypto.randomUUID() } };
+    saving = true;
+    ++loadEpoch;
+    lockForm(true);
     try {
       const r = await fetch("/api/demo/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(pending.body),
       });
+      const result = await r.json();
+      if (r.status === 409) throw new Error(result.error === "requestChanged" ? "requestChanged" : "conflict");
+      if (r.status === 400) throw new Error("invalid");
+      if (r.status === 401 || r.status === 403) throw new Error("forbidden");
       if (!r.ok) throw new Error();
-      alert(send ? "日報を送信しました（デモ）。" : "一時保存しました。");
-    } catch {
-      alert("保存できませんでした。接続を確認してください。");
+      formRevision = result.revision;
+      pending = null;
+      await load();
+      notify(send ? "日報を確定しました。メール送信は行いません。" : "一時保存しました。");
+    } catch (error) {
+      const messages = {
+        conflict: "別の操作で情報が更新されました。入力内容は残しています。必要な内容を控えてから「最新の入力内容を読み込む」で確認してください。",
+        requestChanged: "先の保存と内容が異なります。入力内容を控えてから「最新の入力内容を読み込む」で保存結果を確認してください。",
+        invalid: "入力内容を確認してください。各項目は 2,000 文字以内で入力してください。",
+        forbidden: "ログイン状態と、管理者またはマネージャーの権限を確認してください。"
+      };
+      notify(messages[error.message] || "保存結果を確認できません。同じ内容でもう一度保存すると、二重保存せず確認できます。");
+    } finally {
+      saving = false; lockForm(false);
     }
   }
   document.getElementById("save").addEventListener("click", () => post(false));
   document.getElementById("send").addEventListener("click", () => post(true));
 
+  document.getElementById("reload-saved").addEventListener("click", async () => {
+    if (saving || !confirm("入力中の内容を保存済みの内容に置き換えますか？")) return;
+    loadedSaved = false; pending = null; await load();
+  });
   load();
-  setInterval(() => { if (!document.hidden) load(); }, 30000);
+  setInterval(() => { if (!document.hidden && !saving) load(); }, 30000);
 })();
 </script>
 </body>

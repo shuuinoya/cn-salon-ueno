@@ -257,7 +257,7 @@ function adminWarmList() {
   const f = path.join(ROOT, r.file);
   let m = 0;
   try { m = fs.statSync(f).mtimeMs; } catch { return []; }
-  const key = m + ":" + staticVer() + ":" + pmVer();
+  const key = m + ":" + staticVer() + ":" + pmVer() + ":" + fileVer("ledger-operations.js") + ":" + fileVer("ledger-operations.css") + ":" + fileVer("customer-records.js") + ":" + fileVer("customer-records.css") + ":" + fileVer("booth-settings.js") + ":" + fileVer("booth-settings.css") + ":" + fileVer("booking-details-ui.js") + ":" + fileVer("booking-details-ui.css");
   if (adminWarm.m === key) return adminWarm.list;
   let list = [];
   try {
@@ -266,6 +266,7 @@ function adminWarmList() {
     for (const d of preloadsFor(html)) refs.add(d);
     list = [...refs].map((d) => pinStatic("/" + d));
     list.push("/pm-layout.js?v=" + pmVer(), "/pm-layout.css?v=" + pmVer(), "/pm-motion.css?v=" + fileVer("pm-motion.css"));
+    list.push("/ledger-operations.js?v=" + fileVer("ledger-operations.js"), "/ledger-operations.css?v=" + fileVer("ledger-operations.css"), "/customer-records.js?v=" + fileVer("customer-records.js"), "/customer-records.css?v=" + fileVer("customer-records.css"), "/booth-settings.js?v=" + fileVer("booth-settings.js"), "/booth-settings.css?v=" + fileVer("booth-settings.css"), "/booking-details-ui.js?v=" + fileVer("booking-details-ui.js"), "/booking-details-ui.css?v=" + fileVer("booking-details-ui.css"));
   } catch { list = []; }
   adminWarm = { m: key, list };
   return list;
@@ -430,6 +431,10 @@ function sendFile(res, file, status, type, head, url, req) {
         }
         // 管理画面の上書きスクリプト・CSSにも版番号を付け、古いキャッシュが残らないようにする
         const PM_VER = pmVer();
+        if (text.includes('src="/pm-layout.js"')) {
+          text = text.replace("</head>", '<link rel="stylesheet" href="/ledger-operations.css?v=' + fileVer("ledger-operations.css") + '"/><link rel="stylesheet" href="/customer-records.css?v=' + fileVer("customer-records.css") + '"/><link rel="stylesheet" href="/booth-settings.css?v=' + fileVer("booth-settings.css") + '"/><link rel="stylesheet" href="/booking-details-ui.css?v=' + fileVer("booking-details-ui.css") + '"/></head>');
+          text = text.replace("</body>", '<script src="/ledger-operations.js?v=' + fileVer("ledger-operations.js") + '" defer></script><script src="/customer-records.js?v=' + fileVer("customer-records.js") + '" defer></script><script src="/booth-settings.js?v=' + fileVer("booth-settings.js") + '" defer></script><script src="/booking-details-ui.js?v=' + fileVer("booking-details-ui.js") + '" defer></script></body>');
+        }
         text = text
           .split('href="/pm-layout.css"').join('href="/pm-layout.css?v=' + PM_VER + '"')
           .split('src="/pm-layout.js"').join('src="/pm-layout.js?v=' + PM_VER + '"');
@@ -804,6 +809,16 @@ const handler = (req, res) => {
     res.writeHead(302, { Location: "/admin/login" });
     return res.end();
   }
+  // 旧形式の顧客リンクに氏名・連絡先を残さず、予約の識別子だけで開く。
+  if (url.pathname === "/admin/customer" && (req.method === "GET" || head)) {
+    const clean = new URLSearchParams();
+    for (const key of ["bookingId", "ref"]) if (url.searchParams.get(key)) clean.set(key, url.searchParams.get(key));
+    const canonical = clean.toString();
+    if (url.search.slice(1) !== canonical) {
+      res.writeHead(302, { Location: url.pathname + (canonical ? "?" + canonical : ""), "Cache-Control": "no-store" });
+      return res.end();
+    }
+  }
   // ログアウト経由でログイン画面に来たらセッションを破棄する
   if (url.pathname === "/admin/login" && url.searchParams.get("out") === "1") {
     clearSession(req, res);
@@ -908,13 +923,13 @@ server.on("listening", () => {
     if (PUBLIC_HOSTS.length) {
       console.log(`  予約サイト : https://${PUBLIC_HOSTS[0]}/`);
       console.log(`  管理画面   : https://${PUBLIC_HOSTS[0]}/cnsalon-board （要ログイン）`);
-      // 無料プランは15分アクセスが無いと停止し、その間はリマインドメール（来店24時間前）を送れない。
-      // 10分ごとに自分の公開URLへ軽いアクセスをして、停止させずに時刻どおり送れるようにする。
+      // 無料プランは15分アクセスが無いと停止する。
+      // 10分ごとに自分の公開URLへ軽いアクセスをして、予約受付と通知処理の稼働を維持する。
       // 止めたい場合は環境変数 KEEP_AWAKE=0
       if (process.env.KEEP_AWAKE !== "0") {
         const ping = () => fetch(`https://${PUBLIC_HOSTS[0]}/api/tickets/plans`).catch(() => {});
         setInterval(ping, 10 * 60000);
-        console.log("  稼働維持   : 10分ごとに自動アクセス（リマインドメールを時刻どおり送るため／KEEP_AWAKE=0 で停止）");
+        console.log("  稼働維持   : 10分ごとに自動アクセス（予約受付・通知処理の稼働維持／KEEP_AWAKE=0 で停止）");
       }
     }
     return; // ポート80/443・mDNS・トンネルはローカル専用機能のため起動しない

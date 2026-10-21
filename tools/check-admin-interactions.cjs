@@ -191,7 +191,7 @@ function touch() {
 function detail() {
   const mobileHead = node(); mobileHead.querySelector = () => node();
   const side = node(); side.querySelector = (selector) => selector === ".pm-mobile-panel-head" ? mobileHead : null;
-  let current = { reference: "TEST-102", name: "テスト予約", course_name: "女性スタッフの長いメニュー".repeat(4) };
+  let current = { id: "test-booking", status: "confirmed", service_date: "2026-10-20", start_at: Date.parse("2026-10-20T14:00:00+09:00"), end_at: Date.parse("2026-10-20T15:00:00+09:00"), reference: "TEST-102", name: "テスト予約", course_name: "女性スタッフの長いメニュー".repeat(4) };
   const val = (key) => ({ "予約ID": current.reference, "お名前": current.name, "メニュー": current.course_name, "コメント": "なし" }[key] || "");
   const dl = { querySelectorAll() { return ["予約ID", "お名前", "メニュー", "コメント"].map((key) => ({ textContent: key, nextElementSibling: { textContent: val(key) } })); } };
   const form = node();
@@ -203,9 +203,9 @@ function detail() {
   const context = vm.createContext({
     window: { __pmSchedData: { bookings: [current] } },
     document: { querySelector(s) { return s === ".ledger-side" ? side : form; }, getElementById() { return pd; }, createElement: node },
-    fillMoveTargets() {}, submitMove() {}, openCheckout() {}, URLSearchParams, location: {},
+    fillMoveTargets() {}, submitMove() {}, openCheckout() {}, URLSearchParams, location: {}, pmMin: (date, value) => (value - Date.parse(date + "T00:00:00+09:00")) / 60000, pmHM: value => String(Math.floor(value / 60)).padStart(2, "0") + ":" + String(value % 60).padStart(2, "0"),
   });
-  vm.runInContext(extract("  function decoratePanel()", "  // ---- 予約の移動"), context);
+  vm.runInContext(extract("  function bookingPanelSnapshot(", "  // ---- 予約の移動"), context);
   context.decoratePanel();
   assert.ok(pd.innerHTML.includes("ID:TEST-102"), "実際の予約IDを保持");
   assert.ok(pd.innerHTML.includes("TEL:未登録"));

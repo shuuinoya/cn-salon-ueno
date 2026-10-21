@@ -88,7 +88,7 @@ function safeFailure(response, expected, label) {
   report.staff = { id: person.id, name: person.name };
   const body = (slot, tag) => ({ requestKey: "http-risk-" + runId + "-" + tag, course, date: report.date,
     start: slot.start, people: 1, staff: "none", staffId: person.id, expectedNominationFee: person.nominationFee,
-    name: "テスト HTTP同時操作 " + tag, email: "http-risk-" + runId + "-" + tag + "@example.test",
+    name: "テスト HTTP同時操作 " + tag, email: "http-risk-" + runId + "-" + Buffer.from(tag).toString("hex") + "@example.test",
     phone: "00000000000", comment: "テスト HTTP同時操作", consent: true, language: "ja" });
   const saveCreated = (result, slot, tag) => {
     report.created.push({ id: result.id, date: report.date, staffId: person.id, staffName: person.name,
@@ -155,6 +155,13 @@ function safeFailure(response, expected, label) {
   const intervals = final.body.bookings.filter(x => x.status === "confirmed" && allAssigned.has(x.id)).sort((a, b) => a.start_at - b.start_at);
   for (let i = 1; i < intervals.length; i++) assert(intervals[i - 1].end_at <= intervals[i].start_at, "保存後に担当時間の重複があります");
   record("保存後の予約ID・担当割当・予約時間に重複なし");
+  const mailResult = await request("/api/demo/mails", undefined, true);
+  assert.equal(mailResult.status, 200);
+  const bookingMails = mailResult.body.mails.filter(m => testIds.has(m.bookingId));
+  assert(!bookingMails.some(m => m.type === "remind"), "予約リマインドが作成されています");
+  for (const id of testIds) assert.equal(bookingMails.filter(m => m.bookingId === id && m.kind === "customer" && m.type === "confirm").length, 1);
+  assert(!bookingMails.some(m => m.real), "検証から実メールを送信しています");
+  record("20回再送後もお客様の予約確認は各1通・自動リマインドなし・外部送信なし");
   report.passed = true;
   report.summary = { concurrentRequests: 20, createdBookings: 3, changedInputRejected: 3, moveSucceeded: 1, moveRejected: 1 };
   save();

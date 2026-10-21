@@ -1,7 +1,8 @@
 'use strict';
-// スタッフ情報（コース・画像・フリーメッセージ。性別は条件にしない）がそろっていない人には、シフト・休憩・業務・予約を入れられず、
+// スタッフ情報（コース・画像・フリーメッセージ。性別は条件にしない）がそろっていない人には、新規シフト・予約を入れられず、
 // 新規受付・予約サイト・ホットペッパーの割り当てに出ないことを確かめる。
 // 管理用の既存シフトは情報未入力でも隠さず、スタッフ情報と同じ登録を表示する（2026-10-21）。
+// 登録済みの勤務時間内なら、掲載用の情報が未入力でも休憩・業務を管理できる。
 // 記録はすべて架空。メール設定のない検証用チェックアウトで実行する（メールは送らない）
 const fs = require('node:fs');
 const path = require('node:path');
@@ -63,13 +64,18 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.ok(!nominatableStaff(COURSE, 'none').some((s) => s.id === bare.id));
   assert.ok(!publicStaffList().some((s) => s.id === bare.id));
 
-  // シフト・まとめてシフト・休憩/業務・予約の登録は断る（何も変えない）
+  // シフト・まとめてシフト・予約の登録は断る（何も変えない）
   const before = JSON.stringify([...state.shifts]);
   assert.throws(() => postSchedule({ action: 'shift', date: next, revision: rev(next), staffId: bare.id, start: 600, end: 1200 }), code('staffInfoMissing'));
   assert.throws(() => postSchedule({ action: 'bulkShift', date, start: 600, end: 1200, cells: [{ date: next, staffId: ready.id, revision: rev(next) }, { date: next, staffId: bare.id, revision: rev(next) }] }), code('staffInfoMissing'));
   assert.throws(() => postSchedule({ action: 'bulkShift', date, start: 600, end: 1200, cells: [{ date: next, staffId: 'no-such-staff', revision: rev(next) }] }), code('invalid'));
   assert.equal(JSON.stringify([...state.shifts]), before, '断ったときはどのシフトも変えない');
-  assert.throws(() => postSchedule({ action: 'block', date, revision: rev(), staffId: bare.id, start: 900, end: 960, kind: 'break' }), code('staffInfoMissing'));
+  // 登録済みの勤務内の休憩は追加・削除できる。元からある業務枠は保持する。
+  assert.equal(postSchedule({ action: 'block', date, revision: rev(), staffId: bare.id, start: 900, end: 960, kind: 'break' }).ok, true);
+  const addedBreak = state.events.get(date).blocks.find(b => b.staff_id === bare.id && b.kind === 'break');
+  assert.ok(addedBreak);
+  assert.equal(postSchedule({ action: 'block', date, revision: rev(), id: addedBreak.id, remove: true }).ok, true);
+  assert.ok(state.events.get(date).blocks.some(b => b.id === 'blk-bare'));
   assert.throws(() => postSchedule({ action: 'createBooking', date, revision: rev(), staffId: bare.id, start: 720, course: COURSE, people: 1, consent: true, name: 'テスト 確認 店頭' }), code('staffInfoMissing'));
   // シフトの削除はできる
   assert.equal(postSchedule({ action: 'bulkShift', date, remove: true, cells: [{ date, staffId: bare.id, revision: rev() }] }).ok, true);

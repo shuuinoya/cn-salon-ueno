@@ -14,6 +14,23 @@ const tls = require("tls");
 // ・権限は admin > manager > staff の3段階。すべての管理APIはサーバー側で
 //   ログインと権限を検証する（URLを知っているだけでは何も見えない・できない）
 const crypto = require("crypto");
+const ledgerOperations = require("./ledger-operations");
+const boothPolicy = require("./booth-policy");
+const bookingDetails = require("./booking-details");
+const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（予約確認・変更・取消の通知のみ送信します）";
+const BOOKING_TICKET_NOTICE_STOP_REASON = "この予約の回数券利用・残り回数は予約確認メールに記載済みのため、別の残数通知は送信しません";
+function isBookingReminder(m) { return m?.type === "remind" || (m?.tpl?.name === "booking" && /Remind$/.test(m.tpl.variant || "")); }
+function bookingUseNoticeIncludedInConfirmation(m) {
+  if (m?.type !== "ticket" || m.tpl?.name !== "ticketLeft" || m.tpl.kind !== "use" || !m.tpl.ref || !m.tpl.ticketId) return false;
+  const matches = [];
+  for (const ev of state.events.values()) for (const b of ev.bookings || []) if (b.reference === m.tpl.ref && b.ticket_id === m.tpl.ticketId && b.status === "confirmed") matches.push(b);
+  if (matches.length !== 1) return false;
+  const bk = matches[0], email = String(bk.email || "").trim().toLowerCase();
+  if (!email || String(m.to || "").trim().toLowerCase() !== email) return false;
+  return state.mails.some(x => x !== m && x.bookingId === bk.id && x.kind === "customer" && x.type === "confirm" &&
+    ["pending", "sending", "sent"].includes(x.status) && String(x.to || "").trim().toLowerCase() === email &&
+    Array.isArray(x.ticketIds) && x.ticketIds.includes(m.tpl.ticketId) && /残り回数/.test(x.body || ""));
+}
 // 本番ホスティング（常時HTTPS）ではCookieにSecureを付け、暗号化された通信でしか送らない
 const IS_CLOUD = require("./persist").isCloud();
 const COOKIE_FLAGS = "Path=/; HttpOnly; SameSite=Lax" + (IS_CLOUD ? "; Secure" : "");
@@ -618,6 +635,12 @@ const state = {
   courseSerial: 0,
   // メニュー写真の変更分だけを保存（courseId -> dataURL、""＝削除）。初期写真は画像ファイルから毎回読み込む
   coursePhotoEdits: new Map(),
+  ledger: ledgerOperations.createState(), // 支払内訳・物販・返客・シフトひな型/パターン（通常の state 保存で永続化）
+  booths: boothPolicy.sourceDefaults().booths,
+  boothRevision: 0,
+  boothRequestKeys: new Map(),
+  bookingDetailsKeys: new Map(),
+  customerRecords: null,
 };
 
 // ---- 永続化（persist.js＝このシステムのデータベース層） ----
@@ -664,12 +687,11 @@ const persistReady = (() => {
           m.error = "送信処理中にサーバーが再起動したため、送信結果を確認できませんでした（二重送信防止のため自動再送はしていません）";
         }
       }
-      // 以前の版で本文を固定して積んだ送信待ちリマインドは、すべて送信直前に
-      // 最新の予約データ（日時・担当・料金・取消状況・回数券）で作り直すよう指定を付け直す
+      // 予約の自動リマインドは停止。以前の送信待ちも予定時刻を問わず中止し、履歴は残す。
       for (const m of state.mails || []) {
-        if (m.status !== "pending" || m.type !== "remind" || !m.bookingId) continue;
-        if (m.tpl && m.tpl.name === "booking") continue;
-        m.tpl = { name: "booking", variant: m.kind === "store" ? "storeRemind" : "customerRemind", bookingId: m.bookingId };
+        if (m.status !== "pending") continue;
+        if (isBookingReminder(m)) { m.status = "skipped"; m.skipReason = BOOKING_REMINDER_STOP_REASON; }
+        else if (bookingUseNoticeIncludedInConfirmation(m)) { m.status = "skipped"; m.skipReason = BOOKING_TICKET_NOTICE_STOP_REASON; }
       }
       for (const m of state.mails || []) {
         if (m.kind === "store" && m.status === "pending" && m.to === "info@cn-salon-ueno.example.jp") m.to = storeMail();
@@ -728,6 +750,7 @@ const persistReady = (() => {
       console.log("データ保存が有効です: " + persist.dataFile() +
         (persist.remoteEnabled() ? "（GitHub同期あり）" : ""));
     }
+    ledgerOperations.migrate(state);
     // メールのHTML（本文から作り直せる）は保存しない：保存データ・GitHubへの通信量を約4割減らす
     persist.startSaver(() => ({ savedAt: Date.now(), state: { ...state, mails: state.mails.map(({ html, ...m }) => m) }, sessions: [...adminSessions.entries()] }));
   })();
@@ -796,7 +819,7 @@ function withinShift(date, staffId, start, end) {
   return !!sh && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at);
 }
 
-// 新しいシフト・休憩・業務・予約と、予約サイトへの掲載のための入力条件。
+// 新しいシフト・予約と、予約サイトへの掲載のための入力条件（既存勤務内の業務・休憩には適用しない）。
 // コース・画像・フリーメッセージを確認する。管理画面の既存シフト・予約は隠さない。
 function staffInfoMissing(st) {
   if (!st) return ["スタッフ情報"];
@@ -857,7 +880,9 @@ function getSchedule(date) {
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
     allStaff: sorted.map(staffRow),
     shifts,
-    bookings: ev.bookings,
+    bookings: ev.bookings.map(b => ({ ...b, boothId: boothPolicy.bookingBoothIds(b)[0] || null,
+      booth_allowed_ids: boothPolicy.resolveCourseBoothIds(boothCourseForBooking(b)), ...bookingTiming(b, date) })),
+    booths: boothPolicy.resolveBooths(state),
     blocks: ev.blocks.filter((b) => shown.has(b.staff_id)),
     assignments: ev.assignments,
     days,
@@ -869,6 +894,8 @@ function getSchedule(date) {
         .filter((w) => w.reason)),
     mailReady: true, // デモ：メールは生成のみ（/admin/mails で内容を確認できる）
     notifications: mailSummary(),
+    ledgerSummary: ledgerOperations.summary(state, date),
+    dailyGoals: days.map(d => ledgerOperations.goalOf(state, d.date)),
   };
 }
 
@@ -876,6 +903,48 @@ function err(code, message) {
   const e = new Error(message);
   e.status = code;
   return e;
+}
+
+function bookingTiming(bk, date = bk.service_date) {
+  if (Array.isArray(bk.services) && bk.services.length) {
+    let start = msToMin(date, bk.start_at);
+    const serviceTimings = bk.services.map(s => {
+      const end = start + s.minutesBefore + s.minutesBody + s.minutesAfter;
+      const item = { courseId: s.courseId, start, end, minutesBefore: s.minutesBefore, minutesBody: s.minutesBody, minutesAfter: s.minutesAfter };
+      start = end; return item;
+    });
+    const minutesBefore = bk.services[0].minutesBefore, minutesAfter = bk.services[bk.services.length - 1].minutesAfter;
+    return { serviceTimings, minutesBefore, minutesAfter, minutesBody: (bk.end_at - bk.start_at) / 60000 - minutesBefore - minutesAfter };
+  }
+  const timing = boothPolicy.sourceCourseTiming(getCourse(bk.course));
+  const total = Math.round((bk.end_at - bk.start_at) / 60000);
+  return timing && timing.minutesBefore + timing.minutesBody + timing.minutesAfter === total
+    ? timing : { minutesBefore: 0, minutesBody: total, minutesAfter: 0 };
+}
+function boothCourseForBooking(bk) {
+  return Array.isArray(bk.services) && bk.services.length
+    ? bookingDetails.combinedCourse(bk.services, { getCourse, courseBoothIds: boothPolicy.resolveCourseBoothIds }) : getCourse(bk.course);
+}
+function planBooths(date, start, end, course, people, options = {}) {
+  const params = { state, date, start, end, course: typeof course === "string" ? getCourse(course) : course,
+    people, online: !!options.online, excludeBookingId: options.ignoreId };
+  if (options.boothIds !== undefined) return boothPolicy.boothAvailability({ ...params, boothIds: options.boothIds });
+  const existingIds = options.existing ? boothPolicy.bookingBoothIds(options.existing) : [];
+  if (existingIds.length === people) {
+    const preferred = boothPolicy.boothAvailability({ ...params, boothIds: existingIds });
+    if (preferred.ok) return preferred;
+  }
+  return boothPolicy.boothAvailability(params);
+}
+function setBookingBooths(bk, plan, actor, at = Date.now()) {
+  const ids = plan.booths.map(x => x.id), label = plan.booths.map(x => x.name).join("、");
+  if (bk.booth || boothPolicy.bookingBoothIds(bk).length) {
+    const from = { ids: boothPolicy.bookingBoothIds(bk), label: bk.booth || "" };
+    if (JSON.stringify(from.ids) !== JSON.stringify(ids) || from.label !== label) {
+      bk.booth_history = [...(bk.booth_history || []), { at, by: actor?.user || "", from, to: { ids, label } }];
+    }
+  }
+  bk.booth_ids = ids; bk.booth_id = ids[0]; bk.booth = label;
 }
 
 // actor：操作した管理画面のアカウント（{user, role}。権限の確認と移動の記録に使う）
@@ -895,6 +964,18 @@ function postSchedule(body, actor) {
   const bump = (d = date) => { ensureDay(d).version++; sseTouch(); };
 
   switch (action) {
+    case "moveBooth": {
+      checkRevision();
+      const bk = ensureEvents(date).bookings.find(x => x.id === body.id && x.status === "confirmed");
+      if (!bk) throw err(404, "notFound");
+      if (!Array.isArray(body.boothIds) || !Array.isArray(body.expectBoothIds)) throw err(400, "invalid");
+      if (JSON.stringify(body.expectBoothIds) !== JSON.stringify(boothPolicy.bookingBoothIds(bk))) throw err(409, "bookingChanged");
+      if (bk.nominated_staff_id && body.confirmNominationMove !== true) throw err(409, "nominatedConfirmationRequired");
+      const plan = planBooths(date, msToMin(date, bk.start_at), msToMin(date, bk.end_at), boothCourseForBooking(bk), bk.people || 1,
+        { ignoreId: bk.id, boothIds: body.boothIds });
+      if (!plan.ok) throw err(409, plan.code);
+      setBookingBooths(bk, plan, actor); bump(); return { ok: true };
+    }
     case "shift": {
       checkRevision();
       const { staffId, start, end, remove } = body;
@@ -905,7 +986,7 @@ function postSchedule(body, actor) {
       const idx = list.findIndex((s) => s.staff_id === staffId);
       if (remove) {
         const ev = ensureEvents(date);
-        if (ev.blocks.some((b) => b.staff_id === staffId) || ev.bookings.some((b) => b.status === "confirmed" &&
+        if (state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId)) || ev.blocks.some((b) => b.staff_id === staffId) || ev.bookings.some((b) => b.status === "confirmed" &&
           ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId))) throw err(409, "scheduleConflict");
         if (idx >= 0) list.splice(idx, 1);
         state.attendance.delete(date + "|" + staffId); // シフトを消したら、その日の勤怠の記録も消す
@@ -920,6 +1001,7 @@ function postSchedule(body, actor) {
         ...ev.blocks.filter((b) => b.staff_id === staffId),
       ];
       if (mine.some((it) => msToMin(date, it.start_at) < start || msToMin(date, it.end_at) > end)) throw err(409, "scheduleConflict");
+      if (state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId) && (b.start < start || b.end > end))) throw err(409, "scheduleConflict");
       const rec = { staff_id: staffId, date, start_at: minToMs(date, start), end_at: minToMs(date, end), note: String(body.note ?? "") };
       if (idx >= 0) list[idx] = rec; else list.push(rec);
       bump();
@@ -948,14 +1030,19 @@ function postSchedule(body, actor) {
         if (remove ? myBookings.length : mine.some((it) => msToMin(c.date, it.start_at) < start || msToMin(c.date, it.end_at) > end)) {
           throw err(409, "scheduleConflict");
         }
+        if (!remove && state.ledger.onlineBlocks.some(b => b.date === c.date && b.staffIds.includes(c.staffId) && (b.start < start || b.end > end))) throw err(409, "scheduleConflict");
       }
       for (const c of cells) {
         const list = ensureShifts(c.date);
         const idx = list.findIndex((s) => s.staff_id === c.staffId);
         const { ev } = mineOf(c);
         if (remove) {
-          // 休憩・業務はシフトと一緒に削除する
+          // 休憩・業務・オンライン停止は対象スタッフの勤務と一緒に除く。他スタッフ分は保持する。
           ev.blocks = ev.blocks.filter((b) => b.staff_id !== c.staffId);
+          if (state.ledger.onlineBlocks.some(b => b.date === c.date && b.staffIds.includes(c.staffId))) {
+            state.ledger.onlineBlocks = state.ledger.onlineBlocks.map(b => b.date === c.date ? { ...b, staffIds: b.staffIds.filter(id => id !== c.staffId) } : b).filter(b => b.staffIds.length);
+            state.ledger.version++;
+          }
           if (idx >= 0) list.splice(idx, 1);
           bump(c.date);
           continue;
@@ -977,13 +1064,15 @@ function postSchedule(body, actor) {
         bump();
         return { ok: true };
       }
+      const idx = id ? ev.blocks.findIndex((b) => b.id === id) : -1;
+      // 編集はこの日の既存の休憩・業務だけ。削除済みの枠を再作成したり、予約IDで重複判定をすり抜けたりしない。
+      if (id && idx < 0) throw err(404, "notFound");
       const blockStaff = state.staff.find((s) => s.id === staffId);
       if (!blockStaff || !validSpan(start, end) || ![`break`, `work`].includes(kind)) throw err(400, "invalid");
-      if (!staffReady(blockStaff)) throw err(409, "staffInfoMissing");
+      // 業務・休憩は登録済みの勤務時間を管理するもの。予約サイト掲載用の写真・紹介文・スキルは条件にしない。
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end, id)) throw err(409, "scheduleConflict");
-      const rec = { id: id || "blk-" + Date.now(), staff_id: staffId, date, start_at: minToMs(date, start), end_at: minToMs(date, end), kind, note: String(body.note ?? "") };
-      const idx = ev.blocks.findIndex((b) => b.id === rec.id);
+      const rec = { id: id || "blk-" + crypto.randomBytes(12).toString("hex"), staff_id: staffId, date, start_at: minToMs(date, start), end_at: minToMs(date, end), kind, note: String(body.note ?? "") };
       if (idx >= 0) ev.blocks[idx] = rec; else ev.blocks.push(rec);
       bump();
       return { ok: true };
@@ -1020,6 +1109,8 @@ function postSchedule(body, actor) {
       if (staffLockedOn(staffId, toDate) && !already) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(validSpan(start, end) && end - start <= 600)) throw err(400, "invalid");
+      // 詳細内訳のある予約は、時間の内訳を編集画面で変更する。ドラッグでは総時間を保持する。
+      if (bk.services?.length && end - start !== (bk.end_at - bk.start_at) / 60000) throw err(409, "bookingChanged");
       // 現在の対応メニューのチェックは、権限や指名確認にかかわらず必須。
       // 同じ担当の時間変更でも再確認し、古い画面からの例外承認では回避できない。
       const mvWhy = bookingMismatch(mvTarget, bk);
@@ -1045,20 +1136,22 @@ function postSchedule(body, actor) {
       // 複数名の予約で、指名されていない枠を動かしただけなのに指名担当が自動で替わることを防ぐ。
       if (bk.nominated_staff_id && dragged !== bk.nominated_staff_id &&
         ![staffId, ...others].includes(bk.nominated_staff_id)) throw err(409, "nominatedStaffUnavailable");
+      const boothPlan = planBooths(toDate, start, end, boothCourseForBooking(bk), bk.people || 1, { ignoreId: id, existing: bk });
+      if (!boothPlan.ok) throw err(409, boothPlan.code);
+      const movedTotal = bk.services?.length ? bookingDetails.totalAtStart(bk, start, err) : bk.source === "hotpepper" ? bk.total : bk.base_price * bk.people + (start >= 1320 ? 2000 * bk.people : 0) + (bk.nomination_fee || 0);
+      if ((bk.paid_at || bk.paid_amount > 0) && movedTotal !== bk.total) throw err(409, "alreadyPaid");
       const from = { date, staff_id: dragged, start_at: bk.start_at, end_at: bk.end_at };
       const oldNominee = bk.nominated_staff_id;
       bk.start_at = minToMs(toDate, start);
       bk.end_at = minToMs(toDate, end);
+      setBookingBooths(bk, boothPlan, actor);
       if (oldNominee && dragged === oldNominee && staffId !== oldNominee) {
         bk.nominated_staff_id = staffId;
         bk.nominated_staff_name = profileOf(mvTarget).nickname || mvTarget.name;
       }
       // 指名料は予約時の金額を維持し、深夜料金だけ従来どおり再計算する。
       // ホットペッパーの予約はホットペッパー側の確定金額なので変えない。
-      if (bk.source !== "hotpepper") {
-        const late = start >= 1320 ? 2000 * bk.people : 0;
-        bk.total = bk.base_price * bk.people + late + (bk.nomination_fee || 0);
-      }
+      bk.total = movedTotal;
       ev.assignments = ev.assignments.filter((a) => a.booking_id !== id);
       let evTo = ev;
       if (toDate !== date) {
@@ -1076,7 +1169,7 @@ function postSchedule(body, actor) {
         ...(nominationMove ? { nomination_confirmed: true, nominated_from: oldNominee, nominated_to: bk.nominated_staff_id } : {}),
       }].slice(-20);
       if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
-      queueChangeMails(bk); // 変更通知＋リマインド再登録（双方）
+      queueChangeMails(bk); // 変更の操作通知のみ（自動リマインドなし）
       bump();
       if (toDate !== date) bump(toDate);
       return { ok: true, date: toDate };
@@ -1100,14 +1193,16 @@ function postSchedule(body, actor) {
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end)) throw err(409, "soldOut");
       const ev = ensureEvents(date);
-      state.bookingSerial++;
-      const id = "bk-new-" + state.bookingSerial;
       // 複数名の予約は、対応可能で空いているスタッフを人数分確保する
       const cbOthers = n > 1
         ? freeStaffIds(date, start, end, course, cbGender).filter((sid) => sid !== staffId).slice(0, n - 1)
         : [];
       if (cbOthers.length < n - 1) throw err(409, "soldOut");
-      ev.bookings.push({
+      const boothPlan = planBooths(date, start, end, c, n, { boothIds: body.boothIds });
+      if (!boothPlan.ok) throw err(409, boothPlan.code);
+      state.bookingSerial++;
+      const id = "bk-new-" + state.bookingSerial;
+      const booking = {
         id, reference: "DM" + String(state.bookingSerial).padStart(6, "0"),
         service_date: date, status: "confirmed", created_at: Date.now(), source: "admin",
         start_at: minToMs(date, start), end_at: minToMs(date, end),
@@ -1118,7 +1213,8 @@ function postSchedule(body, actor) {
         nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
         staff: "none", customer_token: null,
         sb_done: false, // サロンボードへの転記状態
-      });
+      };
+      setBookingBooths(booking, boothPlan, actor); ev.bookings.push(booking);
       state.bookingIndex.set(id, date);
       for (const sid of [staffId, ...cbOthers]) ev.assignments.push({ booking_id: id, staff_id: sid });
       queueBookingMails(ev.bookings.find((b) => b.id === id));
@@ -1245,16 +1341,9 @@ function postSchedule(body, actor) {
       return { ok: true };
     }
     case "checkout": {
-      // お会計（精算）の登録。金額は値引後の額を予約に記録する
-      const ev = ensureEvents(date);
-      const bk = ev.bookings.find((b) => b.reference === String(body.reference) && b.status === "confirmed");
-      if (!bk) throw err(404, "notFound");
-      const amount = Math.floor(Number(body.amount));
-      if (!(Number.isFinite(amount) && amount >= 0)) throw err(400, "invalid");
-      bk.paid_amount = amount;
-      bk.paid_at = Date.now();
-      bump();
-      return { ok: true };
+      // 従来の会計入口も同じ二重精算防止・支払内訳・履歴の処理を使う。
+      checkRevision();
+      return ledgerOperations.post(state, body, actor, ledgerContext(), { legacy: true });
     }
     case "staffDelete": {
       // スタッフの削除。予約（昨日以降の確定分）が残っている場合は削除しない。
@@ -1298,6 +1387,7 @@ function postSchedule(body, actor) {
       return { ok: true, attendance: rec };
     }
     case "lockStaff": {
+      checkRevision();
       const st = state.staff.find((x) => x.id === body.staffId);
       if (!st) throw err(400, "invalid");
       // 表示中の日だけ鍵をかける／外す（ほかの日には反映しない）
@@ -1410,6 +1500,8 @@ const JST_DT = (ms) => {
 // 送信に失敗したメールを1通、安全に再送する（メール管理の「再送」と、台帳の「未送信を再試行」で共通）。
 // パスワード等を含むメール・再送済み・内容が古くなった予約メールは再送しない。送れないときは理由つきで err を投げる
 function resendFailedMail(m) {
+  if (isBookingReminder(m)) throw err(409, "cannotResend");
+  if (bookingUseNoticeIncludedInConfirmation(m)) throw err(409, "cannotResend");
   if (m.status !== "failed") throw err(409, "notFailed");
   if (m.type === "member") throw err(409, "hasSecret"); // パスワード等を含むメールは記録から再送できない
   // すでに再送中・再送済みなら、新しく作らない（二重送信防止）
@@ -1419,6 +1511,8 @@ function resendFailedMail(m) {
   if (m.bookingId) {
     const found = findBooking(m.bookingId);
     if (!found) throw err(409, "bookingGone");
+    // 連絡先訂正後に、最新の予約内容を以前の宛先へ再送しない。
+    if (m.kind === "customer" && String(m.to || "").trim().toLowerCase() !== String(found.bk.email || "").trim().toLowerCase()) throw err(409, "bookingChanged");
     // 取消済みの予約に「予約完了・変更」を、取消していない予約に「取消」を送らない（リマインドは送信直前に自動で確認）
     if (m.type !== "remind" && (m.type === "cancel") !== (found.bk.status !== "confirmed")) throw err(409, "bookingChanged");
     if (!tpl) {
@@ -1473,6 +1567,12 @@ function deliverDueMails(source) {
   ticketRemindSweep(source); // 有効期限前の自動リマインド（冪等）
   const now = Date.now();
   for (const m of state.mails) {
+    if (m.status === "pending" && isBookingReminder(m)) {
+      m.status = "skipped"; m.skipReason = BOOKING_REMINDER_STOP_REASON; continue;
+    }
+    if (m.status === "pending" && bookingUseNoticeIncludedInConfirmation(m)) {
+      m.status = "skipped"; m.skipReason = BOOKING_TICKET_NOTICE_STOP_REASON; continue;
+    }
     if (m.status !== "pending" || m.scheduledAt > now) continue;
     if (m.tpl) {
       try {
@@ -1992,7 +2092,8 @@ const MAIL_TPL = {
     };
   },
   // 1回使用・1回返却のたびの残数お知らせ
-  ticketLeft(p) {
+  ticketLeft(p, m, atSend) {
+    if (atSend && bookingUseNoticeIncludedInConfirmation(m)) return { skip: BOOKING_TICKET_NOTICE_STOP_REASON };
     const t = state.tickets.get(p.ticketId);
     if (!t) throw new Error("回数券が見つかりません: " + p.ticketId);
     const left = t.uses_left;
@@ -2079,6 +2180,7 @@ const MAIL_TPL = {
   // 回数券を使った予約のメール（完了・リマインド・変更・取消／お客様・店舗）。
   // 予約内容の部分は従来と同じ文面で、回数券の行だけを送信時点の最新値で作る
   booking(p, m, atSend) {
+    if (atSend && /Remind$/.test(p.variant || "")) return { skip: BOOKING_REMINDER_STOP_REASON };
     const found = findBooking(p.bookingId);
     // リマインドは送信直前に「送ってよい予約か」を必ず確かめる（取消・来店後・重複・時刻変更）
     const isRemind = /Remind$/.test(p.variant);
@@ -2087,6 +2189,9 @@ const MAIL_TPL = {
       throw new Error("予約が見つかりません: " + p.bookingId);
     }
     const bk = found.bk;
+    if (atSend && m.kind === "customer" && String(m.to || "").trim().toLowerCase() !== String(bk.email || "").trim().toLowerCase()) {
+      return { skip: "予約のメールアドレスが変更されたため、以前の宛先への送信を中止しました" };
+    }
     if (isRemind && atSend) {
       if (bk.status !== "confirmed") return { skip: "取消済みの予約のため、リマインドを送信しませんでした" };
       if (bk.start_at <= Date.now()) return { skip: "来店時刻を過ぎていたため、リマインドを送信しませんでした" };
@@ -2240,18 +2345,18 @@ function ticketForUse(ticketId, token, email, member, courseId, now = Date.now()
 }
 
 // 予約確定の直前に1回分を消費する（同期・冪等）。失敗したら予約は作られない
-function consumeTicket(t, bookingId, ref, now = Date.now()) {
+function consumeTicket(t, bookingId, ref, now = Date.now(), options = {}) {
   if (state.ticketUseByBooking.has(bookingId)) return t.uses_left; // 同じ予約では1回だけ
   if (now > t.expires_at) throw err(409, "ticketExpired");
   if (t.uses_left <= 0) throw err(409, "ticketEmpty");
   t.uses_left -= 1;
   t.history.push({ at: new Date().toISOString(), type: "use", booking_id: bookingId, ref, delta: -1, left_after: t.uses_left });
   state.ticketUseByBooking.set(bookingId, t.id);
-  queueTicketLeftMail(t, "use", ref);
+  if (options.notify !== false) queueTicketLeftMail(t, "use", ref);
   return t.uses_left;
 }
 
-// 回数券の残数お知らせメール（1回使うたび・返却のたびに「あと何回」を本人へ送る。
+// 回数券の残数お知らせメール（予約時の利用分は予約確認に集約し、返却等の別操作は本人へ送る。
 // マイページの回数券タブでも同じ残数をいつでも確認できる）。
 // 本文は送信直前に最新の残り回数・有効期限で作る（ticketLeft テンプレート）。
 // メールの成否は回数券の処理と切り離す（メールが失敗しても残数の処理は確定済み・記録は管理画面に残る）
@@ -2284,7 +2389,7 @@ function maybeRefundTicket(bk, now = Date.now()) {
 
 // 回数券利用予約のメール追記行（未使用の予約では空＝既存メールを一切変えない）。
 // 残り回数・有効期限は予約時に控えた数字ではなく、呼ばれた時点（＝送信直前）の
-// state.tickets から取る。例：予約後に別の予約で1回使えば、リマインドには減った後の回数が載る
+// state.tickets から取る。予約確認・変更・取消の通知には送信時点の残り回数を載せる。
 function ticketMailLinesCustomer(bk) {
   if (!bk.ticket_id) return [];
   const t = state.tickets.get(bk.ticket_id);
@@ -2430,12 +2535,13 @@ function bookingStaffLine(bk) {
 // 料金の内訳（すべて予約データに保存された確定値から作る。合計は予約の合計金額そのもの）
 function bookingPriceLines(bk) {
   const people = bk.people || 1;
-  const base = (bk.base_price || 0) * people;
+  const base = bk.services?.length ? bookingDetails.totalAtStart(bk, 0, err) - (bk.nomination_fee || 0) : (bk.base_price || 0) * people;
   const fee = bk.nomination_fee || 0;
   const late = bk.total - base - fee; // 深夜料金（予約作成・担当変更時にシステムが計算した分）
   if (late < 0) return [`合計 ${bk.total.toLocaleString("ja-JP")} 円`]; // 内訳が合わない古いデータは合計のみ
   const lines = [];
   if (bk.ticket_id) lines.push("コース料金 回数券でお支払い（1回分）");
+  else if (bk.services?.length) lines.push(`コース料金（割引後・${people}名分） ${base.toLocaleString("ja-JP")} 円`);
   else lines.push(`コース料金 ${(bk.base_price || 0).toLocaleString("ja-JP")} 円` + (people > 1 ? ` × ${people}名` : ""));
   if (fee > 0) lines.push(`指名料 ${fee.toLocaleString("ja-JP")} 円`);
   if (late > 0) lines.push(`深夜料金 ${late.toLocaleString("ja-JP")} 円`);
@@ -2449,12 +2555,14 @@ function bookingRemindBody(bk) {
   const d = bk.service_date;
   const minutes = Math.round((bk.end_at - bk.start_at) / 60000);
   const staffLine = bookingStaffLine(bk);
-  const payLines = bk.total > 0
+  const payLines = bk.paid_at || bk.paid_amount > 0
+    ? [`会計済みです（店舗の受領記録 ${(bk.paid_amount || 0).toLocaleString("ja-JP")} 円）。お支払いについては店舗へお問い合わせください。`]
+    : bk.total > 0
     ? [
       "合計金額は、ご来店時に店頭にてお支払いください。",
       "現金以外（クレジットカード、電子マネー、QRコード決済等）でのお支払いの場合は、利用規約によりお支払い金額の5％を決済手数料として申し受けます（現金でのお支払いには決済手数料はかかりません）。",
     ]
-    : ["今回のご予約は回数券でのお支払いです。"];
+    : [bk.ticket_id ? "今回のご予約は回数券でのお支払いです。" : "今回のご予約のお支払い金額は0円です。"];
   return [
     `${bk.name} 様`,
     "",
@@ -2488,9 +2596,7 @@ function bookingRemindBody(bk) {
     "ご予約の変更や遅刻される場合は、事前にご連絡いただけますと幸いです。",
     `ご連絡先：${VISIT_CONTACT_MAIL}`,
     "",
-    "■ご予約内容の変更は、一度予約のキャンセルを行っていただき、再度予約を取り直してください。",
-    "※混雑状況によっては、再予約ができないことがございます。あらかじめご了承ください。",
-    "※会員登録（ログイン）されている方は、マイページから日時の変更も行えます。",
+    ...bookingChangeGuide(bk, true),
     "ご予約の確認・キャンセルはこちら ⇒",
     bookingMypageUrl(bk),
   ].join("\n") + MAIL_COMMON;
@@ -2500,6 +2606,12 @@ const VISIT_CONTACT_MAIL = "cnsalon2021@gmail.com";
 // リマインドを送る時刻（お客様：来店24時間前／店舗：来店日の9:00）。予約時点で過ぎていれば即時
 function remindDueAt(bk, kind) {
   return kind === "store" ? dayStartMs(bk.service_date) + 9 * 3600e3 : bk.start_at - 24 * 3600e3;
+}
+function bookingChangeGuide(bk, memberGuide = false) {
+  if (bk.details_customized || bk.paid_at || bk.paid_amount > 0) return ["■このご予約の日時・内容の変更は、店舗までご連絡ください。現在のコース・料金・お支払い記録を確認して変更いたします。"];
+  return ["■ご予約内容の変更は、一度予約のキャンセルを行っていただき、再度予約を取り直してください。",
+    "※混雑状況によっては、再予約ができないことがございます。あらかじめご了承ください。",
+    ...(memberGuide ? ["※会員登録（ログイン）されている方は、マイページから日時の変更も行えます。"] : [])];
 }
 function bookingCustomerBody(bk, lead) {
   const cancelUrl = bookingMypageUrl(bk);
@@ -2514,8 +2626,7 @@ function bookingCustomerBody(bk, lead) {
     "■開始時間に遅れる場合は、お電話にてご連絡ください。",
     MAIL_TEL,
     "",
-    "■ご予約内容の変更は、一度予約のキャンセルを行っていただき、再度予約を取り直してください。",
-    "※混雑状況によっては、再予約ができないことがございます。あらかじめご了承ください。",
+    ...bookingChangeGuide(bk),
     "予約のキャンセルはこちら ⇒",
     cancelUrl, // 末尾に余計な記号を付けない（テキストメールでもURLが壊れないように）
   ].join("\n") + MAIL_COMMON;
@@ -2534,28 +2645,28 @@ function bookingStoreBody(bk, lead) {
 //  ・回数券を使った予約のその他のメール…回数券の行を最新の残り回数・有効期限で作る
 // 回数券を使わない予約の完了・変更・取消メールは、従来どおり即時に送る文面のまま
 function queueBookingMail(kind, type, to, variant, bk, at) {
+  if (isBookingReminder({ type, tpl: { name: "booking", variant } })) return null;
   const b = BOOKING_MAIL[variant](bk);
   const tpl = (type === "remind" || bk.ticket_id) ? { name: "booking", variant, bookingId: bk.id } : undefined;
   return queueMail(kind, type, to, b.subject, b.body, at, bk.id, tpl);
 }
 
-// 予約確定時：完了メール（お客様）＋新規予約通知（店舗）＋双方のリマインドを予約する
+// 予約確定時：確認メールをお客様に1通、新規予約通知を店舗に1通。自動リマインドは作らない。
 function queueBookingMails(bk) {
   const now = Date.now();
   if (bk.email) {
     queueBookingMail("customer", "confirm", bk.email, "customerConfirm", bk, now);
-    queueBookingMail("customer", "remind", bk.email, "customerRemind", bk, Math.max(now, bk.start_at - 24 * 3600e3));
   }
   queueBookingMail("store", "notify", storeMail(), "storeNotify", bk, now);
-  queueBookingMail("store", "remind", storeMail(), "storeRemind", bk, Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3));
   deliverDueMails();
 }
 
-// 変更・取消時：まだ送信していないリマインドを破棄する（送信済みのものは記録として残す）
+// 変更・取消時：送信待ちだけを中止して記録を残す。処理中の送信は取り消せないため履歴から消さない。
 function dropPendingReminders(bookingId) {
-  deliverDueMails();
-  state.mails = state.mails.filter((m) =>
-    !(m.bookingId === bookingId && m.type === "remind" && (m.status === "pending" || m.status === "sending")));
+  for (const m of state.mails) if (m.bookingId === bookingId && m.type === "remind" && m.status === "pending") {
+    m.status = "skipped";
+    m.skipReason = "予約が変更・取消されたため、以前の送信予定を中止しました";
+  }
 }
 
 function queueChangeMails(bk) {
@@ -2563,10 +2674,8 @@ function queueChangeMails(bk) {
   const now = Date.now();
   if (bk.email) {
     queueBookingMail("customer", "change", bk.email, "customerChange", bk, now);
-    queueBookingMail("customer", "remind", bk.email, "customerChangeRemind", bk, Math.max(now, bk.start_at - 24 * 3600e3));
   }
   queueBookingMail("store", "change", storeMail(), "storeChange", bk, now);
-  queueBookingMail("store", "remind", storeMail(), "storeChangeRemind", bk, Math.max(now, dayStartMs(bk.service_date) + 9 * 3600e3));
   deliverDueMails();
 }
 
@@ -2642,6 +2751,10 @@ const mismatchError = (why) => err(409, why === "gender" ? "staffGenderOnly" : "
 // 既にある予約をそのスタッフが担当してよいか。メニューが特定できない予約（ホットペッパーのメニュー名が
 // こちらのメニューと一致しない等）は、「全て」にチェックのスタッフだけが担当できる（メニュー名の性別指定も守る）
 function bookingMismatch(st, bk) {
+  if (Array.isArray(bk.services) && bk.services.length) {
+    for (const s of bk.services) { const why = staffMismatch(st, s.courseId); if (why) return why; }
+    return null;
+  }
   if (bk.course) return staffMismatch(st, bk.course);
   if (!st || !staffCanDo(st, "")) return "course"; // 「全て」以外（メニューを選んで設定）のスタッフは不可
   const nm = String(bk.course_name || "");
@@ -2736,7 +2849,7 @@ function staffPickerDirectory(courseId, genderPref) {
 
 // 指定時間帯に施術できるスタッフID一覧
 // スタッフ情報の入力→対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
-function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId) {
+function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId, online = false) {
   const shifts = ensureShifts(date);
   return state.staff
     .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
@@ -2746,6 +2859,7 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
       return sh && msToMin(date, sh.start_at) <= startMin && endMin <= msToMin(date, sh.end_at);
     })
     .filter((st) => !overlaps(date, st.id, startMin, endMin, ignoreBookingId))
+    .filter((st) => !online || !ledgerOperations.onlineBlocked(state, date, st.id, startMin, endMin, { minToMs }))
     .map((st) => st.id);
 }
 
@@ -2821,9 +2935,12 @@ function hpNotify(b, via) {
     .filter((st) => !named || st.id === named[0].id);
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
+    .filter((st) => !ledgerOperations.onlineBlocked(state, date, st.id, start, end, { minToMs }))
     .sort((a, c) => a.sort_order - c.sort_order);
   if (!capable.length) return failed(409, "noCapableStaff", when); // このメニューを担当できるスタッフがいない
   if (!candidates.length) return failed(409, "slotTaken", when);
+  const boothPlan = planBooths(date, start, end, course, 1, { online: true });
+  if (!boothPlan.ok) return failed(409, "slotTaken", { ...when, note: "ブース確認: " + boothPlan.code });
 
   const assignee = candidates[0];
   state.bookingSerial++;
@@ -2838,12 +2955,12 @@ function hpNotify(b, via) {
     total: price, base_price: price, paid_amount: 0,
     nomination_fee: 0, nominated_staff_id: null, nominated_staff_name: null,
     staff: "none", customer_token: null,
-    source: "hotpepper", booth: "HP",
+    source: "hotpepper", booth: boothPlan.booths.map(x => x.name).join("、"), booth_id: boothPlan.booths[0].id, booth_ids: boothPlan.booths.map(x => x.id),
     created_label: (() => {
       const n = new Date(Date.now() + 9 * 3600e3);
       return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " HP";
     })(),
-    customer_gender: gender === "female" ? "f" : gender === "male" ? "m" : "",
+    customer_gender: "", // メニューの担当性別からお客様本人の性別を推測しない
     is_new: isRepeatEmail(String(b.email || "")) ? 0 : 1,
   });
   ev.assignments.push({ booking_id: id, staff_id: assignee.id });
@@ -3057,7 +3174,10 @@ function getAvailability(q, member) {
   const rsId = q.get("reschedule");
   if (rsId && member) {
     const f = findBooking(rsId);
-    if (f && f.bk.member_email === member.email && f.bk.status === "confirmed") ignoreId = f.bk.id;
+    if (f && f.bk.member_email === member.email && f.bk.status === "confirmed") {
+      if (f.bk.details_customized || f.bk.paid_at || f.bk.paid_amount > 0) throw err(409, "adminChangeRequired");
+      ignoreId = f.bk.id;
+    }
   }
   const courseId = q.get("course");
   const date = q.get("date");
@@ -3085,8 +3205,9 @@ function getAvailability(q, member) {
       // 受付対象外（受付停止日・過ぎた時間）は枠自体を返さず、画面では「－」表示にする
       if (!open) continue;
       if (d === today && m <= nowMinJst()) continue;
-      const free = freeStaffIds(d, m, m + dur, courseId, gpref, ignoreId);
-      const ok = nominatedAllowed && free.length >= people && (!staffId || free.includes(staffId));
+      const free = freeStaffIds(d, m, m + dur, courseId, gpref, ignoreId, true);
+      const ok = nominatedAllowed && free.length >= people && (!staffId || free.includes(staffId)) &&
+        planBooths(d, m, m + dur, course, people, { online: true, ignoreId }).ok;
       slots.push({ minute: m, available: ok, start: minToMs(d, m) });
     }
     days.push({ date: d, enabled: day.enabled, slots });
@@ -3134,6 +3255,7 @@ function createPublicBooking(body, member) {
     if (!found || found.bk.member_email !== member.email) throw err(404, "notFound");
     if (found.bk.status !== "confirmed") throw err(409, "alreadyCancelled");
     if (found.bk.start_at <= operationTime) throw err(409, "tooLate");
+    if (found.bk.details_customized || found.bk.paid_at || found.bk.paid_amount > 0) throw err(409, "adminChangeRequired");
     reschedule = found;
   }
   const date = body.date;
@@ -3168,8 +3290,10 @@ function createPublicBooking(body, member) {
   }
   const dur = course.minutes;
   // 日時変更では、元の予約が使っている担当・時間は空いているものとして判定する（同じ担当で30分ずらす等ができるように）
-  const free = freeStaffIds(date, m, m + dur, body.course, gpref, reschedule ? reschedule.bk.id : undefined);
+  const free = freeStaffIds(date, m, m + dur, body.course, gpref, reschedule ? reschedule.bk.id : undefined, true);
   if (free.length < people || (staffId && !free.includes(staffId))) throw err(409, "soldOut");
+  const boothPlan = planBooths(date, m, m + dur, course, people, { online: true, ignoreId: reschedule?.bk.id, existing: reschedule?.bk });
+  if (!boothPlan.ok) throw err(409, "soldOut");
 
   const assignee = staffId || free[0];
 
@@ -3198,7 +3322,7 @@ function createPublicBooking(body, member) {
   // 日時変更で同じ回数券を使う場合は、先に元の予約の1回分を戻してから使う（元の予約の取消時に二重には戻らない）
   if (carryTicket) maybeRefundTicket(reschedule.bk, operationTime);
   // ここで1回分を消費（同期処理なので同時リクエストでも残数は正確。残1で同時2件なら後の1件はここで拒否）
-  const ticketLeft = useTicket ? consumeTicket(useTicket, id, reference, operationTime) : null;
+  const ticketLeft = useTicket ? consumeTicket(useTicket, id, reference, operationTime, { notify: false }) : null;
   const ev = ensureEvents(date);
   ev.bookings.push({
     id, reference,
@@ -3221,8 +3345,8 @@ function createPublicBooking(body, member) {
       const n = new Date(Date.now() + 9 * 3600e3);
       return n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 16) + " WEB";
     })(),
-    booth: "新規1(" + ((state.bookingSerial % 9) + 1) + ")",
-    customer_gender: gpref === "female" ? "f" : gpref === "male" ? "m" : "",
+    booth: boothPlan.booths.map(x => x.name).join("、"), booth_id: boothPlan.booths[0].id, booth_ids: boothPlan.booths.map(x => x.id),
+    customer_gender: "", // 担当スタッフの性別希望から、お客様本人の性別を推測しない
     is_new: isRepeatEmail(String(body.email)) ? 0 : 1,
     sb_done: false, // サロンボードへの転記状態（自社予約はHP側の枠も塞ぐ必要がある）
   });
@@ -3239,7 +3363,7 @@ function createPublicBooking(body, member) {
     if (nm) member.name = nm;
     if (ph) member.phone = ph;
   }
-  queueBookingMails(newBk); // 完了メール＋通知＋双方のリマインド
+  queueBookingMails(newBk); // 確認メール＋店舗通知（自動リマインドなし）
   ensureDay(date).version++; sseTouch();
   // 日時変更：新しい予約が成立したので元の予約を取り消す（回数券は返却→新予約で再使用済み）
   if (reschedule) {
@@ -3324,22 +3448,28 @@ function dayCounts(date) {
 
 function reportStats(date) {
   const list = confirmedBookings(date);
-  const gross = list.reduce((s, b) => s + b.total, 0);
-  const net = Math.round(gross / 1.1);
+  const ledgerSummary = ledgerOperations.summary(state, date);
+  const gross = ledgerSummary.sales;
+  const net = null; // 税区分・経費が未設定のため、税抜売上や利益を推測しない
   const counts = dayCounts(date);
   // 当月累計（データがある日だけ集計。架空データは生成しない）
   const monthStart = date.slice(0, 8) + "01";
-  let cumGross = 0, cumNet = 0;
-  for (const [d, ev] of state.events) {
+  let cumGross = 0;
+  const reportDates = new Set([...state.events.keys(), ...state.ledger.checkouts.map(x => x.date), ...state.ledger.sales.map(x => x.date)]);
+  for (const d of reportDates) {
     if (d >= monthStart && d <= date) {
-      const g = ev.bookings.filter((b) => b.status === "confirmed").reduce((s, b) => s + b.total, 0);
-      cumGross += g;
+      cumGross += ledgerOperations.summary(state, d).sales;
     }
   }
-  cumNet = Math.round(cumGross / 1.1);
+  const cumNet = null;
   const dayN = Number(date.slice(8));
   const daysInMonth = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
-  const forecast = dayN ? Math.round(cumNet / dayN * daysInMonth) : 0;
+  const forecast = dayN ? Math.round(cumGross / dayN * daysInMonth) : 0;
+  const goal = ledgerOperations.goalOf(state, date).amount;
+  const monthGoals = Array.from({ length: daysInMonth }, (_, i) => ledgerOperations.goalOf(state, date.slice(0, 8) + String(i + 1).padStart(2, "0")).amount);
+  const elapsedGoals = monthGoals.slice(0, dayN), configuredGoals = elapsedGoals.filter(x => x !== null);
+  const cumGoal = configuredGoals.length ? configuredGoals.reduce((n, x) => n + x, 0) : null;
+  const monthGoal = monthGoals.every(x => x !== null) ? monthGoals.reduce((n, x) => n + x, 0) : null;
   // シフト状況
   const shifts = visibleShifts(date); // 台帳と同じ登録済みスタッフのシフトを数える
   const shiftMin = shifts.reduce((s, x) => s + (x.end_at - x.start_at) / 60000, 0);
@@ -3351,7 +3481,7 @@ function reportStats(date) {
   }
   const tomorrow = addDays(date, 1);
   const names = {};
-  for (const st of state.staff) names[st.id] = st.name;
+  for (const st of state.staff) names[st.id] = profileOf(st).nickname || st.name;
   const tomorrowShifts = visibleShifts(tomorrow)
     .map((x) => ({
       name: names[x.staff_id] || "",
@@ -3363,21 +3493,42 @@ function reportStats(date) {
     .filter((x) => x.name);
   return {
     date,
+    revision: state.days.get(date)?.version || 0,
     today: {
-      salesNet: net, salesGross: gross, profit: net,
+      salesNet: net, salesGross: gross, profit: null, taxBasis: "unconfigured", ledgerSummary,
       ...counts,
       avgSpend: counts.visitors ? Math.round(gross / counts.visitors) : 0,
-      cumNet, cumGross, forecast,
+      cumNet, cumGross, forecast, goal, cumGoal, cumGoalComplete: configuredGoals.length === elapsedGoals.length,
+      achievement: goal > 0 ? Math.round(gross / goal * 1000) / 10 : null,
+      progress: monthGoal > 0 ? Math.round(cumGross / monthGoal * 1000) / 10 : null,
       shiftStaff: shifts.length, shiftMin, treatMin,
       utilization: shiftMin ? Math.round(treatMin / shiftMin * 1000) / 10 : 0,
     },
-    tomorrow: { ...dayCounts(tomorrow), shifts: tomorrowShifts },
-    staffNames: state.staff.map((s) => s.name),
-    saved: state.reports.get(date) || null,
+    tomorrow: { ...dayCounts(tomorrow), shifts: tomorrowShifts, goal: ledgerOperations.goalOf(state, tomorrow).amount },
+    staffNames: state.staff.map((s) => profileOf(s).nickname || s.name),
+    saved: state.reports.has(date) ? Object.fromEntries(Object.entries(state.reports.get(date)).filter(([key]) => key !== "lastrequests")) : null,
   };
 }
 
 // server.js から呼ばれる入口。処理した場合は true を返す。
+function ledgerContext() {
+  return { err, validDay, validSpan, todayJst, addDays, minToMs, msToMin, staffInfoMissing, staffReady, bookingMismatch, courseNameOf,
+    staffDisplayName: st => st ? profileOf(st).nickname || st.name : "",
+    bookingBoothIssue: (bk, date) => {
+      if (boothPolicy.bookingBoothIds(bk).length !== (bk.people || 1)) return "boothUnassigned";
+      const p = planBooths(date, msToMin(date, bk.start_at), msToMin(date, bk.end_at), boothCourseForBooking(bk), bk.people || 1, { ignoreId: bk.id, boothIds: boothPolicy.bookingBoothIds(bk) });
+      return p.ok ? null : p.code;
+    },
+    bump: (date) => { ensureDay(date).version++; }, touch: sseTouch };
+}
+function bookingDetailsContext() {
+  return { err, validDay, validSpan, minToMs, msToMin, getCourse, courses: () => [...courseStore.values()],
+    sourceTiming: boothPolicy.sourceCourseTiming, courseBoothIds: boothPolicy.resolveCourseBoothIds,
+    courseGender, profileOf, staffInfoMissing, staffMismatch, overlaps, rejectTestData,
+    booths: () => boothPolicy.resolveBooths(state), planBooths, setBookingBooths, queueChangeMails, queueBookingMails,
+    bump: date => { ensureDay(date).version++; }, touch: sseTouch };
+}
+
 function handleDemoApi(req, res, url) {
   // 変更の操作（予約・スタッフ情報・シフト・設定・会員情報など、GET以外）は、返事を返した直後にディスクへ保存する
   if (req.method !== "GET" && req.method !== "HEAD") res.once("finish", () => require("./persist").requestSave());
@@ -3475,6 +3626,11 @@ function handleDemoApi(req, res, url) {
       return true;
     }
   }
+  if (url.pathname === "/api/demo/customer-records") {
+    return require("./customer-records").handle(req, res, url, state, sessionAccount(req), {
+      err, findBooking, staffDisplayName: st => st ? profileOf(st).nickname || st.name : "", courseNameOf,
+    });
+  }
 
   // リアルタイム配信（SSE）。ログイン中の管理画面が購読し、予約・シフト等の
   // 変更がDBに保存された直後に「変わった」通知を受け取る（中身は必ず再取得する）
@@ -3542,7 +3698,7 @@ function handleDemoApi(req, res, url) {
         state.mailRelay.url = u;
         // 登録したらすぐテスト送信（店舗のメールアドレス宛て。届けば設定完了）
         const to = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.testTo || "")) ? String(b.testTo) : storeMail();
-        const body = ["メール送信のテストです。", "", "このメールが届いていれば、予約システムからのメール（予約確認・リマインド・店舗への通知）が送れる状態です。",
+        const body = ["メール送信のテストです。", "", "このメールが届いていれば、予約システムからのメール（予約確認・変更・取消・店舗への通知）が送れる状態です。",
           "", `送信日時：${JST_DT(Date.now())}`].join("\n");
         relaySend({ relayUrl: u, relaySecret: state.mailRelay.secret }, { to, subject: `${MAIL_STORE} メール送信テスト`, body, html: mailHtml(body) }, (e2) => {
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -3864,6 +4020,56 @@ function handleDemoApi(req, res, url) {
   }
 
   // メニュー一覧（管理画面から追加・変更・削除・写真登録ができる）
+  if (url.pathname === "/api/demo/booths") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      const result = { ok: true, version: state.boothRevision, booths: boothPolicy.resolveBooths(state),
+        canManage: roleAtLeast(req, "manager"), courses: [...courseStore.values()].map(c => ({ id: c.id, name: c.name, boothIds: boothPolicy.resolveCourseBoothIds(c) })) };
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(result));
+    } else if (req.method === "POST") {
+      if (!roleAtLeast(req, "manager")) { denyApi(req, res); return true; }
+      readJson(req, res, 1e6, body => {
+        const actor = sessionAccount(req), key = String(body.requestKey || "");
+        if (!key || key.length > 150) throw err(400, "invalid");
+        const fingerprint = sha256(JSON.stringify({ ...body, expectedVersion: undefined, requestKey: undefined, actor: actor.user }));
+        const saved = state.boothRequestKeys.get(key);
+        if (saved) {
+          if (saved.fingerprint !== fingerprint) throw err(409, "requestChanged");
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(saved.result)); return;
+        }
+        if (body.expectedVersion !== state.boothRevision) throw err(409, "boothChanged");
+        let booths = boothPolicy.resolveBooths(state), courses = [...courseStore.values()].map(c => ({ ...c }));
+        let id;
+        if (body.action === "saveBooth") {
+          if (!body.booth || typeof body.booth !== "object" || Array.isArray(body.booth)) throw err(400, "invalid");
+          id = body.booth.id ? String(body.booth.id) : "booth-" + crypto.randomBytes(8).toString("hex");
+          const idx = booths.findIndex(b => b.id === id);
+          if (body.booth.id && idx < 0) throw err(404, "notFound");
+          const rec = { ...(idx >= 0 ? booths[idx] : {}), ...body.booth, id };
+          if (idx >= 0) booths[idx] = rec; else booths.push(rec);
+        } else if (body.action === "deleteBooth") {
+          id = String(body.boothId || "");
+          if (!booths.some(b => b.id === id)) throw err(404, "notFound");
+          booths = booths.filter(b => b.id !== id);
+          courses = courses.map(c => { const ids = boothPolicy.resolveCourseBoothIds(c); return ids === null ? c : { ...c, boothIds: ids.filter(x => x !== id) }; });
+        } else if (body.action === "saveCourseBooths") {
+          id = String(body.courseId || "");
+          const idx = courses.findIndex(c => c.id === id);
+          if (idx < 0) throw err(404, "notFound");
+          courses[idx] = { ...courses[idx], boothIds: body.boothIds };
+        } else throw err(400, "invalid");
+        const checked = boothPolicy.validateConfiguration(state, { booths, courses }, { now: Date.now(), courses: [...courseStore.values()] });
+        if (!checked.ok) throw err(409, checked.code);
+        state.booths = checked.booths;
+        courseStore.clear(); for (const c of checked.courses) courseStore.set(c.id, c);
+        state.courses = [...courseStore.values()]; state.boothRevision++;
+        const result = { ok: true, version: state.boothRevision, id };
+        state.boothRequestKeys.set(key, { fingerprint, result }); sseTouch();
+        res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(result));
+      });
+    } else { res.writeHead(405); res.end(); }
+    return true;
+  }
   if (url.pathname === "/api/demo/courses") {
     if (req.method === "GET" || req.method === "HEAD") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -3904,6 +4110,17 @@ function handleDemoApi(req, res, url) {
             if (!c) throw err(404, "notFound");
             validVals();
             applyPhoto(c.id);
+            // 元サイト由来の設定は名称照合で得ている。名称変更前に実際の設定を保存し、
+            // メニュー名を変えただけで対応ブースや準備・片付け時間が消えないようにする。
+            const existingBooths = boothPolicy.resolveCourseBoothIds(c);
+            const existingTiming = boothPolicy.sourceCourseTiming(c);
+            if (existingBooths) c.boothIds = [...existingBooths];
+            if (existingTiming) {
+              const edges = existingTiming.minutesBefore + existingTiming.minutesAfter;
+              c.minutesBefore = minutes > edges ? existingTiming.minutesBefore : 0;
+              c.minutesAfter = minutes > edges ? existingTiming.minutesAfter : 0;
+              c.minutesBody = minutes - c.minutesBefore - c.minutesAfter;
+            }
             c.name = name; c.price = price; c.minutes = minutes;
           } else if (b.action === "delete") {
             const cid = String(b.id || "");
@@ -3912,7 +4129,7 @@ function handleDemoApi(req, res, url) {
             const today = todayJst();
             for (const [d, ev2] of state.events) {
               if (d < addDays(today, -1)) continue;
-              if (ev2.bookings.some((x) => x.status === "confirmed" && x.course === cid)) throw err(409, "hasBookings");
+              if (ev2.bookings.some((x) => x.status === "confirmed" && (x.course === cid || x.services?.some(s => s.courseId === cid)))) throw err(409, "hasBookings");
             }
             courseStore.delete(cid);
             coursePhotos.delete(cid);
@@ -3966,7 +4183,7 @@ function handleDemoApi(req, res, url) {
   if (url.pathname === "/api/demo/report") {
     if (req.method === "GET" || req.method === "HEAD") {
       const date = url.searchParams.get("date") || todayJst();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      if (!validDay(date)) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "invalid" }));
         return true;
@@ -3981,18 +4198,41 @@ function handleDemoApi(req, res, url) {
       req.on("end", () => {
         try {
           const b = JSON.parse(raw || "{}");
-          const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? b.date : todayJst();
-          const rec = state.reports.get(date) || {};
+          const date = b.date;
+          const actor = sessionAccount(req), key = b.requestKey;
+          if (!actor || !["admin", "manager"].includes(actor.role)) throw err(403, "forbidden");
+          if (!validDay(date) || typeof key !== "string" || !/^[\w-]{10,150}$/.test(key)) throw err(400, "invalid");
+          const fields = {};
           for (const k of ["weather", "todayPlan", "review", "tomorrowPlan", "manager"]) {
-            if (k in b) rec[k] = String(b[k] || "").slice(0, 2000);
+            if (!(k in b)) continue;
+            if (typeof b[k] !== "string" || b[k].length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(b[k])) throw err(400, "invalid");
+            fields[k] = b[k];
           }
+          if ("send" in b && typeof b.send !== "boolean") throw err(400, "invalid");
+          if ("weather" in fields && !["", "晴れ", "曇り", "雨", "雪", "台風"].includes(fields.weather)) throw err(400, "invalid");
+          const fingerprint = sha256(JSON.stringify({ date, fields, send: b.send === true, actor: actor.user }));
+          const rec = { ...(state.reports.get(date) || {}) };
+          const previous = (rec.lastrequests || []).find(x => x.key === key);
+          if (previous) {
+            if (previous.fingerprint !== fingerprint) throw err(409, "requestChanged");
+            res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+            res.end(JSON.stringify(previous.result));
+            return;
+          }
+          if (b.revision !== (state.days.get(date)?.version || 0)) throw err(409, "scheduleConflict");
+          Object.assign(rec, fields);
+          if (b.send && !String(rec.manager || "").trim()) throw err(400, "invalid");
           if (b.send) rec.sentAt = Date.now();
+          const saved = Object.fromEntries(Object.entries(rec).filter(([k]) => k !== "lastrequests"));
+          const result = { ok: true, saved, revision: (state.days.get(date)?.version || 0) + 1 };
+          rec.lastrequests = [...(rec.lastrequests || []), { key, fingerprint, result }].slice(-100);
           state.reports.set(date, rec);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, saved: rec }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid" }));
+          ensureDay(date).version++; sseTouch();
+          res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(e.status || 400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify({ error: e.status ? e.message : "invalid" }));
         }
       });
       return true;
@@ -4067,7 +4307,9 @@ function handleDemoApi(req, res, url) {
 
   // 管理画面の版（画面の部品ファイルの更新時刻）。開いたままの管理画面が、新しい版に気づいて読み込み直すのに使う
   if (url.pathname === "/api/demo/build" && (req.method === "GET" || req.method === "HEAD")) {
-    const files = ["public/pm-layout.js", "public/pm-layout.css", "public/pm-motion.css", "public/_next/static/chunks/index-pm3.js", "public/_next/static/chunks/NativeCalendar-pm2.js",
+    const files = ["public/pm-layout.js", "public/pm-layout.css", "public/pm-motion.css", "public/ledger-operations.js", "public/ledger-operations.css",
+      "public/booth-settings.js", "public/booth-settings.css", "public/customer-records.js", "public/customer-records.css",
+      "ledger-operations.js", "booth-policy.js", "customer-records.js", "booking-details.js", "public/booking-details-ui.js", "public/booking-details-ui.css", "public/_next/static/chunks/index-pm3.js", "public/_next/static/chunks/NativeCalendar-pm2.js",
       "public/_next/static/chunks/AdminSchedule-pm2.js", "public/_next/static/chunks/I18n-8lang-v1.js", "pages/admin.html"];
     const v = files.map((f) => { try { return Math.floor(fs.statSync(path.join(__dirname, f)).mtimeMs); } catch { return 0; } }).join("-");
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -4754,6 +4996,7 @@ function handleDemoApi(req, res, url) {
     const current = cur[0] || null;
     const slotsByStaff = new Map();
     for (let t = 600; t + dur <= 1620; t += 5) {
+      if (!planBooths(date, t, t + dur, boothCourseForBooking(bk), people, { ignoreId: bk.id, existing: bk }).ok) continue;
       const free = freeStaffIds(date, t, t + dur, bk.course, gender, bk.id)
         .filter((sid) => !bookingMismatch(state.staff.find((st) => st.id === sid), bk));
       const curOk = cur.filter((sid) => state.staff.find((st) => st.id === sid)?.active === 1 &&
@@ -4811,6 +5054,36 @@ function handleDemoApi(req, res, url) {
         res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
       }
     });
+    return true;
+  }
+  if (url.pathname === "/api/demo/booking-details") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      try {
+        const result = bookingDetails.get(state, Object.fromEntries(url.searchParams), sessionAccount(req), bookingDetailsContext());
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(req.method === "HEAD" ? undefined : JSON.stringify(result));
+      } catch (e) { res.writeHead(e.status || 500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" })); }
+    } else if (req.method === "POST") {
+      readJson(req, res, 1e6, body => {
+        const result = bookingDetails.post(state, body, sessionAccount(req), bookingDetailsContext());
+        res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(result));
+      });
+    } else { res.writeHead(405); res.end(); }
+    return true;
+  }
+  if (url.pathname === "/api/demo/ledger") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      try {
+        const result = ledgerOperations.get(state, Object.fromEntries(url.searchParams), sessionAccount(req), ledgerContext());
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(req.method === "HEAD" ? undefined : JSON.stringify(result));
+      } catch (e) { res.writeHead(e.status || 500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" })); }
+    } else if (req.method === "POST") {
+      readJson(req, res, 1e6, body => {
+        const result = ledgerOperations.post(state, body, sessionAccount(req), ledgerContext());
+        res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(result));
+      });
+    } else { res.writeHead(405); res.end(); }
     return true;
   }
   if (url.pathname !== "/api/demo/schedule") return false;
