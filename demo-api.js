@@ -520,6 +520,8 @@ const state = {
     profile_revision: 0,
   })),
   photos: new Map(),   // staffId -> dataURL
+  staffReconciliation: null, // 照合の結果と直前の復旧用記録（顧客情報なし）
+  staffIdHigh: 10000000,
   days: new Map(),     // date -> {version, enabled}
   shifts: new Map(),   // date -> [{staff_id, date, start_at, end_at, note}]
   events: new Map(),   // date -> {bookings: [], blocks: [], assignments: []}
@@ -749,7 +751,8 @@ const FIXED_SHIFTS = {
 function ensureShifts(date) {
   if (state.shifts.has(date)) return state.shifts.get(date);
   const list = [];
-  state.staff.forEach((s) => {
+  // 本番の未登録日は休み。参照しただけで架空の勤務枠を作らない。
+  if (!IS_CLOUD && !state.staffReconciliation) state.staff.forEach((s) => {
     const t = FIXED_SHIFTS[s.id];
     if (!t) return;
     list.push({ staff_id: s.id, date, start_at: minToMs(date, t[0]), end_at: minToMs(date, t[1]), note: "" });
@@ -844,7 +847,7 @@ function getSchedule(date) {
   const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
   return {
     // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。
-    staff: sorted.filter((st) => shown.has(st.id)).map(staffRow),
+    staff: sorted.filter((st) => shown.has(st.id)).map((st) => ({ ...staffRow(st), name: profileOf(st).nickname || st.name })),
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
     allStaff: sorted.map(staffRow),
     shifts,
@@ -873,6 +876,14 @@ function err(code, message) {
 function postSchedule(body, actor) {
   const { action, date } = body;
   if (!action || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw err(400, "invalid");
+  if (action === "staffReconcile") {
+    if (actor?.role !== "admin") throw err(403, "forbidden");
+    const result = require("./staff-reconcile").reconcile(state, body, {
+      courses: [...courseStore.values()], today: todayJst(), minToMs, err,
+    });
+    if (!body.dryRun) sseTouch();
+    return result;
+  }
   const day = ensureDay(date);
   const checkRevision = () => { if (body.revision !== day.version) throw err(409, "scheduleConflict"); };
   const bump = (d = date) => { ensureDay(d).version++; sseTouch(); };
@@ -4763,6 +4774,29 @@ function handleDemoApi(req, res, url) {
     return true;
   }
 
+  // 写真を含む照合済みデータ。通常の予約APIの容量上限は広げない。
+  if (url.pathname === "/api/demo/staff-reconcile" && req.method === "POST") {
+    if (!roleAtLeast(req, "admin")) { denyApi(req, res); return true; }
+    let raw = "", bytes = 0, tooLarge = false;
+    req.setEncoding("utf8");
+    req.on("data", c => {
+      bytes += Buffer.byteLength(c);
+      if (bytes > 50 * 1024 * 1024) { tooLarge = true; raw = ""; return; }
+      if (!tooLarge) raw += c;
+    });
+    req.on("end", () => {
+      try {
+        if (tooLarge) throw err(413, "tooLarge");
+        const body = JSON.parse(raw || "{}");
+        const result = postSchedule({ ...body, action: "staffReconcile" }, sessionAccount(req));
+        res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(e.status || 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
+      }
+    });
+    return true;
+  }
   if (url.pathname !== "/api/demo/schedule") return false;
 
   if (req.method === "GET" || req.method === "HEAD") {
