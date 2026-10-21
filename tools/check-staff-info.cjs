@@ -1,6 +1,7 @@
 'use strict';
 // スタッフ情報（コース・画像・フリーメッセージ。性別は条件にしない）がそろっていない人には、シフト・休憩・業務・予約を入れられず、
-// 台帳・月間シフト作成・予約サイト・ホットペッパーの割り当てに出ないことを確かめる（2026-10-20 お店の人の指定）。
+// 新規受付・予約サイト・ホットペッパーの割り当てに出ないことを確かめる。
+// 管理用の既存シフトは情報未入力でも隠さず、スタッフ情報と同じ登録を表示する（2026-10-21）。
 // 記録はすべて架空。メール設定のない検証用チェックアウトで実行する（メールは送らない）
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,7 +30,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   state.photos = new Map([[ready.id, 'data:image/jpeg;base64,/9j/']]);
   state.days = new Map(); state.events = new Map();
   const shift = (sid, d, s, e) => ({ staff_id: sid, date: d, start_at: minToMs(d, s), end_at: minToMs(d, e), note: '' });
-  // すでに入ってしまっているシフトと業務（台帳・予約サイトには出さない）
+  // 登録済みのシフトと業務（管理画面には出すが、新規の予約受付はしない）
   state.shifts = new Map([[date, [shift(ready.id, date, 600, 1320), shift(bare.id, date, 660, 1320)]], [next, [shift(ready.id, next, 600, 1320)]]]);
   state.events.set(date, { bookings: [], blocks: [{ id: 'blk-bare', staff_id: bare.id, date, start_at: minToMs(date, 660), end_at: minToMs(date, 720), kind: 'work', note: '' }], assignments: [] });
   const rev = (d = date) => state.days.get(d)?.version ?? 0;
@@ -38,12 +39,24 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.deepEqual(staffInfoMissing(bare), ['画像', 'フリーメッセージ']);
   assert.deepEqual(staffInfoMissing(ready), []);
 
-  // 台帳：未入力の人の行・シフト・業務は出さない。スタッフ情報の画面用の一覧（allStaff）には全員と未入力の項目
+  // 台帳・スタッフ情報：同じ全員を返し、未入力でも既存のシフト・業務を隠さない
   let sc = getSchedule(date);
-  assert.deepEqual(sc.staff.map((s) => s.id), [ready.id]);
+  assert.deepEqual(sc.staff, sc.allStaff);
   assert.deepEqual(sc.allStaff.map((s) => [s.id, s.info_missing]), [[ready.id, []], [bare.id, ['画像', 'フリーメッセージ']]]);
-  assert.ok(!sc.shifts.some((x) => x.staff_id === bare.id), '未入力の人のシフトは台帳に出さない');
-  assert.ok(!sc.blocks.some((x) => x.staff_id === bare.id), '未入力の人の業務は台帳に出さない');
+  assert.ok(sc.shifts.some((x) => x.staff_id === bare.id), '登録済みシフトは管理画面から消さない');
+  assert.ok(sc.blocks.some((x) => x.staff_id === bare.id), '登録済み業務は管理画面から消さない');
+
+  // 昨日以前・月初も保存済みのシフトを表示する。未登録の過去日は勝手に作らない。
+  const yesterday = addDays(todayJst(), -1), monthStart = todayJst().slice(0, 8) + '01';
+  const past = shift(bare.id, yesterday, 700, 1100), first = shift(ready.id, monthStart, 650, 1200);
+  state.shifts.set(yesterday, [past]);
+  if (monthStart !== yesterday) state.shifts.set(monthStart, [first]);
+  const oldDates = new Set(state.shifts.keys());
+  const previousSchedule = getSchedule(yesterday);
+  assert.ok(previousSchedule.shifts.some((x) => x === past), '昨日の勤務時間を失わない');
+  const monthSchedule = getSchedule(todayJst());
+  if (monthStart !== yesterday) assert.ok(monthSchedule.shifts.some((x) => x === first), '月の途中から開いても月初のシフトを失わない');
+  assert.ok([...state.shifts.keys()].filter(d => d < todayJst()).every(d => oldDates.has(d)), '過去の未登録シフトは生成しない');
 
   // 予約サイト：空き枠・指名候補・スタッフ紹介に出さない
   assert.deepEqual(freeStaffIds(date, 720, 780, COURSE, 'none'), [ready.id]);
@@ -77,11 +90,11 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   // 予約の担当がある人の情報があとで欠けても、その日の台帳には残す（予約が見えなくならない）。新しい予約は入れられない
   state.photos.delete(ready.id);
   sc = getSchedule(date);
-  assert.deepEqual(sc.staff.map((s) => [s.id, s.info_missing]), [[ready.id, ['画像']]]);
+  assert.deepEqual(sc.staff.map((s) => [s.id, s.info_missing]), [[ready.id, ['画像']], [bare.id, ['画像', 'フリーメッセージ']]]);
   assert.ok(sc.shifts.some((x) => x.staff_id === ready.id && x.date === date));
   assert.equal(postSchedule({ action: 'moveBooking', date, revision: rev(), id: hpBk.id, staffId: ready.id, start: 750, end: 810 }).ok, true, 'いまの担当のまま時間を変えるのはよい');
   assert.throws(() => postSchedule({ action: 'createBooking', date, revision: rev(), staffId: ready.id, start: 900, course: COURSE, people: 1, consent: true, name: 'テスト 確認 店頭' }), code('staffInfoMissing'));
-  assert.deepEqual(getSchedule(next).staff, [], '予約のない日には出さない');
+  assert.deepEqual(getSchedule(next).staff.map(s => s.id), [ready.id, bare.id], 'どの日も同じ登録を参照する');
   state.photos.set(ready.id, 'data:image/jpeg;base64,/9j/');
 
   // スタッフ情報の保存：足りない項目を知らせる。そろえて保存すると、入っていたシフトがそのまま台帳・予約サイトに戻る
@@ -94,5 +107,5 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.ok(freeStaffIds(date, 1080, 1140, COURSE, 'female').includes(bare.id));
   assert.ok(publicStaffList().some((s) => s.id === bare.id));
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
-  console.log('PASS: staff info required for shifts, breaks, bookings, hot pepper, ledger and booking site; hidden shifts return after the info is saved; synthetic records only');
+  console.log('PASS: registered staff and saved shifts remain consistent, including historical/month-start shifts; incomplete profiles cannot accept new shifts or bookings; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

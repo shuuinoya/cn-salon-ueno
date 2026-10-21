@@ -787,11 +787,8 @@ function withinShift(date, staffId, start, end) {
   return !!sh && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at);
 }
 
-// スタッフ情報の入力がそろっているか（2026-10-20 お店の人の指定）。
-// コース（対応メニュー）・画像（写真）・フリーメッセージ（紹介文）が全部ある人だけを
-// 台帳・月間シフト作成・予約サイト（空き枠・指名・スタッフ紹介）・ホットペッパーの割り当てに出し、シフト・休憩・業務・予約を入れられる。
-// 足りない人のシフトは消さずに隠すだけ（入力して保存すれば元に戻る）。
-// 以前は名前だけで登録したスタッフにもシフトが入り、スタッフ情報の一覧（20人ずつ）で見つからないまま台帳に出ていた
+// 新しいシフト・休憩・業務・予約と、予約サイトへの掲載のための入力条件。
+// コース・画像・フリーメッセージを確認する。管理画面の既存シフト・予約は隠さない。
 function staffInfoMissing(st) {
   if (!st) return ["スタッフ情報"];
   const missing = [];
@@ -804,37 +801,35 @@ function staffInfoMissing(st) {
   return missing;
 }
 const staffReady = (st) => staffInfoMissing(st).length === 0;
-// 台帳・月間シフト作成に出すスタッフ：情報がそろっている人。そろっていなくても、その日に予約の担当がある人は出す
-// （本物の予約が台帳から見えなくならないように。新しいシフト・予約は入れられない）
-function ledgerStaffIds(date) {
-  const ev = ensureEvents(date);
-  const booked = new Set(ev.assignments
-    .filter((a) => ev.bookings.some((b) => b.id === a.booking_id && b.status === "confirmed"))
-    .map((a) => a.staff_id));
-  return new Set(state.staff.filter((st) => booked.has(st.id) || staffReady(st)).map((st) => st.id));
+// 管理用の台帳・月間シフト・スタッフ情報は、同じ登録済みスタッフを参照する。
+// 未入力の項目があっても既存の記録を隠さない。新規受付の可否は staffReady で別に判定する。
+function ledgerStaffIds() {
+  return new Set(state.staff.map((st) => st.id));
 }
+// 過去の日も保存済みのシフトを表示する。未登録の過去日にひな型を生成してはいけない。
+const scheduleShifts = (date) => date < todayJst() ? (state.shifts.get(date) || []) : ensureShifts(date);
 const visibleShifts = (date) => {
-  const shown = ledgerStaffIds(date);
-  return ensureShifts(date).filter((x) => shown.has(x.staff_id));
+  const shown = ledgerStaffIds();
+  return scheduleShifts(date).filter((x) => shown.has(x.staff_id));
 };
 
 // ---- リクエスト処理 ----------------------------------------------------
 
 function getSchedule(date) {
-  const today = todayJst();
-  const shown = ledgerStaffIds(date);
+  const shown = ledgerStaffIds();
   const days = [], shifts = [];
-  for (let i = -1; i <= 62; i++) {
+  // 月間シフトも月初から表示する（日別台帳を月の途中で開いても前半を落とさない）。
+  for (let i = Math.min(-1, 1 - Number(date.slice(8, 10))); i <= 62; i++) {
     const d = addDays(date, i);
     const day = ensureDay(d);
     days.push({ date: d, version: day.version, enabled: day.enabled });
-    if (d >= today) shifts.push(...ensureShifts(d).filter((x) => shown.has(x.staff_id)));
+    shifts.push(...scheduleShifts(d).filter((x) => shown.has(x.staff_id)));
   }
   const ev = ensureEvents(date);
   const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st) });
   const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
   return {
-    // 台帳・月間シフト作成の行（スタッフ情報の入力がそろっている人＋その日に予約の担当がある人）
+    // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。
     staff: sorted.filter((st) => shown.has(st.id)).map(staffRow),
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
     allStaff: sorted.map(staffRow),
@@ -1205,8 +1200,8 @@ function postSchedule(body, actor) {
       const warnings = [];
       const missing = staffInfoMissing(rec);
       if (missing.length) {
-        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、このスタッフは台帳・月間シフト作成・予約サイトに出ません（シフトも入れられません）。\n` +
-          "すべて入力して保存すると表示されます。");
+        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、新しいシフト・予約の登録と予約サイトへの掲載はできません。\n` +
+          "登録済みのシフト・予約は管理画面に表示します。スタッフ情報ですべて入力して保存してください。");
       }
       if (affected.length) {
         warnings.push(`保存しました。ただし、このスタッフが担当できないメニュー（対応メニューのチェック・性別）の予約が ${affected.length}件 入っています。\n` +
@@ -3303,7 +3298,7 @@ function reportStats(date) {
   const daysInMonth = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
   const forecast = dayN ? Math.round(cumNet / dayN * daysInMonth) : 0;
   // シフト状況
-  const shifts = visibleShifts(date); // 台帳と同じ（スタッフ情報が未入力の人のシフトは数えない）
+  const shifts = visibleShifts(date); // 台帳と同じ登録済みスタッフのシフトを数える
   const shiftMin = shifts.reduce((s, x) => s + (x.end_at - x.start_at) / 60000, 0);
   const ev = ensureEvents(date);
   let treatMin = 0;

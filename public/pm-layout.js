@@ -454,14 +454,6 @@
       row.classList.toggle("pm-acc-m", !female && lockInfo?.gender !== "none");
       row.classList.toggle("pm-blue", !!lockInfo?.locked);
       row.classList.toggle("pm-locked", !!lockInfo?.locked);
-      // スタッフ情報が未入力でも、その日の予約の担当があるため台帳に残している行（新しいシフト・予約は入れられない）
-      const miss = (window.__pmSchedData?.staff || []).find((x) => x.name === name)?.info_missing || [];
-      row.classList.toggle("pm-info-missing", miss.length > 0);
-      const missTitle = miss.length ? "スタッフ情報が未入力（" + miss.join("・") + "）。この日の予約があるため表示しています。新しいシフト・予約は入れられません" : "";
-      if (cell.dataset.pmMissTitle !== missTitle) {
-        cell.dataset.pmMissTitle = missTitle;
-        if (missTitle) cell.title = missTitle; else cell.removeAttribute("title");
-      }
       if (lockInfo && !cell.querySelector(".pm-lockbtn")) {
         const b = document.createElement("span");
         b.className = "pm-lockbtn";
@@ -1258,7 +1250,7 @@
   async function openShiftAdd() {
     document.getElementById("pm-shiftadd")?.remove();
     await refreshSched(true);
-    // スタッフ情報が未入力の人（予約があるため台帳に残っている人）はシフトを入れられないので、選択肢に出さない
+    // スタッフ情報が未入力の人はシフトを入れられないので、選択肢に出さない
     const staff = (window.__pmSchedData?.staff || []).filter((st) => !(st.info_missing || []).length);
     const date = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime")
       || new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
@@ -3193,12 +3185,12 @@
   };
 
   let current = null; // { key, sec, date, staff, sched, att }
-  async function load(sec, name, date) {
+  async function load(staffId, date) {
     const [sched, att] = await Promise.all([
       fetch("/api/demo/schedule?date=" + date, { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/demo/attendance?date=" + date, { cache: "no-store" }).then((r) => r.json()),
     ]);
-    const staff = (sched.staff || []).find((s) => s.name === name);
+    const staff = (sched.allStaff || sched.staff || []).find((s) => s.id === staffId);
     return { sched, att, staff };
   }
 
@@ -3247,8 +3239,6 @@
     const sEnd = shift ? minOf(date, shift.end_at) : (reactTime(sec, "シフト終了時間") ?? 1320);
     const a = (att.records || []).find((r) => r.staffId === sid) || {};
     const cin = a.clock_in ?? sStart, cout = a.clock_out ?? sEnd;
-    const idx = (sched.staff || []).findIndex((s) => s.id === sid);
-    const dnum = date.replace(/-/g, "");
     const ro = (k, v) => '<span class="pm-si-ro" data-calc="' + k + '">' + esc(v ?? "") + "</span>";
     const num = (name, v) => '<input class="pm-si-num" type="number" min="0" step="1" name="' + name + '" value="' + esc(v ?? 0) + '">';
     const row = (l1, v1, l2, v2) => "<tr><th>" + l1 + "</th><td>" + v1 + "</td><th>" + l2 + "</th><td>" + v2 + "</td></tr>";
@@ -3256,7 +3246,7 @@
     box.className = "pm-si-box";
     box.innerHTML =
       '<table class="pm-si-grid"><tbody>' +
-      row("ID", '<span class="pm-si-ro">' + esc(dnum + String(idx + 1).padStart(2, "0")) + "</span>", "スケジュールID", '<span class="pm-si-ro">' + esc(dnum) + "</span>") +
+      row("スタッフID", '<span class="pm-si-ro">' + esc(sid.slice(0, 8)) + "</span>", "スケジュールID", '<span class="pm-si-ro">' + esc(shift?.id || "未設定") + "</span>") +
       row("日付", '<span class="pm-si-ro">' + esc(date) + "</span>", "勤務時間", ro("work")) +
       row("スタッフ", '<span class="pm-si-ro">' + esc(staff.name) + "</span>", "残業時間", ro("over")) +
       row("出勤時間", timeSel("in", cin, 1), "深夜勤務時間", ro("night")) +
@@ -3340,22 +3330,23 @@
   async function tickDetail() {
     const sec = document.querySelector("section.ledger-shift-detail");
     if (!sec) { current = null; return; }
-    const th = [...sec.querySelectorAll(".ledger-detail-columns th")].find((x) => x.textContent.trim() === "スタッフ");
-    const name = th ? th.nextElementSibling?.textContent.trim() : "";
-    const date = ledgerDay();
-    if (!name || !date) return;
-    const key = name + "|" + date;
+    const staffId = sec.dataset.staffId;
+    const date = sec.dataset.date || ledgerDay();
+    if (!staffId || !date) return;
+    const key = staffId + "|" + date;
     if (current && current.key === key && current.sec === sec && sec.contains(current.box)) return;
     if (current && current.loading === key) return;
     ensureStyle();
-    current = { key, sec, date, loading: key };
+    const request = { key, sec, date, loading: key };
+    current = request;
     try {
-      const { sched, att, staff } = await load(sec, name, date);
-      if (!staff || !document.body.contains(sec)) { current = null; return; }
+      const { sched, att, staff } = await load(staffId, date);
+      if (current !== request) return;
+      if (!staff || !document.body.contains(sec) || sec.dataset.staffId !== staffId || sec.dataset.date !== date) { current = null; return; }
       sec.querySelectorAll(".pm-si-box, .pm-si-actions").forEach((x) => x.remove());
       current = { key, sec, date, sched, att, staff };
       render(current);
-    } catch { current = null; }
+    } catch { if (current === request) current = null; }
   }
 
   // シフトのない人（予約・休憩・業務もない人）の行は、タイムスケジュールに出さない
