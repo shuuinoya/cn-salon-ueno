@@ -1634,16 +1634,26 @@ main.ledger-app .ledger-event.pm-ev-red { background: #f28b80 !important; border
   z-index: 1500;
   background: rgb(216 216 216 / 0.97);
   color: #222;
-  font-size: 13px;
-  line-height: 1.95;
-  padding: 14px 20px;
-  min-width: 330px;
-  max-width: 460px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  width: 320px;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  max-height: min(280px, calc(100vh - 24px));
+  overflow: hidden;
   border-radius: 2px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
   pointer-events: none;
   word-break: break-all;
 }
+#pm-evtip .pm-tip-row { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 6px; margin: 2px 0; }
+#pm-evtip .pm-tip-row > span { color: #666; }
+#pm-evtip .pm-tip-row > b { font-weight: 400; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+#pm-evtip small { display: block; margin-top: 5px; color: #666; font-size: 10px; }
+body.pm-ledger-dragging #pm-evtip { display: none; }
+@media (hover: none) { #pm-evtip { display: none; } }
 
 /* アカウント管理（ユーザ情報）固有 */
 #pm-account-modal select { font: inherit; padding: 6px 8px; border: 1px solid #cfc6b8; border-radius: 4px; background: #fff; }

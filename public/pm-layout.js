@@ -645,19 +645,10 @@
       });
     });
 
-    // 3c6b2) 予約枠にカーソルを乗せると詳細ツールチップを表示（本物と同じ項目構成）
+    // 3c6b2) 操作中は表示しない、小さな予約プレビュー。
     if (!window.__pmEvTip) {
       window.__pmEvTip = 1;
-      document.addEventListener("mouseover", (e) => {
-        if (document.body.classList.contains("pm-ledger-dragging")) return; // ドラッグ中は出さない
-        const el = e.target.closest(".ledger-event");
-        if (!el || el.classList.contains("activity")) { document.getElementById("pm-evtip")?.remove(); return; }
-        showEventTip(el);
-      });
-      document.addEventListener("mouseout", (e) => {
-        if (e.target.closest && e.target.closest(".ledger-event")) document.getElementById("pm-evtip")?.remove();
-      });
-      document.addEventListener("scroll", () => document.getElementById("pm-evtip")?.remove(), true);
+      bindEventTips();
     }
 
     // 3c6c) 「シフト追加」は本物と同じ「シフト新規登録」モーダルを開く
@@ -1189,7 +1180,39 @@
   window.__pmDecorateEvents = decorateEvents;
   window.__pmRefreshSched = refreshSched;
 
-  // 予約枠のホバー詳細（会員番号〜会計情報まで本物と同じ並び）
+  // 押した瞬間に消し、同じ枠の上では操作終了後も勝手に復活させない。
+  function bindEventTips() {
+    let target = null, timer = 0, suppressed = false, pressed = false;
+    const hide = () => { clearTimeout(timer); document.getElementById("pm-evtip")?.remove(); };
+    const suppress = () => { suppressed = true; hide(); };
+    const busy = () => document.body.classList.contains("pm-ledger-dragging") ||
+      !!document.querySelector('.ledger-modal-backdrop, .ledger-side-form, .ledger-shift-detail, #pm-np, #pm-move-confirm, [role="dialog"]');
+    document.addEventListener("pointerover", (e) => {
+      if (e.pointerType !== "mouse") return;
+      const el = e.target.closest?.(".ledger-event");
+      if (!el || el.classList.contains("activity") || el.classList.contains("pm-drag-clone")) { hide(); target = null; return; }
+      if (el === target || el.contains(e.relatedTarget)) return;
+      hide(); target = el; suppressed = pressed || !!e.buttons || busy();
+      if (suppressed) return;
+      timer = setTimeout(() => {
+        if (target === el && el.isConnected && !suppressed && !pressed && !busy()) showEventTip(el);
+      }, 350);
+    });
+    document.addEventListener("pointerout", (e) => {
+      if (target && !target.contains(e.relatedTarget)) { hide(); target = null; }
+    });
+    document.addEventListener("pointerdown", () => { pressed = true; suppress(); }, true);
+    window.addEventListener("pointerup", () => { pressed = false; }, true);
+    window.addEventListener("pointercancel", () => { pressed = false; suppress(); }, true);
+    for (const event of ["click", "keydown", "focusin", "contextmenu", "scroll", "wheel"]) {
+      document.addEventListener(event, suppress, { capture: true, passive: true });
+    }
+    window.addEventListener("blur", () => { pressed = false; suppress(); });
+    window.addEventListener("resize", suppress);
+    document.addEventListener("visibilitychange", suppress);
+  }
+
+  // 空欄は省略。詳細な内容は予約枠をクリックして開く。
   function showEventTip(el) {
     const d = window.__pmSchedData;
     if (!d) return;
@@ -1228,9 +1251,12 @@
     if (!tip) {
       tip = document.createElement("div");
       tip.id = "pm-evtip";
+      tip.setAttribute("role", "tooltip");
       document.body.appendChild(tip);
     }
-    tip.innerHTML = lines.map(([k, v]) => esc(k) + "：" + esc(v)).join("<br/>");
+    tip.innerHTML = lines.filter(([, v]) => String(v).trim()).map(([k, v]) =>
+      '<div class="pm-tip-row"><span>' + esc(k) + '</span><b>' + esc(v) + '</b></div>').join("") +
+      '<small>クリックして詳細を確認</small>';
     const r = el.getBoundingClientRect();
     tip.style.visibility = "hidden";
     tip.style.left = "0px";
@@ -1240,6 +1266,7 @@
     let x = r.left + r.width * 0.6;
     let y = r.bottom + 8;
     if (x + tw > window.innerWidth - 12) x = window.innerWidth - tw - 12;
+    x = Math.max(8, x);
     if (y + th > window.innerHeight - 12) y = Math.max(10, r.top - th - 8);
     tip.style.left = x + "px";
     tip.style.top = y + "px";

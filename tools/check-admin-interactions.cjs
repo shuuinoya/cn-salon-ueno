@@ -163,7 +163,47 @@ function detail() {
   checks += 6;
 }
 
+function hoverTip() {
+  const listeners = {}, windowListeners = {}, timers = new Map();
+  let nextTimer = 0, shown = 0, visible = false, dragging = false, dialog = false, delay = 0;
+  const child = {};
+  const card = { isConnected: true, classList: { contains() { return false; } }, contains(el) { return el === this || el === child; }, closest() { return this; } };
+  child.closest = () => card;
+  const document = {
+    body: { classList: { contains() { return dragging; } } },
+    addEventListener(type, fn) { listeners[type] = fn; },
+    querySelector() { return dialog ? {} : null; },
+    getElementById() { return visible ? { remove() { visible = false; } } : null; },
+  };
+  const context = vm.createContext({ document, window: { addEventListener(type, fn) { windowListeners[type] = fn; } },
+    setTimeout(fn, ms) { delay = ms; timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout(id) { timers.delete(id); },
+    showEventTip() { shown++; visible = true; } });
+  vm.runInContext(extract("  function bindEventTips()", "  // 空欄は省略。") + ";bindEventTips();", context);
+  const enter = (extra = {}) => listeners.pointerover({ target: card, pointerType: "mouse", buttons: 0, relatedTarget: null, ...extra });
+  const leave = () => listeners.pointerout({ relatedTarget: null });
+  const flush = () => { const tasks = [...timers.values()]; timers.clear(); tasks.forEach(fn => fn()); };
+  enter(); assert.equal(visible, false); assert.equal(delay, 350); flush(); assert.equal(visible, true);
+  listeners.pointerout({ relatedTarget: child }); enter({ target: child, relatedTarget: card });
+  assert.equal(visible, true); assert.equal(shown, 1, "枠内の文字の上で点滅させない");
+  listeners.pointerdown(); assert.equal(visible, false, "つかんだ瞬間に消す");
+  windowListeners.pointerup(); enter(); flush(); assert.equal(visible, false, "離しても同じ枠の上で復活しない");
+  leave(); enter(); listeners.pointerdown(); flush(); assert.equal(visible, false, "待機中につかんでも遅れて表示しない");
+  windowListeners.pointerup();
+  for (const event of ["click", "keydown", "focusin", "contextmenu", "scroll", "wheel"]) {
+    leave(); enter(); flush(); assert.equal(visible, true); listeners[event](); assert.equal(visible, false, event + "で消す");
+  }
+  for (const event of ["blur", "resize"]) {
+    leave(); enter(); flush(); windowListeners[event](); assert.equal(visible, false, event + "で消す");
+  }
+  leave(); enter({ pointerType: "touch" }); flush(); assert.equal(visible, false, "タッチ操作では表示しない");
+  enter({ buttons: 1 }); flush(); assert.equal(visible, false);
+  leave(); dragging = true; enter(); flush(); assert.equal(visible, false, "ドラッグ中は表示しない");
+  leave(); dragging = false; dialog = true; enter(); flush(); assert.equal(visible, false, "別の入力画面が開いている間は表示しない");
+  leave(); dialog = false; enter(); card.isConnected = false; flush(); assert.equal(visible, false, "画面切替後に古い予約を表示しない");
+  checks += 17;
+}
+
 (async () => {
-  await confirmation(); touch(); detail();
-  console.log(`PASS admin interactions: ${checks} checks (nomination, one-time confirmation, touch, detail, tickets); synthetic data only`);
+  await confirmation(); touch(); detail(); hoverTip();
+  console.log(`PASS admin interactions: ${checks} checks (nomination, touch, detail, tickets, hover dismissal); synthetic data only`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
