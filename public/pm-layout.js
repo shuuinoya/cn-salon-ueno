@@ -3427,7 +3427,7 @@
     let total = [];
     for (const fs of root.querySelectorAll(":scope > fieldset")) {
       const head = fs.querySelector(":scope > legend input[type=checkbox]");
-      const items = [...fs.querySelectorAll(":scope > div input[type=checkbox]")];
+      const items = [...fs.querySelectorAll(":scope > div input[type=checkbox]")].filter((input) => !input.disabled);
       total = total.concat(items);
       if (!head || !items.length) continue;
       const t = tally(items);
@@ -3443,7 +3443,8 @@
       p.className = "pm-course-note";
       p.textContent = "予約を受けられるのは、チェックが入っているメニューだけです（予約サイトの指名・指名なしの自動の担当・管理画面からの登録すべてに適用）。" +
         "カテゴリのチェックは、そのカテゴリのメニューをまとめて選ぶ・外すためのもので、一部だけ選んでいるときは「－」で表示します。" +
-        "「全て」は、今後増えるメニューも含めて全部担当できる設定です。変更は「保存」を押すまで反映されません。";
+        "男性スタッフは女性指定、女性スタッフは男性指定のメニューを選べません。性別が未設定の場合は、性別指定のないメニューだけ選べます。" +
+        "「全て」は、その人の性別で担当できるメニューを選びます（今後増えるメニューも含む）。変更は「保存」を押すまで反映されません。";
       root.insertAdjacentElement("afterend", p);
     }
   }

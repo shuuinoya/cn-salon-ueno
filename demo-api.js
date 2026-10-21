@@ -1146,6 +1146,11 @@ function postSchedule(body, actor) {
         const known = new Set([...courseStore.keys()].map(String));
         courseList = [...new Set((Array.isArray(p.courses) ? p.courses : []).map(String))].filter((cid) => known.has(cid));
         if (!courseList.length) throw err(400, "noCourses");
+        // 画面を経由しなくても、性別指定の異なるメニューはチェックして保存できない。
+        // 「全て」はその人の性別で担当できる全メニュー（予約時の性別判定も維持）。
+        if (courseList.some((cid) => courseGender(cid) !== "none" && courseGender(cid) !== gender)) {
+          throw err(409, "staffCourseGender");
+        }
       }
       const profile = { ...(p.profile || {}) };
       delete profile.nominationFeePending;

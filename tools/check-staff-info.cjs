@@ -106,6 +106,24 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.ok(sc.shifts.some((x) => x.staff_id === bare.id && x.date === date));
   assert.ok(freeStaffIds(date, 1080, 1140, COURSE, 'female').includes(bare.id));
   assert.ok(publicStaffList().some((s) => s.id === bare.id));
+  // スキル設定の保存時にも性別指定を検証する。拒否時は写真や紹介文も一切変えない。
+  const maleOil = '364326-4822708', femaleOil = '364326-4823112';
+  for (const [gender, blocked] of [['male', femaleOil], ['female', maleOil], ['none', femaleOil], ['none', maleOil]]) {
+    const before = JSON.stringify(state.staff.find(s => s.id === bare.id));
+    const photoBefore = state.photos.get(bare.id);
+    assert.throws(() => save({ gender, courses: [COURSE, blocked], photo: 'invalid-new-photo' }), code('staffCourseGender'));
+    assert.equal(JSON.stringify(state.staff.find(s => s.id === bare.id)), before, '性別制限に違反する保存で登録内容を変えない');
+    assert.equal(state.photos.get(bare.id), photoBefore, '拒否した保存で写真を変えない');
+  }
+  for (const [gender, permitted] of [['male', maleOil], ['female', femaleOil], ['none', COURSE]]) {
+    assert.equal(save({ gender, courses: [permitted] }).ok, true, '対応する性別のメニューは保存できる');
+    assert.deepEqual(JSON.parse(state.staff.find(s => s.id === bare.id).courses), [permitted]);
+    save({ gender, allCourses: true, profile: { personalNomination: true, message: 'テスト紹介文' } });
+    const row = publicStaffList().find(s => s.id === bare.id);
+    assert.ok(row);
+    assert.equal(row.courses.includes(maleOil), gender === 'male', '全てでも男性指定の条件を守る');
+    assert.equal(row.courses.includes(femaleOil), gender === 'female', '全てでも女性指定の条件を守る');
+  }
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
   console.log('PASS: registered staff and saved shifts remain consistent, including historical/month-start shifts; incomplete profiles cannot accept new shifts or bookings; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
