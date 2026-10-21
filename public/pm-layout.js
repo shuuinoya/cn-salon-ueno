@@ -988,11 +988,19 @@
     const now = Date.now();
     // 変更は予約が入った瞬間の通知（SSE）で強制的に取り直すため、ふだんの取り直しは60秒ごとで足りる（通信量の節約）
     if (!force && window.__pmSchedAt && now - window.__pmSchedAt < 60000 && window.__pmSchedFor === t) return;
+    const requestId = window.__pmSchedRequest = (window.__pmSchedRequest || 0) + 1;
     window.__pmSchedAt = now;
     window.__pmSchedFor = t;
     try {
       const r = await fetch("/api/demo/schedule?date=" + t, { cache: "no-store" });
+      if (!r.ok) return;
       const d = await r.json();
+      const shown = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime");
+      if (requestId !== window.__pmSchedRequest || (shown && shown !== t)) return;
+      if (!Array.isArray(d.staff) || !Array.isArray(d.bookings)) return;
+      const current = window.__pmSchedData;
+      const version = (data) => Number((data?.days || []).find((day) => day.date === t)?.version || 0);
+      if (current?.__date === t && version(current) > version(d)) return;
       d.__date = t;
       window.__pmSchedData = d;
     } catch {}
@@ -1010,6 +1018,10 @@
       if (shown && shown !== date) return; // 先読みした前後の日のデータは、表示中の日のデータにしない
       let d;
       try { d = JSON.parse(text); } catch { return; }
+      if (!Array.isArray(d.staff) || !Array.isArray(d.bookings)) return;
+      const current = window.__pmSchedData;
+      const version = (data) => Number((data?.days || []).find((day) => day.date === date)?.version || 0);
+      if (current?.__date === date && version(current) > version(d)) return;
       d.__date = date;
       const changed = window.__pmSchedFor !== date;
       window.__pmSchedData = d;
@@ -1097,6 +1109,8 @@
     const d = window.__pmSchedData;
     if (!d || !d.bookings) return;
     const date = d.__date;
+    const shown = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime");
+    if (shown && shown !== date) return;
     const staffByName = {};
     for (const st of d.staff || []) staffByName[st.name] = st.id;
     const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\'/g, "&#39;");
@@ -3851,15 +3865,55 @@
     return commit(p, t);
   }
 
+  // 置き場の札は保存後も残せるため、確認画面を出す前に元予約を必ず読み直す。
+  // キャッシュ済みの台帳を使わず、変更された説明・指名内容を古い札のまま承認させない。
+  async function inspectParkedBooking(p) {
+    try {
+      const r = await fetch("/api/demo/schedule?date=" + encodeURIComponent(p.date) + "&moveCheck=" + Date.now(),
+        { cache: "no-store", signal: AbortSignal.timeout(10000) });
+      if (!r.ok) return { status: "unavailable" };
+      const data = await r.json();
+      if (!Array.isArray(data.bookings) || !Array.isArray(data.assignments)) return { status: "unavailable" };
+      const booking = data.bookings.find((b) => b.id === p.item.id && b.status === "confirmed");
+      if (!booking) return { status: "missing" };
+      const summary = (b) => JSON.stringify([b?.name || "", b?.course || "", b?.course_name || "", Number(b?.people || 1),
+        b?.nominated_staff_id || null, b?.nominated_staff_name || "", Number(b?.nomination_fee || 0)]);
+      const assigned = data.assignments.some((a) => a.booking_id === p.item.id && a.staff_id === p.item.staffId);
+      if (!assigned || minOf(p.date, booking.start_at) !== p.item.start || minOf(p.date, booking.end_at) !== p.item.end ||
+          summary(booking) !== summary(p.booking)) return { status: "changed" };
+      const revision = (data.days || []).find((day) => day.date === p.date)?.version;
+      if (!Number.isInteger(revision) || revision < 0) return { status: "unavailable" };
+      return { status: "same", booking, revision, staffName: staffIn(data, p.item.staffId)?.name || p.staffName };
+    } catch { return { status: "unavailable" }; }
+  }
+
   async function commit(p, t) {
     const it = p.item;
     const cross = t.date !== p.date;
     const move = { date: p.date, id: it.id, staffId: t.staffId, start: t.start, end: t.end };
     if (cross) move.toDate = t.date;
     if (it.type === "booking") {
+      if (p.kind === "chip") {
+        const current = await inspectParkedBooking(p);
+        if (current.status !== "same") {
+          if (current.status === "unavailable") {
+            toast("元の予約の最新情報を確認できませんでした。予約は変更していません。接続を確認して、もう一度操作してください。");
+          } else {
+            setParked(null);
+            toast(current.status === "missing"
+              ? "元の予約が移動または取消されていたため、置き場の札を解除しました。最新の台帳を確認してください。"
+              : "元の予約の日時・担当・メニュー・指名情報などが変わっていたため、移動を中止して置き場の札を解除しました。最新の予約から操作し直してください。");
+            await reloadLedger(p);
+          }
+          return back(p);
+        }
+        p.booking = current.booking;
+        p.staffName = current.staffName;
+        p.validatedSourceRevision = current.revision;
+      }
       // 変更前は「動かした枠」の担当・時刻（複数名の予約でも、動かした人から動かした先へ）
       const before = { staffId: it.staffId, staffName: p.staffName, start: it.start, end: it.end };
-      const ok = await window.__pmConfirmBookingMove(cross ? { ...move, before, booking: p.booking } : { ...move, before }, p.data);
+      const ok = await window.__pmConfirmBookingMove(cross || p.kind === "chip" ? { ...move, before, booking: p.booking } : { ...move, before }, p.data);
       if (!ok) return back(p);
     }
     p.clone.classList.add("pm-drag-saving");
@@ -3881,13 +3935,21 @@
       toast(it.type !== "booking" ? "保存しました。" : "予約を移動しました。", "ok");
       return;
     }
-    toast(ERR[out.error] || (out.error === "network"
-      ? "通信に失敗しました。保存できたか分からないため、最新の状態を読み直しました。台帳を確認してください。" : "移動できませんでした。"));
+    let clearedPark = false;
+    if (p.kind === "chip") {
+      const current = await inspectParkedBooking(p);
+      if (current.status === "missing" || current.status === "changed") { setParked(null); clearedPark = true; }
+    }
+    toast((ERR[out.error] || (out.error === "network"
+      ? "通信に失敗しました。保存できたか分からないため、台帳の最新状態を取り直します。接続と保存結果を確認してください。" : "移動できませんでした。")) +
+      (clearedPark ? " 元の予約の移動・変更・取消を確認したため、古い置き場の札を解除しました。" : ""));
     await reloadLedger(p);
     return back(p);
   }
   // その日の台帳の版（ほかの画面での変更の検出に使う）。表示中の日は画面のデータ、ほかの日はサーバーに聞く
   async function versionOf(p, date) {
+    // 指名等を確認した後に新しい版へ取り替えない。確認中の変更はサーバーに拒否させる。
+    if (p.kind === "chip" && date === p.date && Number.isInteger(p.validatedSourceRevision)) return p.validatedSourceRevision;
     const v = (p.data?.days || []).find((x) => x.date === date)?.version;
     if (v !== undefined && date === p.shown) return v;
     try {

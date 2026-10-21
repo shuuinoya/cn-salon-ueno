@@ -27,11 +27,12 @@
         es.addEventListener("message", function (ev) {
           var was = curSeq;
           curSeq = String(ev.data);
+          if (was !== curSeq) clearKept();
           // 合図の番号が分かった（つながった・変わった）ことを画面に知らせる（前後の日の先読みを始める合図）
           if (was !== curSeq) { try { window.dispatchEvent(new CustomEvent("cn:seq", { detail: curSeq })); } catch (e) {} }
           if (boot && curSeq !== String(boot.seq)) boot = null;
         });
-        es.addEventListener("error", function () { curSeq = null; });
+        es.addEventListener("error", function () { curSeq = null; clearKept(); });
       } catch (e) {}
       return es;
     };
@@ -43,6 +44,8 @@
   // ④ 台帳データ（予約台帳・受付停止）を覚えておく場所。key＝パス＋日付
   var KEEP = /^\/api\/demo\/(schedule|locks)$/;
   var kept = {}, keptFlight = {};
+  var keptEpoch = 0;
+  function clearKept() { kept = {}; keptFlight = {}; keptEpoch++; }
   var KEEP_MS = 90000;
   function keptResponse(e) { return new Response(e.text, { status: e.status, headers: { "Content-Type": e.type } }); }
   // 台帳データが届いたことを画面（管理画面の上書き pm-layout.js）に知らせる。画面の部品が受け取る前に知らせるので、
@@ -71,17 +74,18 @@
     var p = keptFlight[key];
     if (!p) {
       var seqAtStart = curSeq;
+      var epochAtStart = keptEpoch;
       p = keptFlight[key] = F(key, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
         return r.text().then(function (text) {
-          var e = { text: text, status: r.status, type: r.headers.get("Content-Type") || "application/json", seq: seqAtStart, at: Date.now() };
+          var e = { text: text, status: r.status, type: r.headers.get("Content-Type") || "application/json", seq: seqAtStart, epoch: epochAtStart, at: Date.now() };
           // 取っている間に「変わった」合図が来たら、そのデータは覚えない（変更の前か後か分からないため）
-          if (r.ok && seqAtStart !== null && seqAtStart === curSeq) kept[key] = e;
+          if (r.ok && epochAtStart === keptEpoch && seqAtStart !== null && seqAtStart === curSeq) kept[key] = e;
           if (keptFlight[key] === p) delete keptFlight[key];
           return e;
         });
       }, function (err) { if (keptFlight[key] === p) delete keptFlight[key]; throw err; });
     }
-    return withSignal(p.then(function (e) { if (e.status === 200) tell(u.pathname, u.search, e.text); return keptResponse(e); }), init && init.signal);
+    return withSignal(p.then(function (e) { if (e.status === 200 && e.epoch === keptEpoch) tell(u.pathname, u.search, e.text); return keptResponse(e); }), init && init.signal);
   }
   // 前後の日などを先読みする（覚えた台帳データがまだ使えるものは取りに行かない）
   window.__cnPrefetch = function (paths) {
@@ -127,8 +131,9 @@
       // 書き込みの操作のあとは、先に届いたデータ・取りに行っている途中のデータを使わない（必ず新しく取りに行く）
       if (u.pathname !== "/api/tickets/mine") boot = null;
       inflight = {};
-      kept = {}; keptFlight = {};
-      return F.apply(window, arguments);
+      clearKept();
+      // 送信待ちの間に取得した古い台帳も、保存結果が返った時点で失効させる。
+      return F.apply(window, arguments).then(function (r) { clearKept(); return r; }, function (error) { clearKept(); throw error; });
     }
     // ② ページと一緒に届いたデータ：開いてから5秒間は何度でも（画面のいくつもの部品が同じデータを取りに来るため）、
     //    そのあとは20秒までにまだ使われていなければ1回だけ使う

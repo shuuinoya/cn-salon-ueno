@@ -480,10 +480,13 @@ const STAFF_SEED = [
 
 // ---- 時刻ユーティリティ（日本時間・分単位） ---------------------------
 
+const validDay = (date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+  Number.isFinite(Date.parse(date + "T00:00:00Z")) && new Date(date + "T00:00:00Z").toISOString().slice(0, 10) === date;
+const validSpan = (start, end) => Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= 1620 && start < end;
 const dayStartMs = (date) => Date.parse(date + "T00:00:00+09:00");
 const minToMs = (date, min) => dayStartMs(date) + min * 60000;
 const msToMin = (date, ms) => Math.round((ms - dayStartMs(date)) / 60000);
-const todayJst = () => new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10); // 3時切替
+const todayJst = (now = Date.now()) => new Date(now + 32400000 - 10800000).toISOString().slice(0, 10); // 3時切替
 // 鍵（予約受付停止）はその日だけ有効。ほかの日の予約受付には影響しない
 function staffLockedOn(staffId, date) {
   const d = state.days.get(date);
@@ -771,14 +774,17 @@ function ensureEvents(date) {
 }
 
 
-// スタッフの1日分の予定（予約・休憩・業務）が重ならないかを確認
+// 営業日が違っても、同じ実時刻の予約・休憩・業務を重ねない（24時以降も含む）。
 function overlaps(date, staffId, start, end, ignoreId) {
-  const ev = ensureEvents(date);
-  const items = [
-    ...ev.bookings.filter((b) => b.status === "confirmed" && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId)),
-    ...ev.blocks.filter((b) => b.staff_id === staffId),
-  ];
-  return items.some((it) => it.id !== ignoreId && msToMin(date, it.start_at) < end && msToMin(date, it.end_at) > start);
+  const from = minToMs(date, start), to = minToMs(date, end);
+  return [addDays(date, -1), date, addDays(date, 1)].some((d) => {
+    const ev = state.events.get(d);
+    if (!ev) return false;
+    const ids = new Set(ev.assignments.filter((a) => a.staff_id === staffId).map((a) => a.booking_id));
+    return [...ev.bookings.filter((b) => b.status === "confirmed" && ids.has(b.id)),
+      ...ev.blocks.filter((b) => b.staff_id === staffId)]
+      .some((it) => it.id !== ignoreId && it.start_at < to && it.end_at > from);
+  });
 }
 
 function shiftOf(date, staffId) {
@@ -875,7 +881,7 @@ function err(code, message) {
 // actor：操作した管理画面のアカウント（{user, role}。権限の確認と移動の記録に使う）
 function postSchedule(body, actor) {
   const { action, date } = body;
-  if (!action || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw err(400, "invalid");
+  if (!action || !validDay(date)) throw err(400, "invalid");
   if (action === "staffReconcile") {
     if (actor?.role !== "admin") throw err(403, "forbidden");
     const result = require("./staff-reconcile").reconcile(state, body, {
@@ -898,13 +904,15 @@ function postSchedule(body, actor) {
       const list = ensureShifts(date);
       const idx = list.findIndex((s) => s.staff_id === staffId);
       if (remove) {
-        if (overlaps(date, staffId, 0, 100000)) throw err(409, "scheduleConflict");
+        const ev = ensureEvents(date);
+        if (ev.blocks.some((b) => b.staff_id === staffId) || ev.bookings.some((b) => b.status === "confirmed" &&
+          ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId))) throw err(409, "scheduleConflict");
         if (idx >= 0) list.splice(idx, 1);
         state.attendance.delete(date + "|" + staffId); // シフトを消したら、その日の勤怠の記録も消す
         bump();
         return { ok: true };
       }
-      if (!(Number.isFinite(start) && Number.isFinite(end) && start < end)) throw err(400, "invalid");
+      if (!validSpan(start, end)) throw err(400, "invalid");
       // 予約・休憩・業務が新しいシフトの外に残る短縮は保存しない
       const ev = ensureEvents(date);
       const mine = [
@@ -920,11 +928,11 @@ function postSchedule(body, actor) {
     case "bulkShift": {
       const { start, end, cells, remove } = body;
       if (!Array.isArray(cells) || !cells.length) throw err(400, "invalid");
-      if (!remove && !(Number.isFinite(start) && Number.isFinite(end) && start < end)) throw err(400, "invalid");
+      if (!remove && !validSpan(start, end)) throw err(400, "invalid");
       for (const c of cells) {
         // 実在するスタッフ・日付だけ（以前はここを確かめておらず、どんなスタッフIDでもシフトが入った）
         const cellStaff = state.staff.find((s) => s.id === c.staffId);
-        if (!cellStaff || !/^\d{4}-\d{2}-\d{2}$/.test(String(c.date || ""))) throw err(400, "invalid");
+        if (!cellStaff || !validDay(c.date)) throw err(400, "invalid");
         if (!remove && !staffReady(cellStaff)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろうまでシフトは入れられない
         if (c.revision !== ensureDay(c.date).version) throw err(409, "scheduleConflict");
       }
@@ -970,7 +978,7 @@ function postSchedule(body, actor) {
         return { ok: true };
       }
       const blockStaff = state.staff.find((s) => s.id === staffId);
-      if (!blockStaff || !(start < end) || ![`break`, `work`].includes(kind)) throw err(400, "invalid");
+      if (!blockStaff || !validSpan(start, end) || ![`break`, `work`].includes(kind)) throw err(400, "invalid");
       if (!staffReady(blockStaff)) throw err(409, "staffInfoMissing");
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end, id)) throw err(409, "scheduleConflict");
@@ -987,7 +995,7 @@ function postSchedule(body, actor) {
       // 予約ID・お客様・メニュー・施術時間・回数券などはそのまま、日付・時間・担当だけを変える
       const toDate = body.toDate && body.toDate !== date ? String(body.toDate) : date;
       if (toDate !== date) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(toDate) || toDate < todayJst() || toDate > addDays(todayJst(), 90)) throw err(400, "invalid");
+        if (!validDay(toDate) || toDate < todayJst() || toDate > addDays(todayJst(), 90)) throw err(400, "invalid");
         if (body.toRevision !== ensureDay(toDate).version) throw err(409, "scheduleConflict");
       }
       const ev = ensureEvents(date);
@@ -1011,7 +1019,7 @@ function postSchedule(body, actor) {
       if (!staffReady(mvTarget) && !already) throw err(409, "staffInfoMissing");
       if (staffLockedOn(staffId, toDate) && !already) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
-      if (!(Number.isInteger(start) && Number.isInteger(end) && end > start && end - start <= 600)) throw err(400, "invalid");
+      if (!(validSpan(start, end) && end - start <= 600)) throw err(400, "invalid");
       // 現在の対応メニューのチェックは、権限や指名確認にかかわらず必須。
       // 同じ担当の時間変更でも再確認し、古い画面からの例外承認では回避できない。
       const mvWhy = bookingMismatch(mvTarget, bk);
@@ -1078,7 +1086,8 @@ function postSchedule(body, actor) {
       const { staffId, start, course, people, consent } = body;
       const c = getCourse(course);
       const cbTarget = state.staff.find((s) => s.id === staffId);
-      if (!consent || !c || !cbTarget) throw err(400, "invalid");
+      const n = people === undefined ? 1 : Number(people);
+      if (consent !== true || !c || !cbTarget || !Number.isInteger(n) || n < 1 || n > 3) throw err(400, "invalid");
       rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない（管理画面から入れる予約も同じ）
       if (cbTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中のスタッフには入れられない（移動と同じ）
       if (!staffReady(cbTarget)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろっていない人には入れられない
@@ -1086,14 +1095,13 @@ function postSchedule(body, actor) {
       const cbWhy = staffMismatch(cbTarget, course); // 担当メニュー外・性別の合わないスタッフには入れられない（管理者でも同じ）
       if (cbWhy) throw mismatchError(cbWhy);
       const cbGender = courseGender(course);
-      if (!Number.isInteger(start)) throw err(400, "invalid");
       const end = start + c.minutes;
+      if (!validSpan(start, end)) throw err(400, "invalid");
       if (!withinShift(date, staffId, start, end)) throw err(409, "outsideShift");
       if (overlaps(date, staffId, start, end)) throw err(409, "soldOut");
       const ev = ensureEvents(date);
       state.bookingSerial++;
       const id = "bk-new-" + state.bookingSerial;
-      const n = Number(people) || 1;
       // 複数名の予約は、対応可能で空いているスタッフを人数分確保する
       const cbOthers = n > 1
         ? freeStaffIds(date, start, end, course, cbGender).filter((sid) => sid !== staffId).slice(0, n - 1)
@@ -1895,8 +1903,8 @@ function reviveForPurchase(newT, opts = {}) {
   }
 }
 // 「今使える回数券か」の判定はすべてここに集約する（残り1回以上・期限内）
-function ticketUsable(t) {
-  return !!t && t.uses_left > 0 && Date.now() <= t.expires_at;
+function ticketUsable(t, now = Date.now()) {
+  return !!t && t.uses_left > 0 && now <= t.expires_at;
 }
 function ticketUsageLabel(t) {
   if (t.uses_left <= 0) return "残り回数がないため、ご利用いただけません";
@@ -2216,7 +2224,7 @@ function ticketPublicJson(t) {
 }
 
 // 予約で使う回数券の事前検証（所有者・残数・期限）。減算はしない
-function ticketForUse(ticketId, token, email, member, courseId) {
+function ticketForUse(ticketId, token, email, member, courseId, now = Date.now()) {
   const t = state.tickets.get(String(ticketId || ""));
   if (!t) throw err(409, "ticketInvalid");
   const scope = ticketConditions(t).scopeKey;
@@ -2225,16 +2233,16 @@ function ticketForUse(ticketId, token, email, member, courseId) {
   const own = member && t.member_email === member.email;
   if (!own && t.token !== String(token || "")) throw err(409, "ticketInvalid");
   if (!own && String(email || "").toLowerCase() !== t.buyer_email) throw err(409, "ticketInvalid");
-  if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
+  if (now > t.expires_at) throw err(409, "ticketExpired");
   if (t.uses_left <= 0) throw err(409, "ticketEmpty");
-  if (!ticketUsable(t)) throw err(409, "ticketInvalid");
+  if (!ticketUsable(t, now)) throw err(409, "ticketInvalid");
   return t;
 }
 
 // 予約確定の直前に1回分を消費する（同期・冪等）。失敗したら予約は作られない
-function consumeTicket(t, bookingId, ref) {
+function consumeTicket(t, bookingId, ref, now = Date.now()) {
   if (state.ticketUseByBooking.has(bookingId)) return t.uses_left; // 同じ予約では1回だけ
-  if (Date.now() > t.expires_at) throw err(409, "ticketExpired");
+  if (now > t.expires_at) throw err(409, "ticketExpired");
   if (t.uses_left <= 0) throw err(409, "ticketEmpty");
   t.uses_left -= 1;
   t.history.push({ at: new Date().toISOString(), type: "use", booking_id: bookingId, ref, delta: -1, left_after: t.uses_left });
@@ -2258,11 +2266,11 @@ function queueTicketLeftMail(t, type, ref) {
 
 // キャンセル時の返却。規定：予約開始前の正規キャンセルに限り1回分を戻す。
 // 1つの予約につき返却は1回まで（履歴で冪等）。開始後の取消では戻さない
-function maybeRefundTicket(bk) {
+function maybeRefundTicket(bk, now = Date.now()) {
   if (!bk || !bk.ticket_id) return false;
   const t = state.tickets.get(bk.ticket_id);
   if (!t) return false;
-  if (bk.start_at <= Date.now()) return false; // 開始後は返却しない（既存キャンセル規定に合わせる）
+  if (bk.start_at <= now) return false; // 開始後は返却しない（既存キャンセル規定に合わせる）
   if (!t.history.some((h) => h.type === "use" && h.booking_id === bk.id)) return false;
   if (t.history.some((h) => h.type === "refund" && h.booking_id === bk.id)) return false;
   t.uses_left = Math.min(ticketMaxLeft(t), t.uses_left + 1);
@@ -2730,14 +2738,6 @@ function staffPickerDirectory(courseId, genderPref) {
 // スタッフ情報の入力→対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
 function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId) {
   const shifts = ensureShifts(date);
-  const ev = ensureEvents(date);
-  const busy = (staffId) => {
-    const items = [
-      ...ev.bookings.filter((b) => b.status === "confirmed" && b.id !== ignoreBookingId && ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId)),
-      ...ev.blocks.filter((b) => b.staff_id === staffId),
-    ];
-    return items.some((it) => msToMin(date, it.start_at) < endMin && msToMin(date, it.end_at) > startMin);
-  };
   return state.staff
     .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
     .filter((st) => genderPref === "none" || st.gender === genderPref)
@@ -2745,7 +2745,7 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
       const sh = shifts.find((x) => x.staff_id === st.id);
       return sh && msToMin(date, sh.start_at) <= startMin && endMin <= msToMin(date, sh.end_at);
     })
-    .filter((st) => !busy(st.id))
+    .filter((st) => !overlaps(date, st.id, startMin, endMin, ignoreBookingId))
     .map((st) => st.id);
 }
 
@@ -2772,6 +2772,7 @@ function hpNotify(b, via) {
     if (bk0.status === "confirmed") {
       bk0.status = "cancelled";
       bk0.cancelled = true;
+      ensureEvents(d0).assignments = ensureEvents(d0).assignments.filter((a) => a.booking_id !== bid);
       ensureDay(d0).version++; sseTouch();
     }
     hpLogIt({ via, result: "取消", rid, date: d0 });
@@ -2791,7 +2792,7 @@ function hpNotify(b, via) {
     start = h * 60 + mi;
   }
   start = Math.round(Number(start));
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name || !menu ||
+  if (!validDay(date) || !name || !menu ||
       !(minutes >= 10 && minutes <= 600) || !(price >= 0) ||
       !(Number.isInteger(start) && start % 5 === 0)) return failed(400, "invalid", { rid });
   const end = start + minutes;
@@ -3045,9 +3046,9 @@ function fmtTime2(min) {
   return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 }
 
-function nowMinJst() {
-  const t = todayJst();
-  return Math.round((Date.now() - dayStartMs(t)) / 60000);
+function nowMinJst(now = Date.now()) {
+  const t = todayJst(now);
+  return Math.round((now - dayStartMs(t)) / 60000);
 }
 
 function getAvailability(q, member) {
@@ -3065,10 +3066,11 @@ function getAvailability(q, member) {
   const staffId = q.get("staffId") || "";
   const course = getCourse(courseId);
   const today = todayJst();
-  if (!course || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !(people >= 1 && people <= 3) ||
+  if (!course || !validDay(date) || !(Number.isInteger(people) && people >= 1 && people <= 3) ||
       !["none", "male", "female"].includes(pref)) throw err(400, "invalid");
   const dur = course.minutes;
   const gpref = effectivePref(courseId, pref); // コース名の性別指定を優先
+  const nominatedAllowed = !staffId || nominatableStaff(courseId, gpref).some((st) => st.id === staffId);
   const days = [];
   for (let i = 0; i < 7; i++) {
     const d = addDays(date, i);
@@ -3084,7 +3086,7 @@ function getAvailability(q, member) {
       if (!open) continue;
       if (d === today && m <= nowMinJst()) continue;
       const free = freeStaffIds(d, m, m + dur, courseId, gpref, ignoreId);
-      const ok = free.length >= people && (!staffId || free.includes(staffId));
+      const ok = nominatedAllowed && free.length >= people && (!staffId || free.includes(staffId));
       slots.push({ minute: m, available: ok, start: minToMs(d, m) });
     }
     days.push({ date: d, enabled: day.enabled, slots });
@@ -3102,11 +3104,26 @@ function isRepeatEmail(email) {
   return false;
 }
 
+// 再送キーは、同じ入力内容と同じログイン会員にだけ結び付ける。
+// 以前の形式のキーには照合情報がないため、結果を他の入力へ返さず再確認を求める。
+function bookingRequestFingerprint(body, member) {
+  const stable = (v) => Array.isArray(v) ? v.map(stable) : v && typeof v === "object"
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])])) : v;
+  const { requestKey, ...input } = body;
+  return crypto.createHash("sha256").update(JSON.stringify(stable({ input, member: member?.email || null }))).digest("hex");
+}
 function createPublicBooking(body, member) {
+  const operationTime = Date.now();
   // 多重送信（通信が切れてブラウザが送り直した等）は、最初の結果をそのまま返す。
   // 日時変更の確認より先に見る（1回目で元の予約は取消済みのため、後に見ると「取消済み」と誤って返してしまう）
   const rk = String(body.requestKey || "");
-  if (rk && state.requestKeys.has(rk)) return state.requestKeys.get(rk);
+  if (rk.length > 200) throw err(400, "invalid");
+  const fingerprint = rk ? bookingRequestFingerprint(body, member) : null;
+  if (rk && state.requestKeys.has(rk)) {
+    const previous = state.requestKeys.get(rk);
+    if (!previous?.fingerprint || previous.fingerprint !== fingerprint) throw err(409, "requestChanged");
+    return previous.result;
+  }
   const course = getCourse(body.course);
   // 日時変更（ログイン会員のみ）：元の予約が本人のもの・予約中・開始前であることを先に確認し、
   // 新しい予約が成立した直後に元の予約を取り消す（成立しなければ元の予約はそのまま残る）
@@ -3116,7 +3133,7 @@ function createPublicBooking(body, member) {
     const found = findBooking(String(body.rescheduleId));
     if (!found || found.bk.member_email !== member.email) throw err(404, "notFound");
     if (found.bk.status !== "confirmed") throw err(409, "alreadyCancelled");
-    if (found.bk.start_at <= Date.now()) throw err(409, "tooLate");
+    if (found.bk.start_at <= operationTime) throw err(409, "tooLate");
     reschedule = found;
   }
   const date = body.date;
@@ -3124,7 +3141,7 @@ function createPublicBooking(body, member) {
   const pref = ["none", "male", "female"].includes(body.staff) ? body.staff : "none";
   const staffId = String(body.staffId || "");
   if (String(body.website || "")) throw err(400, "invalid"); // ボット対策の隠し欄
-  if (!course || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !(people >= 1 && people <= 3) ||
+  if (!course || !validDay(date) || !(Number.isInteger(people) && people >= 1 && people <= 3) ||
       body.consent !== true || !String(body.name || "").trim() || !String(body.email || "").trim() ||
       !String(body.phone || "").trim()) throw err(400, "invalid");
   rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない
@@ -3132,7 +3149,7 @@ function createPublicBooking(body, member) {
   const fm = state.settings.freeMessage;
   let comment = fm.visible ? String(body.comment || "").slice(0, fm.maxLength || 2000) : "";
   if (fm.visible && fm.required && !comment.trim()) throw err(400, "invalid");
-  const today = todayJst();
+  const today = todayJst(operationTime);
   if (date < today || date > addDays(today, 84)) throw err(400, "invalid");
   if (!ensureDay(date).enabled) throw err(409, "soldOut");
   const m = Math.round((Number(body.start) - dayStartMs(date)) / 60000);
@@ -3140,7 +3157,7 @@ function createPublicBooking(body, member) {
   const smB = state.settings.shopMaster;
   const mMax = Math.min(smB.resEnd, 1620 - course.minutes);
   if (!(Number.isInteger(m) && m >= Math.max(600, smB.resStart) && m <= mMax && m % 5 === 0)) throw err(400, "invalid");
-  if (date === today && m <= nowMinJst()) throw err(409, "soldOut");
+  if (date === today && m <= nowMinJst(operationTime)) throw err(409, "soldOut");
 
   const gpref = effectivePref(body.course, pref); // コース名の性別指定を優先
   let nominated = null;
@@ -3167,7 +3184,7 @@ function createPublicBooking(body, member) {
       state.ticketUseByBooking.get(reschedule.bk.id) === reschedule.bk.ticket_id);
     const t0 = carryTicket ? state.tickets.get(reschedule.bk.ticket_id) : null;
     if (t0) t0.uses_left += 1;
-    try { useTicket = ticketForUse(body.ticketId, body.ticketToken, body.email, member, body.course); }
+    try { useTicket = ticketForUse(body.ticketId, body.ticketToken, body.email, member, body.course, operationTime); }
     finally { if (t0) t0.uses_left -= 1; }
   }
 
@@ -3179,13 +3196,13 @@ function createPublicBooking(body, member) {
   const fee = nominated ? nominated.nominationFee : 0;
   const reference = "2472" + String(state.bookingSerial).padStart(5, "0");
   // 日時変更で同じ回数券を使う場合は、先に元の予約の1回分を戻してから使う（元の予約の取消時に二重には戻らない）
-  if (carryTicket) maybeRefundTicket(reschedule.bk);
+  if (carryTicket) maybeRefundTicket(reschedule.bk, operationTime);
   // ここで1回分を消費（同期処理なので同時リクエストでも残数は正確。残1で同時2件なら後の1件はここで拒否）
-  const ticketLeft = useTicket ? consumeTicket(useTicket, id, reference) : null;
+  const ticketLeft = useTicket ? consumeTicket(useTicket, id, reference, operationTime) : null;
   const ev = ensureEvents(date);
   ev.bookings.push({
     id, reference,
-    service_date: date, status: "confirmed", created_at: Date.now(), source: "web",
+    service_date: date, status: "confirmed", created_at: operationTime, source: "web",
     start_at: minToMs(date, m), end_at: minToMs(date, m + dur),
     people, course: body.course, course_name: course.name,
     name: String(body.name).slice(0, 120), email: String(body.email).slice(0, 254),
@@ -3227,22 +3244,22 @@ function createPublicBooking(body, member) {
   // 日時変更：新しい予約が成立したので元の予約を取り消す（回数券は返却→新予約で再使用済み）
   if (reschedule) {
     newBk.rescheduled_from = reschedule.bk.id;
-    cancelBooking(reschedule.bk, reschedule.date);
+    cancelBooking(reschedule.bk, reschedule.date, operationTime);
   }
   const result = useTicket ? { id, token, ticketLeft } : { id, token };
   if (reschedule) result.rescheduledFrom = reschedule.bk.id;
-  if (rk) state.requestKeys.set(rk, result);
+  if (rk) state.requestKeys.set(rk, { fingerprint, result });
   return result;
 }
 
 // 予約の取消（お客様用の共通処理。回数券の返却・メール・台帳の更新まで）
-function cancelBooking(bk, date) {
+function cancelBooking(bk, date, now = Date.now()) {
   const ev2 = ensureEvents(date);
   if (bk.status !== "confirmed") throw err(409, "alreadyCancelled");
-  if (bk.start_at <= Date.now()) throw err(409, "tooLate"); // 開始後は店舗にお電話で
+  if (bk.start_at <= now) throw err(409, "tooLate"); // 開始後は店舗にお電話で
   bk.status = "cancelled";
   ev2.assignments = ev2.assignments.filter((a) => a.booking_id !== bk.id);
-  maybeRefundTicket(bk); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
+  maybeRefundTicket(bk, now); // 回数券利用の予約は、開始前キャンセルに限り1回分を返却（冪等）
   queueCancelMails(bk);
   ensureDay(date).version++; sseTouch();
 }
@@ -4714,7 +4731,7 @@ function handleDemoApi(req, res, url) {
   if (url.pathname === "/api/demo/move-targets" && (req.method === "GET" || req.method === "HEAD")) {
     const date = url.searchParams.get("date");
     const id = url.searchParams.get("id") || "";
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
+    if (!validDay(date)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "invalid" }));
       return true;
@@ -4800,7 +4817,7 @@ function handleDemoApi(req, res, url) {
 
   if (req.method === "GET" || req.method === "HEAD") {
     const date = url.searchParams.get("date");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
+    if (!validDay(date)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "invalid" }));
       return true;

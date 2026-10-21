@@ -81,7 +81,9 @@ function setupDrop(source, nominated) {
     J: (v) => { log.posts.push(v); },
   };
   const context = vm.createContext(sandbox);
-  vm.runInContext(extract(source, "function Le(e)", "function Re(e,t)") + ";globalThis.drop=Le;", context);
+  // 次のメニュー選択関数は性別条件・読み取り専用の引数が追加されている。
+  // 検査対象のドラッグ完了処理 Le はそのまま抽出し、次関数の引数には依存しない。
+  vm.runInContext(extract(source, "function Le(e)", "function Re(") + ";globalThis.drop=Le;", context);
   const event = { pointerId: 1, currentTarget: { hasPointerCapture: () => true, releasePointerCapture: () => {} } };
   return { context, log, run: () => context.drop(event) };
 }
