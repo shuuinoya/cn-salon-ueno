@@ -16,6 +16,7 @@
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const crypto = require("crypto");
 
 const TAG_MAP = "__pm_map__";
 const TAG_SET = "__pm_set__";
@@ -184,9 +185,70 @@ async function ghSaveError(response, requestJson, requestContent) {
   return new Error("GitHub保存に失敗: HTTP " + response.status + " category=" + category +
     (fields ? " fields=" + fields : "") + (codes ? " codes=" + codes : "") + " diagnostic=" + (saved ? "saved" : "unavailable"));
 }
-// GitHubへ保存（sha競合は一度だけ取り直して再試行）
+const GH_CONTENTS_LIMIT = 20 * 1024 * 1024;
+const gitSha = value => typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
+let ghGitRefBlocked = false;
+async function ghJson(route, method = "GET", body, json = "", content = "", stage = "repository") {
+  if (method !== "GET" && savesAborted) throw new Error("GitHub保存を中止: category=save_aborted");
+  const r = await fetch(`${GH.api()}/repos/${GH.repo()}${route}`, {
+    method, headers: { ...ghHeaders(), Accept: "application/vnd.github+json", ...(body ? { "Content-Type": "application/json" } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!r.ok) { const e = await ghSaveError(r, json, content); e.message += " stage=" + stage; throw e; }
+  try { return await r.json(); } catch { throw new Error("GitHub保存に失敗: category=invalid_response stage=" + stage); }
+}
+function ghCheck(condition, stage) {
+  if (!condition) throw new Error("GitHub保存に失敗: category=invalid_response stage=" + stage);
+}
+async function ghPrivate() {
+  const repo = await ghJson("");
+  if (repo.private !== true) throw new Error("GitHub保存に失敗: category=repository_not_private");
+}
+// 大きな圧縮データは同じパス・同じgzipのままGitオブジェクトとして保存する。
+// 最後のref更新まで既存バックアップは変わらない。競合時は親を付け替えず止める。
+async function ghPutGit(json, compressed) {
+  if (ghGitRefBlocked) throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_ref");
+  const branch = GH.branch().split("/").map(encodeURIComponent).join("/"), file = GH.path() + ".gz";
+  if (!file || file.startsWith("/") || file.split("/").some(p => !p || p === "." || p === "..") || /[\u0000-\u001f\u007f]/.test(file)) throw new Error("GitHub保存に失敗: category=invalid_path");
+  const ref = await ghJson("/git/ref/heads/" + branch, "GET", undefined, "", "", "git_head");
+  ghCheck(ref.ref === "refs/heads/" + GH.branch() && ref.object?.type === "commit" && gitSha(ref.object.sha), "git_head");
+  const head = ref.object.sha, parent = await ghJson("/git/commits/" + head, "GET", undefined, "", "", "git_parent");
+  ghCheck(parent.sha === head && gitSha(parent.tree?.sha), "git_parent");
+  const expectedBlob = crypto.createHash("sha1").update("blob " + compressed.length + "\0").update(compressed).digest("hex");
+  const content = compressed.toString("base64");
+  const blob = await ghJson("/git/blobs", "POST", { content, encoding: "base64" }, json, content, "git_blob");
+  ghCheck(blob.sha === expectedBlob, "git_blob");
+  const tree = await ghJson("/git/trees", "POST", { base_tree: parent.tree.sha, tree: [{ path: file, mode: "100644", type: "blob", sha: blob.sha }] }, "", "", "git_tree");
+  ghCheck(gitSha(tree.sha), "git_tree");
+  const commit = await ghJson("/git/commits", "POST", { message: "予約データ自動保存 " + new Date().toISOString(), tree: tree.sha, parents: [head] }, "", "", "git_commit");
+  ghCheck(gitSha(commit.sha) && commit.tree?.sha === tree.sha && Array.isArray(commit.parents) && commit.parents.length === 1 && commit.parents[0].sha === head, "git_commit");
+  // 結果不明でも古い内容を新しい親へ重ねない。読取で結果を確かめ、旧headなら同じcommitだけ再試行。
+  ghGitRefBlocked = true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const updated = await ghJson("/git/refs/heads/" + branch, "PATCH", { sha: commit.sha, force: false }, "", "", "git_ref");
+      ghCheck(updated.ref === "refs/heads/" + GH.branch() && updated.object?.type === "commit" && updated.object.sha === commit.sha, "git_ref");
+      ghGitRefBlocked = false; return blob.sha;
+    } catch (error) {
+      if (savesAborted) throw error;
+      let current;
+      try { current = await ghJson("/git/ref/heads/" + branch, "GET", undefined, "", "", "git_ref_verify"); }
+      catch { throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_ref"); }
+      ghCheck(current.ref === "refs/heads/" + GH.branch() && current.object?.type === "commit" && gitSha(current.object.sha), "git_ref_verify");
+      if (current.object.sha === commit.sha) { ghGitRefBlocked = false; return blob.sha; }
+      if (current.object.sha !== head) throw new Error("GitHub保存に失敗: category=ref_conflict stage=git_ref");
+      if (attempt === 1) throw error;
+    }
+  }
+}
+// 小さいファイルは従来のContents API（SHA競合を一度だけ再確認）。圧縮は予約受付を塞がない。
 async function ghPut(json, sha, retry = true) {
-  const content = zlib.gzipSync(Buffer.from(json), { level: 9 }).toString("base64");
+  if (ghGitRefBlocked) throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_ref");
+  await ghPrivate();
+  const compressed = await new Promise((resolve, reject) => zlib.gzip(Buffer.from(json), { level: 9 }, (error, data) => error ? reject(error) : resolve(data)));
+  if (compressed.length > GH_CONTENTS_LIMIT) return ghPutGit(json, compressed);
+  if (savesAborted) throw new Error("GitHub保存を中止: category=save_aborted");
+  const content = compressed.toString("base64");
   const r = await fetch(ghUrl(), {
     method: "PUT",
     headers: { ...ghHeaders(), "Content-Type": "application/json" },

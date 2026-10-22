@@ -60,15 +60,15 @@ const read = () => JSON.parse(fs.readFileSync(diagnostic, 'utf8'));
     fs.chmodSync(diagnostic,0o644);await a.ghSaveError(response(422,{message:'unknown'}),'','');assert.equal(fs.statSync(diagnostic).mode&0o777,0o600);
   });
   await check('最終422だけを診断し従来のPUT→SHA→PUT再試行を維持', async () => {
-    const calls=[];fetchImpl=async (_url,opt)=>{calls.push(opt.method||'GET');return calls.length===2?response(200,{sha:'test-new-sha'}):response(422,{message:'content is too large'});};
+    const calls=[];fetchImpl=async (_url,opt)=>{if(_url==='https://api.github.com/repos/test/private')return response(200,{private:true});calls.push(opt.method||'GET');return calls.length===2?response(200,{sha:'test-new-sha'}):response(422,{message:'content is too large'});};
     await assert.rejects(()=>a.ghPut('{"test":true}','test-old-sha'),e=>e.message.includes('category=size_limit'));assert.deepEqual(calls,['PUT','GET','PUT']);
   });
   await check('成功と再試行成功には診断を書かず保存結果を返す', async () => {
-    const before=fs.readFileSync(diagnostic,'utf8'),calls=[];fetchImpl=async (_url,opt)=>{calls.push(opt.method||'GET');return calls.length===1?response(409,{message:'test conflict'}):calls.length===2?response(200,{sha:'test-new-sha'}):response(200,{content:{sha:'test-saved-sha'}});};
+    const before=fs.readFileSync(diagnostic,'utf8'),calls=[];fetchImpl=async (_url,opt)=>{if(_url==='https://api.github.com/repos/test/private')return response(200,{private:true});calls.push(opt.method||'GET');return calls.length===1?response(409,{message:'test conflict'}):calls.length===2?response(200,{sha:'test-new-sha'}):response(200,{content:{sha:'test-saved-sha'}});};
     assert.equal(await a.ghPut('{"test":true}','test-old-sha'),'test-saved-sha');assert.deepEqual(calls,['PUT','GET','PUT']);assert.equal(fs.readFileSync(diagnostic,'utf8'),before);
   });
   await check('422以外は従来どおり再試行せず分類', async () => {
-    let n=0;fetchImpl=async()=>{n++;return response(429,{message:'rate limit exceeded'});};await assert.rejects(()=>a.ghPut('{"test":true}',null),e=>e.message.includes('category=rate_limit'));assert.equal(n,1);
+    let n=0;fetchImpl=async(_url)=>{if(_url==='https://api.github.com/repos/test/private')return response(200,{private:true});n++;return response(429,{message:'rate limit exceeded'});};await assert.rejects(()=>a.ghPut('{"test":true}',null),e=>e.message.includes('category=rate_limit'));assert.equal(n,1);
   });
   if (process.argv[2]) await check('送信無効の本番コピーを隔離保存しmock422でも元記録を維持', async () => {
     const crypto=require('node:crypto'), hash=x=>crypto.createHash('sha256').update(x).digest('hex');
@@ -78,9 +78,15 @@ const read = () => JSON.parse(fs.readFileSync(diagnostic, 'utf8'));
     sandbox.process.env.DEMO_DATA=target;sandbox.process.env.DEMO_EPHEMERAL='0';sandbox.process.env.DEMO_PERSIST='1';
     const p=sandbox.module.exports,loaded=p.loadSnapshot();assert(loaded.enabled&&loaded.data,'コピー読込');
     const before=hash(JSON.stringify(original.state)), save=p.startSaver(()=>loaded.data);save();
-    const calls=[];fetchImpl=async (_url,opt)=>{calls.push(opt.method||'GET');return opt.method==='PUT'?response(422,{message:'content too large'}):response(200,{sha:'test-copy-sha'});};
+    const calls=[];fetchImpl=async (_url,opt)=>{
+      if(_url==='https://api.github.com/repos/test/private')return response(200,{private:true});
+      calls.push(opt.method||'GET');
+      if(_url.endsWith('/git/ref/heads/main'))return response(200,{ref:'refs/heads/main',object:{type:'commit',sha:'1'.repeat(40)}});
+      if(_url.endsWith('/git/commits/'+'1'.repeat(40)))return response(200,{sha:'1'.repeat(40),tree:{sha:'2'.repeat(40)}});
+      return ['PUT','POST'].includes(opt.method)?response(422,{message:'content too large'}):response(200,{sha:'test-copy-sha'});
+    };
     await timers.find(t=>t.ms===30000).fn();
-    assert.deepEqual(calls,['GET','PUT','GET','PUT']);assert(hash(JSON.stringify(JSON.parse(fs.readFileSync(target)).state))===before,'コピー保存後も全state保持');
+    assert(calls.some(x=>['PUT','POST'].includes(x)));assert(hash(JSON.stringify(JSON.parse(fs.readFileSync(target)).state))===before,'コピー保存後も全state保持');
     assert(hash(fs.readFileSync(path.resolve(process.argv[2])))===sourceHash,'元コピーは変更なし');
     assert(logs.at(-1).includes('category=size_limit'));assert(!logs.join('\n').includes(fixtureSecret));assert(!logs.join('\n').includes(fixtureMail));
     assert.equal(fs.statSync(target+'.github-error.json').mode&0o777,0o600);
