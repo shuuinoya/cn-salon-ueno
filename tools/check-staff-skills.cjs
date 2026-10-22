@@ -117,6 +117,7 @@ const skills=require(path.join(root,'staff-skills.js')),err=(status,code)=>Objec
   state.staffSkillCatalog=null;reject(body({staffRevision:6}),'staffChanged');const b=body();state.staff=[];reject(b,'staffChanged');
  });
  test('不正写真・不正profileを保存前に拒否し公開表示が壊れない',()=>{
+  state.shifts.set(date,[{staff_id:st().id,date,start_at:a.minToMs(date,600),end_at:a.minToMs(date,1320)}]);
   for(const photo of [{bad:'image'},true,123,'https://example.test/image','data:image/svg+xml;base64,dGVzdA=='])reject(body({photo}),'invalid');
   for(const p of ['bad',[],42])reject(body({profile:p}),'invalid');assert(a.publicStaffList(date).length===1);
  });

@@ -15,7 +15,7 @@ assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && sn
 const persist = require(path.join(root, 'persist.js'));
 persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {}; persist.requestSave = () => {};
 const file = path.join(root, 'demo-api.js'), code = fs.readFileSync(file, 'utf8');
-const exportsForAudit = '\nmodule.exports.audit={state,courseStore,postSchedule,getStaffOrdering,publicStaffList,nominatableStaff,staffPickerDirectory,freeStaffIds,getAvailability,createPublicBooking,cancelBooking,findBooking,hpNotify,adminSessions,todayJst,addDays,minToMs};';
+const exportsForAudit = '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,getStaffOrdering,publicStaffList,nominatableStaff,staffPickerDirectory,freeStaffIds,getAvailability,createPublicBooking,cancelBooking,findBooking,hpNotify,adminSessions,todayJst,addDays,minToMs};';
 function load() { const mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root); mod._compile(code + exportsForAudit, file); return mod; }
 const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
 (async () => {
@@ -73,11 +73,11 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     const registered=new Map(a.getStaffOrdering(date,manager).staff.map(s=>[s.id,s]));
     const listed=a.publicStaffList(date), working=order.workingIds(state.shifts,date);
     for(let i=0;i<listed.length;i++){
-      const row=listed[i],stored=registered.get(row.id);assert(stored&&stored.listed);
+      const row=listed[i],stored=registered.get(row.id);assert(stored&&stored.listed&&stored.working);assert(working.has(row.id));
       assert.equal(row.listingOrder,stored.listingOrder);assert.equal(row.name,stored.name);assert.equal(row.working,working.has(row.id));
       if(i){const prev=listed[i-1];assert(Number(prev.working)>=Number(row.working));if(prev.working===row.working)assert(prev.listingOrder<row.listingOrder);}
     }
-    assert.equal(state.mails.length,0);results.push({name:'本番コピー全スタッフのID別No保存と実勤務優先表示を照合・予約等保持',ok:true});
+    assert.equal(state.mails.length,0);results.push({name:'本番コピー全スタッフのID別No保存と勤務者だけの掲載を照合・予約等保持',ok:true});
   }catch(e){results.push({name:'本番コピー全スタッフ照合',ok:false,error:e.message.split('\n').slice(0,2).join(' ')});}
 
   await check('初回Noは既存管理順を保ち、二度目の初期化と名前変更で不変', () => {
@@ -130,19 +130,47 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     const restored=JSON.parse(encode({state}),revive);persist.loadSnapshotWithRemote=async()=>({enabled:false,data:restored});
     const reload=load();await reload.exports.ready;assert.deepEqual(reload.exports.audit.state.staff.map(s=>[s.id,s.listing_order,s.sort_order]),before);
   });
-  await check('勤務ありB/C/Eを先頭にし、非勤務A/Dは後、各群はNo順', () => {
+  await check('勤務ありB/C/Eだけを掲載No順に公開し、非勤務A/Dは載せない', () => {
     for(const list of [a.publicStaffList(date),a.nominatableStaff(course,'none',date),a.staffPickerDirectory(course,'none',date)]){
-      assert.deepEqual(ids(list),['B','C','E','A','D']);assert.deepEqual(list.map(s=>s.working),[true,true,true,false,false]);
+      assert.deepEqual(ids(list),['B','C','E']);assert.deepEqual(list.map(s=>s.working),[true,true,true]);
     }
   });
   await check('翌日の勤務A/Dへ切替、Noの値自体は不変', () => {
-    assert.deepEqual(ids(a.publicStaffList(next)),['A','D','B','C','E']);assert.deepEqual(state.staff.map(s=>s.listing_order),[1,2,3,4,5]);
-    const q=new URLSearchParams({date:next,course,people:'1',staff:'none'});assert.deepEqual(ids(a.getAvailability(q).staffDirectory),['A','D','B','C','E']);
+    assert.deepEqual(ids(a.publicStaffList(next)),['A','D']);assert.deepEqual(state.staff.map(s=>s.listing_order),[1,2,3,4,5]);
+    const q=new URLSearchParams({date:next,course,people:'1',staff:'none'});assert.deepEqual(ids(a.getAvailability(q).staffDirectory),['A','D']);
   });
   await check('シフトの追加削除が次の取得へ即反映、GETで記録は不変', () => {
     state.shifts.get(date).push({...state.shifts.get(date)[0],staff_id:'A'});assert.equal(a.publicStaffList(date)[0].id,'A');
     state.shifts.set(date,state.shifts.get(date).filter(s=>s.staff_id!=='B'));const before=encode(state);
-    assert.deepEqual(ids(a.publicStaffList(date)),['A','C','E','B','D']);assert.equal(encode(state),before);
+    assert.deepEqual(ids(a.publicStaffList(date)),['A','C','E']);assert.equal(encode(state),before);
+  });
+  await check('勤務なしも管理画面で情報と順位を編集でき、シフト登録後だけ掲載', () => {
+    assert.deepEqual(ids(a.getStaffOrdering(date,manager).staff),['A','B','C','D','E']);
+    assert.deepEqual(new Set(ids(a.getSchedule(date).allStaff)),new Set(['A','B','C','D','E']));
+    const s=staff('A');a.postSchedule({action:'staff',date,id:s.id,name:'テスト休み編集',gender:s.gender,active:true,allCourses:true,profile:JSON.parse(s.profile),sortOrder:1,staffRevision:0},manager);
+    save();assert(!a.publicStaffList(date).some(s=>s.id==='A'));assert.equal(staff('A').name,'テスト休み編集');
+    a.postSchedule({action:'shift',date,revision:state.days.get(date).version,staffId:'A',start:600,end:1320},manager);
+    assert.deepEqual(ids(a.publicStaffList(date)),['E','C','B','A']);
+    assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
+  });
+  await check('全員休み・不正な勤務時間・未登録のシフトで架空の掲載を作らない', () => {
+    state.shifts.set(date,[]);assert.equal(a.publicStaffList(date).length,0);assert.equal(a.staffPickerDirectory(course,'none',date).length,0);
+    state.shifts.set(date,[{staff_id:'A',date,start_at:100,end_at:100},{staff_id:'B',date,start_at:200,end_at:100},{staff_id:'C',date,start_at:NaN,end_at:300},{staff_id:'missing',date,start_at:100,end_at:200}]);
+    assert.equal(a.publicStaffList(date).length,0);assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
+  });
+  await check('重複シフトでも同じスタッフのカードは1枚、順位保存は勤務者内へ反映', () => {
+    state.shifts.get(date).push({...state.shifts.get(date)[0]});save();
+    for(const list of [a.publicStaffList(date),a.nominatableStaff(course,'none',date),a.staffPickerDirectory(course,'none',date)])assert.deepEqual(ids(list),['E','C','B']);
+  });
+  await check('今日が休みでも別日の指名を受け付け、週先頭の休みで翌日の枠を消さない', () => {
+    state.shifts.set(a.todayJst(),[]);
+    const week=a.getAvailability(new URLSearchParams({date,course,people:'1',staff:'none',staffId:'A'}));
+    assert.equal(week.nomination.id,'A');assert(!week.staff.some(s=>s.id==='A'));assert(!week.staffDirectory.some(s=>s.id==='A'));
+    assert(!week.days[0].slots.some(s=>s.available));assert(week.days[1].slots.some(s=>s.available));
+    const p=pub({date:next,start:a.minToMs(next,720),staffId:'A',expectedNominationFee:500});
+    assert.deepEqual(ev(next).assignments.filter(x=>x.booking_id===p.id).map(x=>x.staff_id),['A']);
+    staff('A').active=0;const stopped=a.getAvailability(new URLSearchParams({date,course,people:'1',staff:'none',staffId:'A'}));
+    assert.equal(stopped.nomination,null);assert(!stopped.days.some(d=>d.slots.some(s=>s.available)));
   });
   await check('勤務ありでも日単位の鍵と店全体の停止はaccepting=falseで返す', () => {
     state.days.get(date).locked=['B'];
@@ -154,7 +182,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   });
   await check('公開APIは日付とNo・勤務状態を返し古いキャッシュを使わない', () => {
     for(const route of ['/api/staff/list?date='+date,'/api/staff?course='+course+'&date='+date]){
-      const r=api('GET',route,null,'none');assert.equal(r.status,200);assert.equal(r.data.date,date);assert.equal(r.headers['Cache-Control'],'no-store');assert.deepEqual(ids(r.data.staff),['B','C','E','A','D']);
+      const r=api('GET',route,null,'none');assert.equal(r.status,200);assert.equal(r.data.date,date);assert.equal(r.headers['Cache-Control'],'no-store');assert.deepEqual(ids(r.data.staff),['B','C','E']);
     }
     assert.equal(api('GET','/api/staff/list?date=2026-11-31',null,'none').status,400);
   });
@@ -187,7 +215,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     }
   });
   await check('順位が高くてもシフトなしの指名予約は成立させない', () => {
-    const before=encode(ev());assert.throws(()=>pub({staffId:'A',expectedNominationFee:500}),e=>e.message==='soldOut');assert.equal(encode(ev()),before);
+    const before=encode(ev());assert.throws(()=>pub({staffId:'A',expectedNominationFee:500}),e=>e.message==='staffUnavailable');assert.equal(encode(ev()),before);
   });
   await check('指名は順位より指定本人を優先し指名料を保持', () => {
     const p=pub({staffId:'E',expectedNominationFee:500}),b=a.findBooking(p.id).bk;assert.deepEqual(assigned(p.id),['E']);assert.equal(b.nomination_fee,500);
@@ -203,7 +231,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   });
   await check('非公開や写真不足は順位にかかわらず公開しない', () => {
     staff('B').active=0;state.photos.delete('C');staff('E').profile=JSON.stringify({personalNomination:false,message:'テスト'});
-    assert.deepEqual(ids(a.publicStaffList(date)),['A','D']);assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
+    assert.deepEqual(ids(a.publicStaffList(date)),[]);assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
   });
   await check('複数勤務区間は実在する一つの区間内だけ受付、隙間をつなげない', () => {
     const sh=state.shifts.get(date).find(s=>s.staff_id==='B');sh.end_at=a.minToMs(date,660);

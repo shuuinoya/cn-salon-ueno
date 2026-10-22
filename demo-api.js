@@ -2826,14 +2826,14 @@ function staffPhotoVersion(id) {
   return v;
 }
 
-// スタッフ紹介ページ用：指名できるスタッフ全員（写真・指名料・紹介文と、指名して予約できるメニュー）
+// スタッフ紹介ページ用：選んだ営業日にシフトがあり、掲載条件を満たすスタッフ（写真・指名料・紹介文と、指名して予約できるメニュー）
 // 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・スタッフ情報の入力がそろっている・個人指名あり・メニュー対応・メニューの性別指定。
 // 毎回いまの登録内容から作るので、管理画面の「スタッフ情報」を保存すると次に開いたとき（開いたままのページも1分以内）に反映される
 function publicStaffList(date = todayJst()) {
   const courses = [...courseStore.values()];
   const working = staffOrdering.workingIds(state.shifts, date);
   return staffOrdering.ordered(state.staff, state.shifts, date)
-    .filter((st) => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+    .filter((st) => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .map((st) => {
       const pr = profileOf(st);
       const pv = staffPhotoVersion(st.id);
@@ -2860,8 +2860,8 @@ function nominationOf(staffId, date = todayJst()) {
   return rest;
 }
 
-// 指名候補スタッフ一覧（受付中・スタッフ情報の入力がそろっている・個人指名あり・コース対応・性別条件）
-function nominatableStaff(courseId, genderPref, date = todayJst()) {
+// 指名の資格。週表示で選択済みの本人を保持するため、勤務日の絞り込みとは分ける。
+function nominationCandidates(courseId, genderPref, date = todayJst()) {
   const working = staffOrdering.workingIds(state.shifts, date);
   return staffOrdering.ordered(state.staff, state.shifts, date)
     .filter((st) => st.active === 1 && staffReady(st) && staffCanDo(st, courseId))
@@ -2883,11 +2883,16 @@ function nominatableStaff(courseId, genderPref, date = todayJst()) {
     });
 }
 
-// プロフィールは全員を案内する。予約できるかは選択メニューと勤務予定で別に判定する。
+// 新しく選べる候補は、その営業日にシフトがあるスタッフだけ。
+function nominatableStaff(courseId, genderPref, date = todayJst()) {
+  return nominationCandidates(courseId, genderPref, date).filter(st => st.working);
+}
+
+// 勤務者のプロフィールを案内する。対応メニュー外ならメニュー選択へ戻す。
 function staffPickerDirectory(courseId, genderPref, date = todayJst()) {
   const eligible = new Set(nominatableStaff(courseId, genderPref, date).map(s => s.id));
   const working = staffOrdering.workingIds(state.shifts, date);
-  return staffOrdering.ordered(state.staff, state.shifts, date).filter(st => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+  return staffOrdering.ordered(state.staff, state.shifts, date).filter(st => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .map(st => {
       const pr = profileOf(st);
       return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
@@ -3239,7 +3244,9 @@ function getAvailability(q, member) {
       !["none", "male", "female"].includes(pref)) throw err(400, "invalid");
   const dur = course.minutes;
   const gpref = effectivePref(courseId, pref); // コース名の性別指定を優先
-  const nominatedAllowed = !staffId || nominatableStaff(courseId, gpref).some((st) => st.id === staffId);
+  // 週の先頭が休みでも、選択済みの指名は各日の実勤務・空きで判定する。
+  const nomination = staffId ? nominationCandidates(courseId, gpref, date).find(st => st.id === staffId) || null : null;
+  const nominatedAllowed = !staffId || !!nomination;
   const days = [];
   for (let i = 0; i < 7; i++) {
     const d = addDays(date, i);
@@ -3261,7 +3268,7 @@ function getAvailability(q, member) {
     }
     days.push({ date: d, enabled: day.enabled, slots });
   }
-  return { date, staff: nominatableStaff(courseId, gpref, date), staffDirectory: staffPickerDirectory(courseId, gpref, date), days };
+  return { date, nomination, staff: nominatableStaff(courseId, gpref, date), staffDirectory: staffPickerDirectory(courseId, gpref, date), days };
 }
 
 // 同じメールアドレスの予約が既にあれば「リピート」扱いにする

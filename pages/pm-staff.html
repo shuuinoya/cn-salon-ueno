@@ -293,6 +293,7 @@
       return;
     }
     if (!staff) return;
+    if (dlg.open && !staff.some(s => s.id === curId)) dlg.close();
     if (!staff.length) {
       list.className = "";
       list.innerHTML = '<p class="st-status">' + esc(T("現在、ご指名いただけるスタッフはいません。")) + "</p>";

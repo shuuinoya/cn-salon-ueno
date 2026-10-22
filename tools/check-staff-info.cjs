@@ -62,8 +62,8 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
 
   // 予約サイト：空き枠・指名候補・スタッフ紹介に出さない
   assert.deepEqual(freeStaffIds(date, 720, 780, COURSE, 'none'), [ready.id]);
-  assert.ok(!nominatableStaff(COURSE, 'none').some((s) => s.id === bare.id));
-  assert.ok(!publicStaffList().some((s) => s.id === bare.id));
+  assert.ok(!nominatableStaff(COURSE, 'none', date).some((s) => s.id === bare.id));
+  assert.ok(!publicStaffList(date).some((s) => s.id === bare.id));
 
   // シフト・まとめてシフト・予約の登録は断る（何も変えない）
   const before = JSON.stringify([...state.shifts]);
@@ -112,7 +112,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.deepEqual(sc.staff.map((s) => s.id), [ready.id, bare.id]);
   assert.ok(sc.shifts.some((x) => x.staff_id === bare.id && x.date === date));
   assert.ok(freeStaffIds(date, 1080, 1140, COURSE, 'female').includes(bare.id));
-  assert.ok(publicStaffList().some((s) => s.id === bare.id));
+  assert.ok(publicStaffList(date).some((s) => s.id === bare.id));
   // スキル設定の保存時にも性別指定を検証する。拒否時は写真や紹介文も一切変えない。
   const maleOil = '364326-4822708', femaleOil = '364326-4823112';
   for (const [gender, blocked] of [['male', femaleOil], ['female', maleOil], ['none', femaleOil], ['none', maleOil]]) {
@@ -126,7 +126,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
     assert.equal(save({ gender, courses: [permitted] }).ok, true, '対応する性別のメニューは保存できる');
     assert.deepEqual(JSON.parse(state.staff.find(s => s.id === bare.id).courses), [permitted]);
     save({ gender, allCourses: true, profile: { personalNomination: true, message: 'テスト紹介文' } });
-    const row = publicStaffList().find(s => s.id === bare.id);
+    const row = publicStaffList(date).find(s => s.id === bare.id);
     assert.ok(row);
     assert.equal(row.courses.includes(maleOil), gender === 'male', '全てでも男性指定の条件を守る');
     assert.equal(row.courses.includes(femaleOil), gender === 'female', '全てでも女性指定の条件を守る');
