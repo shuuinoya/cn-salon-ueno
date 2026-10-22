@@ -31,7 +31,7 @@
 .so-photo-empty { width:48px; font-size:11px; color:#777; }
 .so-card .so-profile { margin:8px 0!important; max-height:42px!important; overflow:hidden!important; }
 .so-card-actions { display:flex; gap:8px; justify-content:flex-end; }
-.so-dragging { border:2px solid #b78b49; box-shadow:0 8px 24px #0003; background:#fff9ec; cursor:grabbing; }
+
 @media(max-width:600px) { .so-dialog h2{font-size:17px;} #staff-listing-ordering{padding:10px;} .so-card-grip{gap:8px;} }
 
 /* 掲載一覧は並べ替えに必要な情報をコンパクトに表示する。紹介文は詳細編集で確認。 */
@@ -75,3 +75,10 @@
 #staff-listing-ordering .so-rank { min-width:17px; }
 #staff-listing-ordering .so-photo-empty { width:24px; font-size:9px; line-height:1.2; }
 #staff-listing-ordering .so-help { line-height:1.4; }
+
+/* 配置用のカードと指に追従する写しを分け、スクロール中も掴んだ位置を保つ。 */
+#staff-listing-ordering .so-cards { position:relative; }
+#staff-listing-ordering.so-sorting { overflow-anchor:none; cursor:grabbing; }
+#staff-listing-ordering .so-drag-placeholder { opacity:.24; border-style:dashed; }
+#staff-listing-ordering .so-drag-preview { position:fixed; left:0; top:0; margin:0; box-sizing:border-box; z-index:10; pointer-events:none; border-color:#b78b49; background:#fff9ec; box-shadow:0 5px 18px #0003; cursor:grabbing; will-change:transform; }
+#staff-listing-ordering .so-message { min-height:2.8em; font-size:12px; line-height:1.4; margin-bottom:6px; }

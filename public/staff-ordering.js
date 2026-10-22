@@ -23,7 +23,7 @@
   }
   function controls(app) {
     app.host.querySelectorAll('input,button').forEach(el => {
-      el.disabled = app.busy || (el.matches('[data-so=up],[data-so=down]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-order-id]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-so=save]') && (!app.data?.canManage || !app.dirty));
+      el.disabled = app.busy || !!app.dragging || (el.matches('[data-so=up],[data-so=down]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-order-id]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-so=save]') && (!app.data?.canManage || !app.dirty));
     });
     app.host.setAttribute('aria-busy', String(app.busy));
     const save = app.host.querySelector('[data-so=save]');
@@ -41,7 +41,8 @@
     controls(app);
   }
   async function load(app) {
-    if (app.busy || app.dragging || !app.host.isConnected) return;
+    if (app.dragging) { app.refreshPending = true; return; }
+    if (app.busy || !app.host.isConnected) return;
     app.busy = true; controls(app);
     if (!app.data) app.host.innerHTML = '<p class="so-message" role="status">読み込み中…</p>';
     const sequence = ++app.sequence;
@@ -101,7 +102,7 @@
     });
     host.addEventListener('click', event => {
       const target = event.target.closest('[data-so]');
-      if (!target || app.busy) return;
+      if (!target || app.busy || app.dragging) return;
       const action = target.dataset.so;
       if (action === 'save') save(app);
       if (action === 'reload') {
@@ -113,7 +114,7 @@
       if (action === 'up' || action === 'down') {
         if (!app.data?.canManage || app.unknown) return;
         const card = target.closest('.so-card'), other = action === 'up' ? card.previousElementSibling : card.nextElementSibling;
-        if (other) { card.parentNode.insertBefore(card, action === 'up' ? other : other.nextSibling); renumber(app); target.focus(); }
+        if (other) { moveCards(card.parentNode, () => card.parentNode.insertBefore(card, action === 'up' ? other : other.nextSibling)); renumber(app); target.focus(); }
       }
       if (action === 'edit') {
         if (app.dirty || app.unknown) { setMessage(app, '順位を保存するか、最新の情報を読み直してから詳細を編集してください。', true); return; }
@@ -133,52 +134,138 @@
       (s.photo ? '<img src="' + esc(s.photo) + '" alt="" draggable="false" width="48" height="64">' : '<span class="so-photo-empty">写真なし</span>') +
       '<div><b title="' + esc(s.name) + '">' + esc(s.name) + '</b><small title="' + esc((s.reasons || []).join(' / ')) + '">' + (s.listed ? s.working ? '掲載中' : '勤務なし' : '非掲載') + '</small></div></div>' +
       '<input type="hidden" data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p><div class="so-card-actions"><button data-so="up" aria-label="' + esc(s.name) + 'を上へ">↑</button><button data-so="down" aria-label="' + esc(s.name) + 'を下へ">↓</button><button data-so="edit" data-id="' + esc(s.id) + '">詳細</button></div></article>').join('') + '</div>';
-    app.host.querySelector('.so-help').textContent = '並べ替えて保存すると、予約サイトは勤務者だけをこの順で掲載します。管理画面では全員を編集できます。';
+    app.host.querySelector('.so-help').hidden = true;
+    setMessage(app, 'カードをつかんで並べ替え、保存してください。掲載は勤務者のみです。', false);
   }
   function renumber(app) {
     [...app.host.querySelectorAll('.so-card')].forEach((card, i) => { card.querySelector('[data-order-id]').value = i + 1; card.querySelector('.so-rank').textContent = i + 1; });
     app.dirty = true; controls(app); setMessage(app, '順番を入れ替えました。掲載順位を保存してください。', false);
   }
+  const cardAnimations = new WeakMap();
+  const quietMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const cardMotion = { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' };
+  // 入れ替え前の見た目から新しい位置へ移す。前の動きが途中でも飛ばさない。
+  function moveCards(list, change, skip) {
+    const cards = [...list.children].filter(card => card !== skip);
+    const before = new Map(cards.map(card => [card, card.getBoundingClientRect().top]));
+    cards.forEach(card => { cardAnimations.get(card)?.cancel(); card.style.willChange = ''; });
+    change();
+    if (quietMotion()) return;
+    for (const card of cards) {
+      const dy = before.get(card) - card.getBoundingClientRect().top;
+      if (Math.abs(dy) < 0.5 || !card.animate) continue;
+      card.style.willChange = 'transform';
+      const animation = card.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], cardMotion);
+      cardAnimations.set(card, animation);
+      animation.finished.then(() => {
+        if (cardAnimations.get(card) === animation) { card.style.willChange = ''; cardAnimations.delete(card); }
+      }, () => {});
+    }
+  }
   function bindCards(app) {
     let drag = null, suppressClick = false;
-    const finish = cancel => {
-      if (!drag) return;
-      const d = drag; drag = null; cancelAnimationFrame(d.frame);
-      d.card.classList.remove('so-dragging'); d.card.style.transform = ''; app.dragging = false; app.host.releasePointerCapture?.(d.id);
-      if (cancel) d.original.forEach(card => d.list.appendChild(card));
-      else if (d.moved && d.original.some((card,i) => d.list.children[i] !== card)) renumber(app);
-      if (d.moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 0); }
-    };
-    app.host.addEventListener('click', e => { if (suppressClick) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
-    app.host.addEventListener('pointerdown', e => {
-      const card = e.target.closest('.so-card');
-      if (!card || e.button !== 0 || !app.data?.canManage || app.busy || app.unknown || e.target.closest('button,input,a') || (e.pointerType === 'touch' && !e.target.closest('.so-card-grip'))) return;
-      const list = card.parentNode;
-      drag = { card, list, id: e.pointerId, x:e.clientX, y:e.clientY, lastY:e.clientY, original:[...list.children], moved:false, frame:0 };
-      app.dragging = true; app.host.setPointerCapture(e.pointerId);
-    });
-    const tick = () => {
-      if (!drag?.moved) return;
-      const d = drag, box = app.host.getBoundingClientRect();
-      if (d.lastY < box.top + 70) app.host.scrollTop -= 12;
-      if (d.lastY > box.bottom - 70) app.host.scrollTop += 12;
-      for (const other of [...d.list.children]) {
-        if (other === d.card) continue;
-        const r = other.getBoundingClientRect();
-        if (d.lastY >= r.top && d.lastY <= r.bottom) { d.list.insertBefore(d.card, d.lastY < r.top + r.height/2 ? other : other.nextSibling); break; }
+    const host = app.host, dialog = host.closest('dialog'), lifetime = new AbortController();
+    const cleanup = (d, cancel) => {
+      if (drag !== d) return;
+      drag = null; cancelAnimationFrame(d.frame); d.settle?.cancel();
+      d.preview?.remove(); d.card.classList.remove('so-drag-placeholder');
+      host.classList.remove('so-sorting');
+      if (cancel) {
+        moveCards(d.list, () => d.original.forEach(card => d.list.appendChild(card)));
+        host.scrollTop = d.scrollTop;
       }
-      d.frame = requestAnimationFrame(tick);
+      app.dragging = false;
+      if (host.hasPointerCapture?.(d.id)) host.releasePointerCapture(d.id);
+      if (!cancel && d.moved && d.original.some((card, i) => d.list.children[i] !== card)) renumber(app);
+      controls(app);
+      if (d.moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 0); }
+      if (app.refreshPending) {
+        app.refreshPending = false;
+        if (!app.dirty && !app.unknown && host.isConnected) load(app);
+      }
     };
-    app.host.addEventListener('pointermove', e => {
-      if (!drag || e.pointerId !== drag.id) return;
-      drag.lastY = e.clientY;
-      if (!drag.moved && Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>6) { drag.moved=true; drag.card.classList.add('so-dragging'); tick(); }
-      if (drag.moved) e.preventDefault();
+    const finish = cancel => {
+      const d = drag;
+      if (!d) return;
+      cancelAnimationFrame(d.frame);
+      if (cancel || !d.moved || quietMotion() || !d.preview.animate) { cleanup(d, cancel); return; }
+      if (d.settling) return;
+      d.settling = true;
+      const target = d.card.getBoundingClientRect();
+      d.settle = d.preview.animate([
+        { transform: d.preview.style.transform },
+        { transform: `translate3d(${target.left}px,${target.top}px,0)` }
+      ], { ...cardMotion, duration: 140, fill: 'forwards' });
+      d.settle.finished.then(() => cleanup(d, false), () => {});
+    };
+    app.cancelDrag = () => finish(true);
+    host.addEventListener('click', e => {
+      if (suppressClick || app.dragging) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+    host.addEventListener('dragstart', e => { if (e.target.closest('.so-card')) e.preventDefault(); });
+    host.addEventListener('pointerdown', e => {
+      const card = e.target.closest('.so-cards > .so-card');
+      if (drag || !card || e.button !== 0 || e.isPrimary === false || !app.data?.canManage || app.busy || app.unknown || e.target.closest('button,input,a') || (e.pointerType === 'touch' && !e.target.closest('.so-card-grip'))) return;
+      const rect = card.getBoundingClientRect(), list = card.parentNode;
+      cardAnimations.get(card)?.cancel(); cardAnimations.delete(card); card.style.willChange = '';
+      drag = { card, list, id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY,
+        grabX: e.clientX - rect.left, grabY: e.clientY - rect.top, width: rect.width, height: rect.height,
+        original: [...list.children], scrollTop: host.scrollTop, moved: false, frame: 0, lastTime: 0 };
+      app.dragging = true;
+      host.setPointerCapture(e.pointerId);
     });
-    app.host.addEventListener('pointerup', e => { if(drag?.id===e.pointerId) finish(false); });
-    app.host.addEventListener('pointercancel', () => finish(true));
-    app.host.addEventListener('lostpointercapture', () => finish(true));
-    app.host.addEventListener('keydown', e => { if(e.key==='Escape' && drag) { e.preventDefault(); e.stopPropagation(); finish(true); } });
+    const draw = (time, scroll = true) => {
+      const d = drag;
+      if (!d?.moved || d.settling) return;
+      if (!host.isConnected) { finish(true); return; }
+      const box = host.getBoundingClientRect(), elapsed = d.lastTime ? Math.min(32, time - d.lastTime) : 0;
+      d.lastTime = time;
+      if (scroll) {
+        const edge = Math.min(56, box.height / 4);
+        const speed = d.lastY < box.top + edge ? -Math.min(1, (box.top + edge - d.lastY) / edge)
+          : d.lastY > box.bottom - edge ? Math.min(1, (d.lastY - box.bottom + edge) / edge) : 0;
+        host.scrollTop += speed * elapsed * 0.55;
+      }
+      // 判定にはアニメーション中の見かけの座標を使わず、配置先の座標を使う。
+      const center = d.lastY - d.grabY + d.height / 2, top = d.list.getBoundingClientRect().top;
+      const before = [...d.list.children].find(card => card !== d.card && center <= top + card.offsetTop + card.offsetHeight / 2) || null;
+      if (d.card.nextElementSibling !== before) moveCards(d.list, () => d.list.insertBefore(d.card, before), d.card);
+      const x = Math.max(box.left + 2, Math.min(box.right - d.width - 2, d.lastX - d.grabX));
+      const y = Math.max(box.top + 2, Math.min(box.bottom - d.height - 2, d.lastY - d.grabY));
+      d.preview.style.transform = `translate3d(${x}px,${y}px,0)`;
+    };
+    const tick = time => { draw(time); if (drag?.moved && !drag.settling) drag.frame = requestAnimationFrame(tick); };
+    host.addEventListener('pointermove', e => {
+      const d = drag;
+      if (!d || d.settling || e.pointerId !== d.id) return;
+      d.lastX = e.clientX; d.lastY = e.clientY;
+      if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
+        d.moved = true;
+        d.preview = d.card.cloneNode(true); d.preview.classList.add('so-drag-preview');
+        d.preview.setAttribute('aria-hidden', 'true'); d.preview.inert = true;
+        d.preview.querySelectorAll('input').forEach(input => input.remove());
+        Object.assign(d.preview.style, { width: d.width + 'px', height: d.height + 'px' });
+        host.appendChild(d.preview); d.card.classList.add('so-drag-placeholder'); host.classList.add('so-sorting');
+        controls(app); draw(performance.now(), false); d.frame = requestAnimationFrame(tick);
+      }
+      if (d.moved) e.preventDefault();
+    });
+    host.addEventListener('pointerup', e => {
+      if (drag?.id !== e.pointerId || drag.settling) return;
+      drag.lastX = e.clientX; drag.lastY = e.clientY; draw(performance.now(), false);
+      const box = host.getBoundingClientRect();
+      finish(e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom);
+    });
+    host.addEventListener('pointercancel', e => { if (drag?.id === e.pointerId) finish(true); });
+    host.addEventListener('lostpointercapture', e => { if (drag?.id === e.pointerId && !drag.settling) finish(true); });
+    (dialog || host).addEventListener('keydown', e => {
+      if (e.key === 'Escape' && drag) { e.preventDefault(); e.stopPropagation(); finish(true); }
+    }, true);
+    const cancel = () => finish(true);
+    window.addEventListener('blur', cancel, { signal: lifetime.signal });
+    window.addEventListener('resize', cancel, { signal: lifetime.signal });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); }, { signal: lifetime.signal });
+    dialog?.addEventListener('close', () => { cancel(); lifetime.abort(); }, { once: true });
   }
   // ページ全体の幅やブラウザー既定の余白に依存せず、見えている領域の中央へ置く。
   function positionListing(dialog) {
@@ -197,12 +284,13 @@
     dialog.innerHTML='<header><h2 id="staff-listing-title">スタッフ掲載情報一覧</h2><button type="button" data-listing-close>閉じる</button></header><div id="staff-listing-ordering"></div>';
     document.body.appendChild(dialog);
     const close = () => {
+      current?.cancelDrag?.();
       if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { setMessage(current,'変更が残っています。保存するか「最新の情報を読み直す」で変更を破棄してから閉じてください。',true); current.host.scrollTop=0; return; }
       dialog.close(); dialog.remove(); current=null; opener?.focus();
     };
     dialog.querySelector('[data-listing-close]').addEventListener('click',close);
     dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
-    const position = () => { if(dialog.open) positionListing(dialog); };
+    const position = () => { if(dialog.open) { current?.cancelDrag?.(); positionListing(dialog); } };
     dialog.addEventListener('close', () => { window.removeEventListener('resize',position); window.visualViewport?.removeEventListener('resize',position); window.visualViewport?.removeEventListener('scroll',position); });
     dialog.showModal(); position();
     window.addEventListener('resize',position); window.visualViewport?.addEventListener('resize',position); window.visualViewport?.addEventListener('scroll',position); mount();
