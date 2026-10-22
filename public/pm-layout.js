@@ -3458,7 +3458,7 @@
 (function () {
   "use strict";
   let base = null, pending = false;
-  const busy = () => !!document.querySelector(".staff-editor form, .ledger-side-form, section.ledger-shift-detail, #pm-np, .ledger-modal-backdrop, #cn-login-ov, #pm-move-confirm") ||
+  const busy = () => !!document.querySelector(".staff-editor form, .ledger-side-form, section.ledger-shift-detail, #pm-np, .ledger-modal-backdrop, #cn-login-ov, #pm-move-confirm, #staff-listing-dialog[open]") ||
     !!(document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
   async function check() {
     if (document.hidden) return;

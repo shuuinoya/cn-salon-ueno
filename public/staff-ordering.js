@@ -131,9 +131,9 @@
     table.outerHTML = '<div class="so-cards" aria-label="スタッフの掲載順">' + app.data.staff.map(s =>
       '<article class="so-card" data-staff-id="' + esc(s.id) + '"><div class="so-card-grip" title="つかんで上下に移動"><span class="so-grip-mark" aria-hidden="true">⠿</span><span class="so-rank">' + esc(s.listingOrder) + '</span>' +
       (s.photo ? '<img src="' + esc(s.photo) + '" alt="" draggable="false" width="48" height="64">' : '<span class="so-photo-empty">写真なし</span>') +
-      '<div><b>' + esc(s.name) + '</b><small>' + (s.listed ? '掲載中' : '非掲載：' + esc((s.reasons || []).join(' / '))) + '</small></div></div>' +
-      '<input type="hidden" data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p><div class="so-card-actions"><button data-so="up" aria-label="' + esc(s.name) + 'を上へ">↑ 上へ</button><button data-so="down" aria-label="' + esc(s.name) + 'を下へ">↓ 下へ</button><button data-so="edit" data-id="' + esc(s.id) + '">詳細編集</button></div></article>').join('') + '</div>';
-    app.host.querySelector('.so-help').textContent = 'カードをつかんで上下に移動できます。スマホでは写真・名前の部分をつかんでください。「掲載順位を保存」で反映します。勤務者を優先し、その中で掲載順に表示します。';
+      '<div><b title="' + esc(s.name) + '">' + esc(s.name) + '</b><small title="' + esc((s.reasons || []).join(' / ')) + '">' + (s.listed ? '掲載中' : '非掲載') + '</small></div></div>' +
+      '<input type="hidden" data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p><div class="so-card-actions"><button data-so="up" aria-label="' + esc(s.name) + 'を上へ">↑</button><button data-so="down" aria-label="' + esc(s.name) + 'を下へ">↓</button><button data-so="edit" data-id="' + esc(s.id) + '">詳細</button></div></article>').join('') + '</div>';
+    app.host.querySelector('.so-help').textContent = '写真・名前をつかんで並べ替え、保存で反映します（勤務者優先）。';
   }
   function renumber(app) {
     [...app.host.querySelectorAll('.so-card')].forEach((card, i) => { card.querySelector('[data-order-id]').value = i + 1; card.querySelector('.so-rank').textContent = i + 1; });
@@ -180,6 +180,15 @@
     app.host.addEventListener('lostpointercapture', () => finish(true));
     app.host.addEventListener('keydown', e => { if(e.key==='Escape' && drag) { e.preventDefault(); e.stopPropagation(); finish(true); } });
   }
+  // ページ全体の幅やブラウザー既定の余白に依存せず、見えている領域の中央へ置く。
+  function positionListing(dialog) {
+    const view = window.visualViewport;
+    const width = Math.min(600, Math.max(1, (view?.width || window.innerWidth) - 32));
+    const height = Math.min(500, Math.max(1, (view?.height || window.innerHeight) - 48));
+    const left = (view?.offsetLeft || 0) + ((view?.width || window.innerWidth) - width) / 2;
+    const top = (view?.offsetTop || 0) + ((view?.height || window.innerHeight) - height) / 2;
+    for (const [key,value] of Object.entries({width,height,left,top})) dialog.style.setProperty(key,value+'px');
+  }
   window.__pmOpenStaffListing = () => {
     if (document.getElementById('staff-listing-dialog')) return;
     if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) return;
@@ -193,7 +202,10 @@
     };
     dialog.querySelector('[data-listing-close]').addEventListener('click',close);
     dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
-    dialog.showModal(); mount();
+    const position = () => { if(dialog.open) positionListing(dialog); };
+    dialog.addEventListener('close', () => { window.removeEventListener('resize',position); window.visualViewport?.removeEventListener('resize',position); window.visualViewport?.removeEventListener('scroll',position); });
+    dialog.showModal(); position();
+    window.addEventListener('resize',position); window.visualViewport?.addEventListener('resize',position); window.visualViewport?.addEventListener('scroll',position); mount();
   };
   window.__pmMountStaffOrdering = mount;
   window.addEventListener('beforeunload', event => { if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { event.preventDefault(); event.returnValue = ''; } });
