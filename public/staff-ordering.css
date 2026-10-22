@@ -33,3 +33,27 @@
 .so-card-actions { display:flex; gap:8px; justify-content:flex-end; }
 .so-dragging { border:2px solid #b78b49; box-shadow:0 8px 24px #0003; background:#fff9ec; cursor:grabbing; }
 @media(max-width:600px) { .so-dialog h2{font-size:17px;} #staff-listing-ordering{padding:10px;} .so-card-grip{gap:8px;} }
+
+/* 掲載一覧は並べ替えに必要な情報をコンパクトに表示する。紹介文は詳細編集で確認。 */
+.so-dialog { width:min(780px,calc(100vw - 24px)); height:min(720px,calc(100dvh - 24px)); }
+.so-dialog > header { padding:8px 12px; } .so-dialog h2 { font-size:17px; }
+#staff-listing-ordering { padding:10px; }
+#staff-listing-ordering .so-help { font-size:12px; line-height:1.5; margin-bottom:6px; }
+#staff-listing-ordering .so-message:empty { display:none; }
+#staff-listing-ordering .so-actions { gap:6px; margin-bottom:8px; font-size:12px; }
+#staff-listing-ordering .so-cards { gap:6px; }
+#staff-listing-ordering .so-card { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; }
+#staff-listing-ordering .so-card-grip { gap:8px; min-height:44px; }
+#staff-listing-ordering .so-card-grip img { width:30px; height:40px; flex-shrink:0; }
+#staff-listing-ordering .so-card-grip b { font-size:13px; }
+#staff-listing-ordering .so-card-grip small { font-size:11px; line-height:1.3; margin-top:2px; }
+#staff-listing-ordering .so-grip-mark { font-size:20px; } #staff-listing-ordering .so-rank { min-width:20px; font-size:12px; }
+#staff-listing-ordering .so-photo-empty { width:30px; flex-shrink:0; font-size:10px; }
+#staff-listing-ordering .so-card .so-profile { display:none; }
+#staff-listing-ordering .so-card-actions { gap:2px; }
+#staff-listing-ordering .so-card-actions button { min-height:40px; padding:6px 8px; font-size:12px; }
+@media(max-width:600px) {
+  #staff-listing-ordering .so-card { grid-template-columns:minmax(0,1fr); gap:0; padding:5px 8px; }
+  #staff-listing-ordering .so-card-actions { margin-top:2px; }
+  #staff-listing-ordering .so-card-actions button { min-height:40px; padding:4px 10px; }
+}
