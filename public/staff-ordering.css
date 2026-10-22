@@ -35,9 +35,11 @@
 @media(max-width:600px) { .so-dialog h2{font-size:17px;} #staff-listing-ordering{padding:10px;} .so-card-grip{gap:8px;} }
 
 /* 掲載一覧は並べ替えに必要な情報をコンパクトに表示する。紹介文は詳細編集で確認。 */
-.so-dialog { width:min(780px,calc(100vw - 24px)); height:min(720px,calc(100dvh - 24px)); }
+.so-dialog { position:fixed; inset:0; margin:auto; box-sizing:border-box; width:min(640px,calc(100vw - 32px)); height:min(560px,calc(100dvh - 48px)); max-height:calc(100dvh - 48px); }
+.so-dialog[open] { display:flex; flex-direction:column; }
+.so-dialog > header { flex:0 0 auto; }
 .so-dialog > header { padding:8px 12px; } .so-dialog h2 { font-size:17px; }
-#staff-listing-ordering { padding:10px; }
+#staff-listing-ordering { padding:10px; height:auto; flex:1 1 auto; min-height:0; }
 #staff-listing-ordering .so-help { font-size:12px; line-height:1.5; margin-bottom:6px; }
 #staff-listing-ordering .so-message:empty { display:none; }
 #staff-listing-ordering .so-actions { gap:6px; margin-bottom:8px; font-size:12px; }
