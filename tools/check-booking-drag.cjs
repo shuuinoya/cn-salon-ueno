@@ -147,7 +147,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   const grp = state.events.get(day).bookings.at(-1);
   const sorted = (b) => [...where(b).staff].sort();
   assert.deepEqual(sorted(grp), [A.id, B.id, F.id].sort());
-  postSchedule({ action: 'lockStaff', date: day, staffId: B.id, locked: true }, manager);
+  postSchedule({ action: 'lockStaff', date: day, revision: rev(), staffId: B.id, locked: true }, manager);
   assert.equal(move(grp, { staffId: A.id, start: 1260, end: 1320, expect: { staffId: A.id, start: 1200 } }).ok, true);
   assert.deepEqual([where(grp).start, sorted(grp)], [1260, [A.id, B.id, F.id].sort()], '鍵の人も担当のまま一緒に移る');
   // 2人目（鍵の B）の枠を動かす：誤って「ほかの画面で変更」と断らず、B のまま時間だけ変わる
@@ -184,7 +184,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.throws(() => move(grp, { staffId: A.id, start: 900, end: 960, expect: { staffId: A.id, start: 1230 }, confirmNominationMove: true }), code('nominatedStaffUnavailable'));
   assert.equal(JSON.stringify(grp), groupBefore);
   // 回数券の予約を移しても、回数券を消費し直さず、支払済みの金額・使用履歴を保つ。
-  postSchedule({ action: 'lockStaff', date: day, staffId: B.id, locked: false }, manager);
+  postSchedule({ action: 'lockStaff', date: day, revision: rev(), staffId: B.id, locked: false }, manager);
   const ticketBooking = make(A.id, 600);
   const ticket = { id: 'test-ticket', plan_name: 'テスト5回券', uses_total: 5, uses_left: 4, history: [{ type: 'use', booking_id: ticketBooking.id, delta: -1 }] };
   state.tickets.set(ticket.id, ticket);

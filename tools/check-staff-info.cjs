@@ -28,6 +28,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   // 名前だけで登録した人（以前の宮崎さんと同じ形：性別は未設定・コースは1つ・画像と紹介文なし）
   const bare = { id: 'chk-bare', name: 'テスト 確認 未入力', gender: 'none', active: 1, locked: 0, sort_order: 2, courses: JSON.stringify([COURSE]), profile: prof(''), profile_revision: 1 };
   state.staff = [ready, bare];
+  require(path.join(root, 'staff-ordering.js')).initialize(state.staff);
   state.photos = new Map([[ready.id, 'data:image/jpeg;base64,/9j/']]);
   state.days = new Map(); state.events = new Map();
   const shift = (sid, d, s, e) => ({ staff_id: sid, date: d, start_at: minToMs(d, s), end_at: minToMs(d, e), note: '' });
@@ -104,7 +105,7 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   state.photos.set(ready.id, 'data:image/jpeg;base64,/9j/');
 
   // スタッフ情報の保存：足りない項目を知らせる。そろえて保存すると、入っていたシフトがそのまま台帳・予約サイトに戻る
-  const save = (extra) => postSchedule({ action: 'staff', date, id: bare.id, name: bare.name, active: 1, courses: [COURSE], sortOrder: 2, staffRevision: 1, profile: { personalNomination: true, nominationFee: 500, message: '' }, ...extra });
+  const save = (extra) => postSchedule({ action: 'staff', date, id: bare.id, name: bare.name, active: 1, courses: [COURSE], sortOrder: 2, staffRevision: state.staff.find(s => s.id === bare.id).profile_revision, profile: { personalNomination: true, nominationFee: 500, message: '' }, ...extra });
   assert.match(save({ gender: 'female' }).warning, /「画像・フリーメッセージ」が未入力/);
   assert.equal(save({ gender: 'female', photo: 'data:image/jpeg;base64,/9j/', profile: { personalNomination: true, nominationFee: 500, message: '紹介文' } }).warning, undefined);
   sc = getSchedule(date);

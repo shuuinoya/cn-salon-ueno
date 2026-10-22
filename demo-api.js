@@ -17,6 +17,8 @@ const crypto = require("crypto");
 const ledgerOperations = require("./ledger-operations");
 const boothPolicy = require("./booth-policy");
 const bookingDetails = require("./booking-details");
+const staffOrdering = require("./staff-ordering");
+const staffSkills = require("./staff-skills");
 const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（予約確認・変更・取消の通知のみ送信します）";
 const BOOKING_TICKET_NOTICE_STOP_REASON = "この予約の回数券利用・残り回数は予約確認メールに記載済みのため、別の残数通知は送信しません";
 function isBookingReminder(m) { return m?.type === "remind" || (m?.tpl?.name === "booking" && /Remind$/.test(m.tpl.variant || "")); }
@@ -509,6 +511,7 @@ function staffLockedOn(staffId, date) {
   const d = state.days.get(date);
   return !!(d && Array.isArray(d.locked) && d.locked.includes(staffId));
 }
+const staffAcceptingOn = (staffId, date) => state.days.get(date)?.enabled !== false && !staffLockedOn(staffId, date);
 const addDays = (date, n) => new Date(Date.parse(date + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
 
 // 日付文字列から決まる簡易乱数（毎回同じ架空データを生成するため）
@@ -542,6 +545,9 @@ const state = {
   photos: new Map(),   // staffId -> dataURL
   staffReconciliation: null, // 照合の結果と直前の復旧用記録（顧客情報なし）
   staffIdHigh: 10000000,
+  staffOrderingKeys: new Map(), // 掲載No保存の再送キー（既存スタッフIDと同じ保存先）
+  staffSkillCatalog: null, // 管理専用の原本階層と、販売メニューへの明示ID対応
+  staffSkillKeys: new Map(),
   days: new Map(),     // date -> {version, enabled}
   shifts: new Map(),   // date -> [{staff_id, date, start_at, end_at, note}]
   events: new Map(),   // date -> {bookings: [], blocks: [], assignments: []}
@@ -751,6 +757,7 @@ const persistReady = (() => {
         (persist.remoteEnabled() ? "（GitHub同期あり）" : ""));
     }
     ledgerOperations.migrate(state);
+    staffOrdering.initialize(state.staff);
     // メールのHTML（本文から作り直せる）は保存しない：保存データ・GitHubへの通信量を約4割減らす
     persist.startSaver(() => ({ savedAt: Date.now(), state: { ...state, mails: state.mails.map(({ html, ...m }) => m) }, sessions: [...adminSessions.entries()] }));
   })();
@@ -815,8 +822,7 @@ function shiftOf(date, staffId) {
 }
 
 function withinShift(date, staffId, start, end) {
-  const sh = shiftOf(date, staffId);
-  return !!sh && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at);
+  return ensureShifts(date).some(sh => sh.staff_id === staffId && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at));
 }
 
 // 新しいシフト・予約と、予約サイトへの掲載のための入力条件（既存勤務内の業務・休憩には適用しない）。
@@ -859,6 +865,20 @@ const visibleShifts = (date) => {
   return scheduleShifts(date).filter((x) => shown.has(x.staff_id));
 };
 
+function getStaffOrdering(date, actor) {
+  if (!actor || !["admin", "manager", "staff"].includes(actor.role)) throw err(403, "forbidden");
+  if (!validDay(date)) throw err(400, "invalid");
+  const working = staffOrdering.workingIds(state.shifts, date);
+  return { ok: true, date, version: staffOrdering.version(state), canManage: ["admin", "manager"].includes(actor.role),
+    staff: [...state.staff].sort(staffOrdering.compare).map(st => {
+      const pr = profileOf(st), status = staffBookingStatus(st), pv = staffPhotoVersion(st.id);
+      return { id: st.id, name: pr.nickname || st.name, registeredName: st.name, listingOrder: st.listing_order,
+        photo: pv ? `/api/staff/photo?id=${encodeURIComponent(st.id)}&v=${pv}` : "", message: pr.message || "",
+        active: st.active === 1, listed: status.listed, reasons: status.reasons, working: working.has(st.id), accepting: staffAcceptingOn(st.id, date),
+        profileRevision: st.profile_revision || 0 };
+    }) };
+}
+
 // ---- リクエスト処理 ----------------------------------------------------
 
 function getSchedule(date) {
@@ -879,6 +899,7 @@ function getSchedule(date) {
     staff: sorted.filter((st) => shown.has(st.id)).map((st) => ({ ...staffRow(st), name: profileOf(st).nickname || st.name })),
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
     allStaff: sorted.map(staffRow),
+    staffSkillCatalog: state.staffSkillCatalog,
     shifts,
     bookings: ev.bookings.map(b => ({ ...b, boothId: boothPolicy.bookingBoothIds(b)[0] || null,
       booth_allowed_ids: boothPolicy.resolveCourseBoothIds(boothCourseForBooking(b)), ...bookingTiming(b, date) })),
@@ -954,7 +975,7 @@ function postSchedule(body, actor) {
   if (action === "staffReconcile") {
     if (actor?.role !== "admin") throw err(403, "forbidden");
     const result = require("./staff-reconcile").reconcile(state, body, {
-      courses: [...courseStore.values()], today: todayJst(), minToMs, err,
+      courses: [...courseStore.values()], today: todayJst(), minToMs, err, initializeStaff: staffOrdering.initialize,
     });
     if (!body.dryRun) sseTouch();
     return result;
@@ -1263,6 +1284,13 @@ function postSchedule(body, actor) {
       const prevStaff = state.staff.find((x) => x.id === p.id);
       const gender = p.gender || prevStaff?.gender || "none";
       if (!p.id || !String(p.name || "").trim() || !["male", "female", "none"].includes(gender)) throw err(400, "invalid");
+      const skillEdit = staffSkills.prepare(state, p, prevStaff, gender, [...courseStore.values()], actor, err);
+      if (skillEdit?.replay) return skillEdit.replay;
+      // 削除後の古い編集画面から別IDのスタッフを復活させない。
+      if ((!prevStaff && p.create !== true) || (prevStaff && p.create === true)) throw err(409, "staffChanged");
+      if (prevStaff && p.staffRevision !== (prevStaff.profile_revision || 0)) throw err(409, "staffChanged");
+      const listingOrder = prevStaff ? prevStaff.listing_order : staffOrdering.nextOrder(state.staff);
+      if (!staffOrdering.validOrder(listingOrder)) throw err(400, "staffOrderingInvalid");
       // 対応メニュー：「全て」か、実在するメニューを1つ以上。チェックが1つもない設定は保存しない
       // （空の一覧は「全て」の意味になるため、そのまま保存すると全部のメニューを担当できることになってしまう）
       let courseList = [];
@@ -1276,8 +1304,20 @@ function postSchedule(body, actor) {
           throw err(409, "staffCourseGender");
         }
       }
-      const profile = { ...(p.profile || {}) };
+      if (p.profile != null && (typeof p.profile !== "object" || Array.isArray(p.profile))) throw err(400, "invalid");
+      if (p.photo !== undefined && p.photo !== null && p.photo !== "" &&
+          (typeof p.photo !== "string" || p.photo.length > 20 * 1024 * 1024 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(p.photo))) throw err(400, "invalid");
+      // 部分的な編集でも既存の連絡先・原本との対応・紹介文を失わない。
+      const priorProfile = prevStaff ? profileOf(prevStaff) : {};
+      const profile = { ...priorProfile, ...(p.profile || {}) };
+      if (priorProfile.peakManagerId) profile.peakManagerId = priorProfile.peakManagerId;
       delete profile.nominationFeePending;
+      if (skillEdit) {
+        profile.sourceSkillChecks = skillEdit.checks;
+        // 原本そのままの記録は同期専用。編集画面から原本を改ざん・削除しない。
+        if (Array.isArray(priorProfile.sourceSkillOriginalChecks)) profile.sourceSkillOriginalChecks = [...priorProfile.sourceSkillOriginalChecks];
+        else delete profile.sourceSkillOriginalChecks;
+      }
       if (p.photo) {
         state.photos.set(p.id, p.photo);
         profile.imageKey = "uploaded";
@@ -1307,7 +1347,8 @@ function postSchedule(body, actor) {
         courses: JSON.stringify(p.allCourses ? [] : courseList),
         profile: JSON.stringify(profile),
         sort_order: Number(p.sortOrder) || 0,
-        profile_revision: (Number(p.staffRevision) || 0) + 1,
+        listing_order: listingOrder, // 通常の編集・名前変更では保存済み掲載Noを保持する
+        profile_revision: (Number(prevStaff?.profile_revision) || 0) + 1,
       };
       const idx = state.staff.findIndex((s) => s.id === p.id);
       if (idx >= 0) state.staff[idx] = rec; else state.staff.push(rec);
@@ -1337,8 +1378,8 @@ function postSchedule(body, actor) {
           affected.slice(0, 5).join("\n") + (affected.length > 5 ? "\nほか" : "") +
           "\n既存の予約はそのまま維持されます（台帳に「対応外」の印が付きます）。必要に応じて担当変更または取消をしてください。");
       }
-      if (warnings.length) return { ok: true, warning: warnings.join("\n\n") };
-      return { ok: true };
+      if (warnings.length) return staffSkills.remember(state, p, skillEdit, { ok: true, warning: warnings.join("\n\n") });
+      return staffSkills.remember(state, p, skillEdit, { ok: true });
     }
     case "checkout": {
       // 従来の会計入口も同じ二重精算防止・支払内訳・履歴の処理を使う。
@@ -2788,16 +2829,19 @@ function staffPhotoVersion(id) {
 // スタッフ紹介ページ用：指名できるスタッフ全員（写真・指名料・紹介文と、指名して予約できるメニュー）
 // 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・スタッフ情報の入力がそろっている・個人指名あり・メニュー対応・メニューの性別指定。
 // 毎回いまの登録内容から作るので、管理画面の「スタッフ情報」を保存すると次に開いたとき（開いたままのページも1分以内）に反映される
-function publicStaffList() {
+function publicStaffList(date = todayJst()) {
   const courses = [...courseStore.values()];
-  return state.staff
+  const working = staffOrdering.workingIds(state.shifts, date);
+  return staffOrdering.ordered(state.staff, state.shifts, date)
     .filter((st) => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
-    .sort((a, b) => a.sort_order - b.sort_order)
     .map((st) => {
       const pr = profileOf(st);
       const pv = staffPhotoVersion(st.id);
       return {
         id: st.id,
+        listingOrder: st.listing_order,
+        working: working.has(st.id),
+        accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
         gender: st.gender,
         nominationFee: Number(pr.nominationFee) || 0,
@@ -2809,24 +2853,27 @@ function publicStaffList() {
     });
 }
 // 「指名して予約する」で来たメニュー選択ページ用：そのスタッフ（指名できなければ null）。紹介文は要らないので外す
-function nominationOf(staffId) {
-  const st = publicStaffList().find((x) => x.id === staffId);
+function nominationOf(staffId, date = todayJst()) {
+  const st = publicStaffList(validDay(date) ? date : todayJst()).find((x) => x.id === staffId);
   if (!st) return null;
   const { message, ...rest } = st;
   return rest;
 }
 
 // 指名候補スタッフ一覧（受付中・スタッフ情報の入力がそろっている・個人指名あり・コース対応・性別条件）
-function nominatableStaff(courseId, genderPref) {
-  return state.staff
+function nominatableStaff(courseId, genderPref, date = todayJst()) {
+  const working = staffOrdering.workingIds(state.shifts, date);
+  return staffOrdering.ordered(state.staff, state.shifts, date)
     .filter((st) => st.active === 1 && staffReady(st) && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => profileOf(st).personalNomination)
-    .sort((a, b) => a.sort_order - b.sort_order)
     .map((st) => {
       const pr = profileOf(st);
       return {
         id: st.id,
+        listingOrder: st.listing_order,
+        working: working.has(st.id),
+        accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
         nominationFee: Number(pr.nominationFee) || 0,
         revision: st.profile_revision || 0,
@@ -2837,12 +2884,14 @@ function nominatableStaff(courseId, genderPref) {
 }
 
 // プロフィールは全員を案内する。予約できるかは選択メニューと勤務予定で別に判定する。
-function staffPickerDirectory(courseId, genderPref) {
-  const eligible = new Set(nominatableStaff(courseId, genderPref).map(s => s.id));
-  return state.staff.filter(st => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
-    .sort((a,b) => a.sort_order - b.sort_order).map(st => {
+function staffPickerDirectory(courseId, genderPref, date = todayJst()) {
+  const eligible = new Set(nominatableStaff(courseId, genderPref, date).map(s => s.id));
+  const working = staffOrdering.workingIds(state.shifts, date);
+  return staffOrdering.ordered(state.staff, state.shifts, date).filter(st => st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+    .map(st => {
       const pr = profileOf(st);
       return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
+        listingOrder:st.listing_order, working:working.has(st.id), accepting:staffAcceptingOn(st.id, date),
         revision:st.profile_revision || 0, hasPhoto:state.photos.has(st.id), message:pr.message || '', eligible:eligible.has(st.id) };
     });
 }
@@ -2855,11 +2904,11 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
     .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => {
-      const sh = shifts.find((x) => x.staff_id === st.id);
-      return sh && msToMin(date, sh.start_at) <= startMin && endMin <= msToMin(date, sh.end_at);
+      return shifts.some((sh) => sh.staff_id === st.id && msToMin(date, sh.start_at) <= startMin && endMin <= msToMin(date, sh.end_at));
     })
     .filter((st) => !overlaps(date, st.id, startMin, endMin, ignoreBookingId))
     .filter((st) => !online || !ledgerOperations.onlineBlocked(state, date, st.id, startMin, endMin, { minToMs }))
+    .sort(staffOrdering.compare)
     .map((st) => st.id);
 }
 
@@ -2936,7 +2985,7 @@ function hpNotify(b, via) {
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
     .filter((st) => !ledgerOperations.onlineBlocked(state, date, st.id, start, end, { minToMs }))
-    .sort((a, c) => a.sort_order - c.sort_order);
+    .sort(staffOrdering.compare);
   if (!capable.length) return failed(409, "noCapableStaff", when); // このメニューを担当できるスタッフがいない
   if (!candidates.length) return failed(409, "slotTaken", when);
   const boothPlan = planBooths(date, start, end, course, 1, { online: true });
@@ -3212,7 +3261,7 @@ function getAvailability(q, member) {
     }
     days.push({ date: d, enabled: day.enabled, slots });
   }
-  return { staff: nominatableStaff(courseId, gpref), staffDirectory: staffPickerDirectory(courseId, gpref), days };
+  return { date, staff: nominatableStaff(courseId, gpref, date), staffDirectory: staffPickerDirectory(courseId, gpref, date), days };
 }
 
 // 同じメールアドレスの予約が既にあれば「リピート」扱いにする
@@ -3284,7 +3333,7 @@ function createPublicBooking(body, member) {
   const gpref = effectivePref(body.course, pref); // コース名の性別指定を優先
   let nominated = null;
   if (staffId) {
-    nominated = nominatableStaff(body.course, gpref).find((st) => st.id === staffId);
+    nominated = nominatableStaff(body.course, gpref, date).find((st) => st.id === staffId);
     if (!nominated) throw err(409, "staffUnavailable");
     if (Number(body.expectedNominationFee) !== nominated.nominationFee) throw err(409, "priceChanged");
   }
@@ -3613,6 +3662,7 @@ function handleDemoApi(req, res, url) {
       else if (P === "/api/demo/mails" && !isGet) need = "manager";
       else if (P === "/api/demo/mail-lang" && !isGet) need = "manager";       // メールの再送はマネージャー以上
       else if (P === "/api/demo/report" || P === "/api/demo/mailtest") need = "manager";
+      else if (P === "/api/demo/staff-ordering" && !isGet) need = "manager";
       else if (!isGet && (P === "/api/demo/settings" || P === "/api/demo/ticket-plans" ||
         P === "/api/demo/courses" || P === "/api/demo/tickets" ||
         P === "/api/demo/course-photo" || P === "/api/demo/staff-photo")) need = "manager";
@@ -3625,6 +3675,26 @@ function handleDemoApi(req, res, url) {
       denyApi(req, res);
       return true;
     }
+  }
+  if (url.pathname === "/api/demo/staff-ordering") {
+    const reply = (status, data) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(data)); };
+    if (req.method === "GET" || req.method === "HEAD") {
+      try { reply(200, getStaffOrdering(url.searchParams.get("date") || todayJst(), sessionAccount(req))); }
+      catch (e) { reply(e.status || 500, { error: e.status ? e.message : "unavailable" }); }
+    } else if (req.method === "POST") {
+      let raw = "", bytes = 0, tooLarge = false;
+      req.on("data", chunk => { bytes += Buffer.byteLength(chunk); if (bytes > 100000) { tooLarge = true; raw = ""; } else if (!tooLarge) raw += chunk; });
+      req.on("end", () => {
+        try {
+          if (tooLarge) throw err(413, "tooLarge");
+          let body; try { body = JSON.parse(raw || "{}"); } catch { throw err(400, "invalid"); }
+          const result = staffOrdering.save(state, body, sessionAccount(req), err);
+          sseTouch(); reply(200, result);
+        } catch (e) { reply(e.status || 500, { error: e.status ? e.message : "unavailable" }); }
+      });
+    } else reply(405, { error: "methodNotAllowed" });
+    return true;
   }
   if (url.pathname === "/api/demo/customer-records") {
     return require("./customer-records").handle(req, res, url, state, sessionAccount(req), {
@@ -3917,23 +3987,29 @@ function handleDemoApi(req, res, url) {
   if (url.pathname === "/api/staff" && (req.method === "GET" || req.method === "HEAD")) {
     const courseId = url.searchParams.get("course");
     const pref = url.searchParams.get("staff") || "none";
-    if (!getCourse(courseId) || !["none", "male", "female"].includes(pref)) {
+    const date = url.searchParams.get("date") || todayJst();
+    if (!getCourse(courseId) || !validDay(date) || !["none", "male", "female"].includes(pref)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "invalid" }));
       return true;
     }
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ staff: nominatableStaff(courseId, effectivePref(courseId, pref)) }));
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ date, staff: nominatableStaff(courseId, effectivePref(courseId, pref), date) }));
     return true;
   }
   // スタッフ紹介ページ用（publicStaffList）
   if (url.pathname === "/api/staff/list" && (req.method === "GET" || req.method === "HEAD")) {
-    const staff = publicStaffList();
+    const date = url.searchParams.get("date") || todayJst();
+    if (!validDay(date)) {
+      res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ error: "invalid" })); return true;
+    }
+    const staff = publicStaffList(date);
     // ページ（pm-staff.html）の版：書き換えたら、開いたままのスタッフ紹介ページが新しい版に読み込み直す
     let page = 0;
     try { page = Math.floor(fs.statSync(path.join(__dirname, "pages", "pm-staff.html")).mtimeMs); } catch {}
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ staff, page }));
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ date, staff, page }));
     return true;
   }
   if (url.pathname === "/api/staff/photo") {
@@ -4308,7 +4384,7 @@ function handleDemoApi(req, res, url) {
   // 管理画面の版（画面の部品ファイルの更新時刻）。開いたままの管理画面が、新しい版に気づいて読み込み直すのに使う
   if (url.pathname === "/api/demo/build" && (req.method === "GET" || req.method === "HEAD")) {
     const files = ["public/pm-layout.js", "public/pm-layout.css", "public/pm-motion.css", "public/ledger-operations.js", "public/ledger-operations.css",
-      "public/booth-settings.js", "public/booth-settings.css", "public/customer-records.js", "public/customer-records.css",
+      "public/booth-settings.js", "public/booth-settings.css", "public/customer-records.js", "public/customer-records.css", "public/staff-ordering.js", "public/staff-ordering.css", "staff-ordering.js", "staff-skills.js",
       "ledger-operations.js", "booth-policy.js", "customer-records.js", "booking-details.js", "public/booking-details-ui.js", "public/booking-details-ui.css", "public/_next/static/chunks/index-pm3.js", "public/_next/static/chunks/NativeCalendar-pm2.js",
       "public/_next/static/chunks/AdminSchedule-pm2.js", "public/_next/static/chunks/I18n-8lang-v1.js", "pages/admin.html"];
     const v = files.map((f) => { try { return Math.floor(fs.statSync(path.join(__dirname, f)).mtimeMs); } catch { return 0; } }).join("-");

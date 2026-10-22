@@ -99,3 +99,8 @@ a, button, summary, label, select, [role="button"], .menu-row, .slot-open { touc
   .back-to-calendar:hover { color: #6f4a1e; }
   .st-more:hover { filter: brightness(0.92); }
 }
+
+/* 勤務日の確認と、シフトのない指名候補。既存カード寸法は維持。 */
+.date-page .select-label input[type=date] { max-width:100%; min-height:44px; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; background:#fff; color:#1f2937; font:inherit; font-size:16px; }
+.staff-picker-item:disabled { cursor:default; opacity:.64; background:#f3f4f6; }
+.staff-picker-item:disabled:active { transform:none; }

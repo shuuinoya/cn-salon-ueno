@@ -2243,3 +2243,9 @@ main.ledger-app .ledger-event.pm-parked-origin { outline: 2px dashed #6d4c33; ou
   .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) { display: block; }
   .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) > th, .ledger-app .staff-master .staff-fields tr:has(.staff-course-groups) > td { display: block; }
 }
+
+/* 対応メニュー：原本と同じ「全て → カテゴリ → 個別」の縦並び。性別制限・部分選択は維持。 */
+.ledger-app .staff-master .staff-course-groups fieldset > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.ledger-app .staff-master .staff-course-groups fieldset > div > label { display: flex; align-items: flex-start; gap: 8px; line-height: 1.7; white-space: normal; }
+.ledger-app .staff-master .staff-course-groups input[type=checkbox] { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; accent-color: #ed1970; }
+.ledger-app .staff-master-editing .staff-public-ordering { display: none; }

@@ -788,8 +788,9 @@
     return location.pathname === "/book" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v) ? v : "";
   })();
   // サーバーがページに入れておいたスタッフの情報（window.__cnNom）があれば、通信を待たずにすぐ使う
+  const NOM_DATE = (() => { const d = new URLSearchParams(location.search).get("date"); return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? d : ""; })();
   let nomStaff = NOM_ID && "__cnNom" in window ? window.__cnNom : undefined; // undefined＝読み込み中／null＝指名できない／スタッフ
-  let nomLoading = false;
+  let nomLoading = false, nomRefreshPending = false;
   if (NOM_ID && nomStaff === undefined) {
     // 絞り込む前のメニュー一覧が一瞬見えないよう、読み込みが済むまで一覧を隠す（最長8秒）
     const pre = document.createElement("style");
@@ -799,25 +800,36 @@
     setTimeout(() => pre.remove(), 8000);
   }
   async function loadNomStaff() {
+    if (document.hidden) return;
+    if (nomLoading) { nomRefreshPending = true; return; }
     nomLoading = true;
+    const before = JSON.stringify(nomStaff);
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
     try {
-      const j = await (await origFetch("/api/staff/list", { cache: "no-store" })).json();
+      const response = await origFetch("/api/staff/list" + (NOM_DATE ? "?date=" + encodeURIComponent(NOM_DATE) : ""), { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw Error('unavailable');
+      const j = await response.json();
       nomStaff = (j.staff || []).find((s) => s.id === NOM_ID) || null;
     } catch {
       nomStaff = null;
     }
+    clearTimeout(timer);
     nomLoading = false;
+    document.getElementById("fm-nom-filter")?.remove();
+    if (before !== JSON.stringify(nomStaff)) document.getElementById("fm-nom-bar")?.remove();
+    if (canTouch()) decorateNomination();
+    if (nomRefreshPending) { nomRefreshPending = false; loadNomStaff(); }
   }
   const courseOf = (href) => { try { return new URL(href, location.origin).searchParams.get("courses") || ""; } catch { return ""; } };
-  const withStaff = (href) => { const u = new URL(href, location.origin); u.searchParams.set("staffId", NOM_ID); return u.pathname + u.search; };
+  const withStaff = (href) => { const u = new URL(href, location.origin); u.searchParams.set("staffId", NOM_ID); if (NOM_DATE) u.searchParams.set("date", NOM_DATE); return u.pathname + u.search; };
   function decorateNomination() {
     if (!NOM_ID || location.pathname !== "/book") return;
     if (nomStaff === undefined) { if (!nomLoading) loadNomStaff(); return; }
     const stack = document.querySelector(".list-stack");
     if (!stack) return;
-    if (nomStaff) {
+    {
       // 担当できないメニューを隠し、残ったメニューのリンクに指名をつける（Reactが描き直しても毎回やり直す）
-      const ok = new Set(nomStaff.courses);
+      const ok = new Set(nomStaff?.courses || []);
       stack.querySelectorAll('a.menu-row[href^="/book/select-datetime"]').forEach((a) => {
         const show = ok.has(courseOf(a.getAttribute("href")));
         a.style.display = show ? "" : "none";
@@ -857,13 +869,28 @@
   }
   // 画面の部品の準備ができたら、0.7秒ごとの確認を待たずにすぐ指名スタッフを出す
   if (NOM_ID) whenHydrated.then(() => decorateNomination());
+  if (NOM_ID) {
+    setInterval(loadNomStaff, 60000);
+    window.addEventListener("focus", loadNomStaff);
+    document.addEventListener("visibilitychange", loadNomStaff);
+    let updates = null, lastSeq = null;
+    const connect = () => {
+      if (updates || typeof EventSource !== "function") return;
+      updates = new EventSource("/api/live");
+      updates.addEventListener("message", event => { if (lastSeq !== event.data) { lastSeq = event.data; loadNomStaff(); } });
+    };
+    connect();
+    window.addEventListener("pagehide", () => { updates?.close(); updates = null; });
+    window.addEventListener("pageshow", event => { if (event.persisted) { connect(); loadNomStaff(); } });
+  }
   // メニューを選んだら、日時選択へ指名つきで進む（予約サイトの画面部品は指名を知らないため、ここでページごと移動する）
   document.addEventListener("click", (e) => {
-    if (!NOM_ID || !nomStaff || location.pathname !== "/book") return;
+    if (!NOM_ID || location.pathname !== "/book") return;
     const a = e.target.closest && e.target.closest('a.menu-row[href^="/book/select-datetime"]');
     if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     e.stopImmediatePropagation();
+    if (!nomStaff || !nomStaff.courses.includes(courseOf(a.getAttribute("href")))) return;
     location.assign(withStaff(a.getAttribute("href")));
   }, true);
 

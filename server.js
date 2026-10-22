@@ -167,7 +167,10 @@ function bootPaths(req, url) {
     }
   }
   if (p === "/book/confirm") list.push("/api/member/me?lite=1");
-  if (p === "/staff") list.push("/api/staff/list");
+  if (p === "/staff") {
+    const date = isDay(q.get("date")) ? q.get("date") : today;
+    list.push("/api/staff/list?date=" + encodeURIComponent(date));
+  }
   return list;
 }
 async function pageBoot(req, url) {
@@ -257,7 +260,7 @@ function adminWarmList() {
   const f = path.join(ROOT, r.file);
   let m = 0;
   try { m = fs.statSync(f).mtimeMs; } catch { return []; }
-  const key = m + ":" + staticVer() + ":" + pmVer() + ":" + fileVer("ledger-operations.js") + ":" + fileVer("ledger-operations.css") + ":" + fileVer("customer-records.js") + ":" + fileVer("customer-records.css") + ":" + fileVer("booth-settings.js") + ":" + fileVer("booth-settings.css") + ":" + fileVer("booking-details-ui.js") + ":" + fileVer("booking-details-ui.css");
+  const key = m + ":" + staticVer() + ":" + pmVer() + ":" + fileVer("ledger-operations.js") + ":" + fileVer("ledger-operations.css") + ":" + fileVer("customer-records.js") + ":" + fileVer("customer-records.css") + ":" + fileVer("booth-settings.js") + ":" + fileVer("booth-settings.css") + ":" + fileVer("booking-details-ui.js") + ":" + fileVer("booking-details-ui.css") + ":" + fileVer("staff-ordering.js") + ":" + fileVer("staff-ordering.css");
   if (adminWarm.m === key) return adminWarm.list;
   let list = [];
   try {
@@ -266,7 +269,7 @@ function adminWarmList() {
     for (const d of preloadsFor(html)) refs.add(d);
     list = [...refs].map((d) => pinStatic("/" + d));
     list.push("/pm-layout.js?v=" + pmVer(), "/pm-layout.css?v=" + pmVer(), "/pm-motion.css?v=" + fileVer("pm-motion.css"));
-    list.push("/ledger-operations.js?v=" + fileVer("ledger-operations.js"), "/ledger-operations.css?v=" + fileVer("ledger-operations.css"), "/customer-records.js?v=" + fileVer("customer-records.js"), "/customer-records.css?v=" + fileVer("customer-records.css"), "/booth-settings.js?v=" + fileVer("booth-settings.js"), "/booth-settings.css?v=" + fileVer("booth-settings.css"), "/booking-details-ui.js?v=" + fileVer("booking-details-ui.js"), "/booking-details-ui.css?v=" + fileVer("booking-details-ui.css"));
+    list.push("/ledger-operations.js?v=" + fileVer("ledger-operations.js"), "/ledger-operations.css?v=" + fileVer("ledger-operations.css"), "/customer-records.js?v=" + fileVer("customer-records.js"), "/customer-records.css?v=" + fileVer("customer-records.css"), "/booth-settings.js?v=" + fileVer("booth-settings.js"), "/booth-settings.css?v=" + fileVer("booth-settings.css"), "/booking-details-ui.js?v=" + fileVer("booking-details-ui.js"), "/booking-details-ui.css?v=" + fileVer("booking-details-ui.css"), "/staff-ordering.js?v=" + fileVer("staff-ordering.js"), "/staff-ordering.css?v=" + fileVer("staff-ordering.css"));
   } catch { list = []; }
   adminWarm = { m: key, list };
   return list;
@@ -401,7 +404,7 @@ function sendFile(res, file, status, type, head, url, req) {
         // （画面の部品の準備や通信を待たずに、すぐ絞り込んだ一覧と指名スタッフを出せる。CSSとheadの差し込みなので画面の組み立てとは食い違わない）
         if (url.pathname === "/book" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(url.searchParams.get("staffId") || "")) {
           let nom = null;
-          try { nom = nominationOf(url.searchParams.get("staffId")); } catch {}
+          try { nom = nominationOf(url.searchParams.get("staffId"), url.searchParams.get("date")); } catch {}
           let css = "";
           if (nom) {
             const row = 'a.menu-row[href^="/book/select-datetime"]';
@@ -432,8 +435,8 @@ function sendFile(res, file, status, type, head, url, req) {
         // 管理画面の上書きスクリプト・CSSにも版番号を付け、古いキャッシュが残らないようにする
         const PM_VER = pmVer();
         if (text.includes('src="/pm-layout.js"')) {
-          text = text.replace("</head>", '<link rel="stylesheet" href="/ledger-operations.css?v=' + fileVer("ledger-operations.css") + '"/><link rel="stylesheet" href="/customer-records.css?v=' + fileVer("customer-records.css") + '"/><link rel="stylesheet" href="/booth-settings.css?v=' + fileVer("booth-settings.css") + '"/><link rel="stylesheet" href="/booking-details-ui.css?v=' + fileVer("booking-details-ui.css") + '"/></head>');
-          text = text.replace("</body>", '<script src="/ledger-operations.js?v=' + fileVer("ledger-operations.js") + '" defer></script><script src="/customer-records.js?v=' + fileVer("customer-records.js") + '" defer></script><script src="/booth-settings.js?v=' + fileVer("booth-settings.js") + '" defer></script><script src="/booking-details-ui.js?v=' + fileVer("booking-details-ui.js") + '" defer></script></body>');
+          text = text.replace("</head>", '<link rel="stylesheet" href="/ledger-operations.css?v=' + fileVer("ledger-operations.css") + '"/><link rel="stylesheet" href="/customer-records.css?v=' + fileVer("customer-records.css") + '"/><link rel="stylesheet" href="/booth-settings.css?v=' + fileVer("booth-settings.css") + '"/><link rel="stylesheet" href="/booking-details-ui.css?v=' + fileVer("booking-details-ui.css") + '"/><link rel="stylesheet" href="/staff-ordering.css?v=' + fileVer("staff-ordering.css") + '"/></head>');
+          text = text.replace("</body>", '<script src="/ledger-operations.js?v=' + fileVer("ledger-operations.js") + '" defer></script><script src="/customer-records.js?v=' + fileVer("customer-records.js") + '" defer></script><script src="/booth-settings.js?v=' + fileVer("booth-settings.js") + '" defer></script><script src="/booking-details-ui.js?v=' + fileVer("booking-details-ui.js") + '" defer></script><script src="/staff-ordering.js?v=' + fileVer("staff-ordering.js") + '" defer></script></body>');
         }
         text = text
           .split('href="/pm-layout.css"').join('href="/pm-layout.css?v=' + PM_VER + '"')

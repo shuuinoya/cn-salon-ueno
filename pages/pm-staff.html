@@ -150,6 +150,10 @@
   .st-actions { margin-top: auto; padding-top: 8px; }
   .booking-button.st-book { width: 100%; min-width: 0; }
   .st-status { margin: 0; padding: 28px 16px; color: #6b7280; text-align: center; line-height: 1.8; }
+  .st-date { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .st-date input { max-width:100%; padding:8px; border:1px solid #d1d5db; border-radius:4px; font:inherit; font-size:16px; }
+  .st-day-state { margin:0; color:#6b7280; font-size:12px; }
+  .st-book-unavailable { display:block; padding:10px 8px; text-align:center; background:#f3f4f6; color:#6b7280; border-radius:6px; font-size:13px; line-height:1.6; }
   .st-status button { margin-left: 6px; padding: 5px 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; font: inherit; cursor: pointer; }
   /* 「続きを読む」・写真を押したとき：その人の情報を画面の真ん中に小さめに出す（カードは伸ばさない）。
      パソコン・スマホとも縦1列で「写真 → 名前・性別・指名料（中央揃え）→ 紹介文（左揃え）→ 指名して予約する」の順。
@@ -179,7 +183,7 @@
     .booking-button.st-book { padding: 8px 10px; font-size: 14px; }
   }
 </style>
-</head><body class="__variable_geist_19ysh9d __variable_geist_mono_1001rt9 antialiased"><div class="page-shell"><header class="site-header"><div class="header-inner"><a href="/" class="brand"><img src="/images/logo.jpg.webp" alt=""/><h1>UENO CN health＆beauty salon</h1></a><nav class="desktop-nav" aria-label="メインメニュー"><a href="/" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M218.83 103.77 138.83 28.29a16 16 0 0 0-21.64 0L37.17 103.77A16 16 0 0 0 32 115.55V208a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48h32v48a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-92.45a16 16 0 0 0-5.17-11.78ZM208 208h-48v-48a16 16 0 0 0-16-16h-32a16 16 0 0 0-16 16v48H48v-92.45L128 40l80 75.53Z"></path></svg><span>ホーム</span></a><a href="/book" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 176H48V96h160Zm0-128H48V48h24v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24Z"></path></svg><span>予約</span></a><a href="/staff" class="nav-item active" aria-current="page"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><span>スタッフ</span></a><a href="/map" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M128 64a40 40 0 1 0 40 40 40 40 0 0 0-40-40Zm0 64a24 24 0 1 1 24-24 24 24 0 0 1-24 24Zm0-112a88.1 88.1 0 0 0-88 88c0 31.4 14.51 64.68 42 96.25a254.19 254.19 0 0 0 41.45 38.3 8 8 0 0 0 9.18 0A254.19 254.19 0 0 0 174 200.25c27.45-31.57 42-64.85 42-96.25A88.1 88.1 0 0 0 128 16Zm0 206c-16.53-13-72-60.75-72-118a72 72 0 0 1 144 0c0 57.23-55.47 105-72 118Z"></path></svg><span>マップ</span></a></nav><div class="header-actions"><div class="language-control"><button class="language-button" type="button" aria-label="言語を選択" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 256 256" aria-hidden="true" class="small-icon"><path d="M128 24a104 104 0 1 0 104 104A104.11 104.11 0 0 0 128 24Zm78.37 64h-35.43a142.39 142.39 0 0 0-20.26-45A88.37 88.37 0 0 1 206.37 88ZM128 40.11C140 53.13 149 69.66 154.37 88h-52.74C107 69.66 116 53.13 128 40.11ZM49.63 88A88.37 88.37 0 0 1 105.32 43a142.39 142.39 0 0 0-20.26 45Zm-6.3 16h38.46a161.79 161.79 0 0 0 0 48H43.33a88.15 88.15 0 0 1 0-48ZM49.63 168h35.43a142.39 142.39 0 0 0 20.26 45A88.37 88.37 0 0 1 49.63 168ZM128 215.89C116 202.87 107 186.34 101.63 168h52.74C149 186.34 140 202.87 128 215.89ZM158 152H98a145.72 145.72 0 0 1 0-48h60a145.72 145.72 0 0 1 0 48Zm-7.32 61a142.39 142.39 0 0 0 20.26-45h35.43A88.37 88.37 0 0 1 150.68 213Zm23.53-61a161.79 161.79 0 0 0 0-48h38.46a88.15 88.15 0 0 1 0 48Z"></path></svg><b>Language</b></button></div><a href="/login" class="login-button"><svg viewBox="0 0 256 256" aria-hidden="true" class="small-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><b>ログイン</b></a></div></div></header><main class="content"><div class="main-column"><section class="list-card"><h2 id="st-title">スタッフ紹介</h2><div id="st-list"><p class="st-status">…</p></div></section></div></main><nav class="mobile-nav" aria-label="モバイルメニュー"><a href="/" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M218.83 103.77 138.83 28.29a16 16 0 0 0-21.64 0L37.17 103.77A16 16 0 0 0 32 115.55V208a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48h32v48a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-92.45a16 16 0 0 0-5.17-11.78ZM208 208h-48v-48a16 16 0 0 0-16-16h-32a16 16 0 0 0-16 16v48H48v-92.45L128 40l80 75.53Z"></path></svg><small>ホーム</small></a><a href="/book" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 176H48V96h160Zm0-128H48V48h24v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24Z"></path></svg><small>予約</small></a><a href="/staff" class="mobile-item active" aria-current="page"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><small>スタッフ</small></a><a href="/map" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M128 64a40 40 0 1 0 40 40 40 40 0 0 0-40-40Zm0 64a24 24 0 1 1 24-24 24 24 0 0 1-24 24Zm0-112a88.1 88.1 0 0 0-88 88c0 31.4 14.51 64.68 42 96.25a254.19 254.19 0 0 0 41.45 38.3 8 8 0 0 0 9.18 0A254.19 254.19 0 0 0 174 200.25c27.45-31.57 42-64.85 42-96.25A88.1 88.1 0 0 0 128 16Zm0 206c-16.53-13-72-60.75-72-118a72 72 0 0 1 144 0c0 57.23-55.47 105-72 118Z"></path></svg><small>マップ</small></a></nav></div>
+</head><body class="__variable_geist_19ysh9d __variable_geist_mono_1001rt9 antialiased"><div class="page-shell"><header class="site-header"><div class="header-inner"><a href="/" class="brand"><img src="/images/logo.jpg.webp" alt=""/><h1>UENO CN health＆beauty salon</h1></a><nav class="desktop-nav" aria-label="メインメニュー"><a href="/" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M218.83 103.77 138.83 28.29a16 16 0 0 0-21.64 0L37.17 103.77A16 16 0 0 0 32 115.55V208a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48h32v48a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-92.45a16 16 0 0 0-5.17-11.78ZM208 208h-48v-48a16 16 0 0 0-16-16h-32a16 16 0 0 0-16 16v48H48v-92.45L128 40l80 75.53Z"></path></svg><span>ホーム</span></a><a href="/book" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 176H48V96h160Zm0-128H48V48h24v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24Z"></path></svg><span>予約</span></a><a href="/staff" class="nav-item active" aria-current="page"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><span>スタッフ</span></a><a href="/map" class="nav-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M128 64a40 40 0 1 0 40 40 40 40 0 0 0-40-40Zm0 64a24 24 0 1 1 24-24 24 24 0 0 1-24 24Zm0-112a88.1 88.1 0 0 0-88 88c0 31.4 14.51 64.68 42 96.25a254.19 254.19 0 0 0 41.45 38.3 8 8 0 0 0 9.18 0A254.19 254.19 0 0 0 174 200.25c27.45-31.57 42-64.85 42-96.25A88.1 88.1 0 0 0 128 16Zm0 206c-16.53-13-72-60.75-72-118a72 72 0 0 1 144 0c0 57.23-55.47 105-72 118Z"></path></svg><span>マップ</span></a></nav><div class="header-actions"><div class="language-control"><button class="language-button" type="button" aria-label="言語を選択" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 256 256" aria-hidden="true" class="small-icon"><path d="M128 24a104 104 0 1 0 104 104A104.11 104.11 0 0 0 128 24Zm78.37 64h-35.43a142.39 142.39 0 0 0-20.26-45A88.37 88.37 0 0 1 206.37 88ZM128 40.11C140 53.13 149 69.66 154.37 88h-52.74C107 69.66 116 53.13 128 40.11ZM49.63 88A88.37 88.37 0 0 1 105.32 43a142.39 142.39 0 0 0-20.26 45Zm-6.3 16h38.46a161.79 161.79 0 0 0 0 48H43.33a88.15 88.15 0 0 1 0-48ZM49.63 168h35.43a142.39 142.39 0 0 0 20.26 45A88.37 88.37 0 0 1 49.63 168ZM128 215.89C116 202.87 107 186.34 101.63 168h52.74C149 186.34 140 202.87 128 215.89ZM158 152H98a145.72 145.72 0 0 1 0-48h60a145.72 145.72 0 0 1 0 48Zm-7.32 61a142.39 142.39 0 0 0 20.26-45h35.43A88.37 88.37 0 0 1 150.68 213Zm23.53-61a161.79 161.79 0 0 0 0-48h38.46a88.15 88.15 0 0 1 0 48Z"></path></svg><b>Language</b></button></div><a href="/login" class="login-button"><svg viewBox="0 0 256 256" aria-hidden="true" class="small-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><b>ログイン</b></a></div></div></header><main class="content"><div class="main-column"><section class="list-card"><h2 id="st-title">スタッフ紹介</h2><label class="st-date"><span id="st-date-label">勤務日</span><input id="st-date" type="date" aria-label="勤務日"></label><div id="st-list"><p class="st-status">…</p></div></section></div></main><nav class="mobile-nav" aria-label="モバイルメニュー"><a href="/" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M218.83 103.77 138.83 28.29a16 16 0 0 0-21.64 0L37.17 103.77A16 16 0 0 0 32 115.55V208a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48h32v48a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-92.45a16 16 0 0 0-5.17-11.78ZM208 208h-48v-48a16 16 0 0 0-16-16h-32a16 16 0 0 0-16 16v48H48v-92.45L128 40l80 75.53Z"></path></svg><small>ホーム</small></a><a href="/book" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 176H48V96h160Zm0-128H48V48h24v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24Z"></path></svg><small>予約</small></a><a href="/staff" class="mobile-item active" aria-current="page"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg><small>スタッフ</small></a><a href="/map" class="mobile-item"><svg viewBox="0 0 256 256" aria-hidden="true" class="nav-icon"><path d="M128 64a40 40 0 1 0 40 40 40 40 0 0 0-40-40Zm0 64a24 24 0 1 1 24-24 24 24 0 0 1-24 24Zm0-112a88.1 88.1 0 0 0-88 88c0 31.4 14.51 64.68 42 96.25a254.19 254.19 0 0 0 41.45 38.3 8 8 0 0 0 9.18 0A254.19 254.19 0 0 0 174 200.25c27.45-31.57 42-64.85 42-96.25A88.1 88.1 0 0 0 128 16Zm0 206c-16.53-13-72-60.75-72-118a72 72 0 0 1 144 0c0 57.23-55.47 105-72 118Z"></path></svg><small>マップ</small></a></nav></div>
 <script>
 (function () {
   "use strict";
@@ -193,7 +197,20 @@
   const USER = '<svg viewBox="0 0 256 256" aria-hidden="true"><path d="M230.92 212c-15.23-26.33-38.7-45.21-66.09-54.16a72 72 0 1 0-73.66 0C63.78 166.78 40.31 185.66 25.08 212a8 8 0 1 0 13.85 8c18.84-32.56 52.14-52 89.07-52s70.23 19.44 89.07 52a8 8 0 1 0 13.85-8ZM72 96a56 56 0 1 1 56 56 56.06 56.06 0 0 1-56-56Z"></path></svg>';
   const list = document.getElementById("st-list");
   let staff = null;
-  let failed = false;
+  let failed = false, stale = false, loading = false, sequence = 0;
+  const dateInput = document.getElementById("st-date");
+  const businessDate = () => new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const addDays = (date, days) => new Date(Date.parse(date + "T12:00:00+09:00") + days * 86400000).toISOString().slice(0, 10);
+  const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || "") && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
+  const initialDate = new URLSearchParams(location.search).get("date");
+  let selectedDate = validDate(initialDate) && initialDate >= businessDate() && initialDate <= addDays(businessDate(), 84) ? initialDate : businessDate();
+  dateInput.value = selectedDate; dateInput.min = businessDate(); dateInput.max = addDays(businessDate(), 84);
+  function bookingAction(s) {
+    if (stale || loading) return '<span class="st-book-unavailable">' + esc(T("勤務情報を確認しています。")) + '</span>';
+    if (s.working !== true) return '<span class="st-book-unavailable">' + esc(T("この日は勤務シフトがありません。別の日を選択してください。")) + '</span>';
+    if (s.accepting !== true) return '<span class="st-book-unavailable">' + esc(T("この日は受付を停止しています。")) + '</span>';
+    return '<a class="booking-button st-book" href="/book?staffId=' + encodeURIComponent(s.id) + '&amp;date=' + encodeURIComponent(selectedDate) + '">' + esc(T("指名して予約する")) + '</a>';
+  }
 
   function card(s) {
     const name = esc(s.name);
@@ -204,7 +221,7 @@
       '<div class="st-head"><h3 class="st-name">' + name + "</h3></div>" +
       '<p class="st-fee">' + esc(T("指名料")) + " <b>" + esc(price(s.nominationFee)) + "</b></p>" +
       (m ? '<p class="st-msg">' + esc(m) + '</p><button type="button" class="st-more" data-id="' + esc(s.id) + '" hidden></button>' : "") +
-      '<div class="st-actions"><a class="booking-button st-book" href="/book?staffId=' + encodeURIComponent(s.id) + '">' + esc(T("指名して予約する")) + "</a></div>" +
+      '<div class="st-actions">' + bookingAction(s) + '</div>' +
       "</div></article>";
   }
 
@@ -237,7 +254,7 @@
       '<div class="st-head"><h3 id="st-d-name" class="st-d-name">' + name + "</h3></div>" +
       '<p class="st-fee">' + esc(T("指名料")) + " <b>" + esc(price(s.nominationFee)) + "</b></p>" +
       (m ? '<p class="st-d-msg">' + esc(m) + "</p>" : "") +
-      '<div class="st-d-actions"><a class="booking-button st-book" href="/book?staffId=' + encodeURIComponent(s.id) + '">' + esc(T("指名して予約する")) + "</a></div>" +
+      '<div class="st-d-actions">' + bookingAction(s) + '</div>' +
       "</div></div>";
     return true;
   }
@@ -266,6 +283,8 @@
   window.addEventListener("popstate", () => { if (dlg.open) { pushed = false; dlg.close(); } });
 
   function render() {
+    document.getElementById("st-date-label").textContent = T("勤務日");
+    dateInput.setAttribute("aria-label", T("勤務日"));
     chrome();
     document.getElementById("st-title").textContent = T("スタッフ紹介");
     if (failed) {
@@ -280,42 +299,62 @@
       return;
     }
     list.className = "st-grid";
-    list.innerHTML = staff.map(card).join("");
+    list.innerHTML = (stale ? '<p class="st-status" role="alert">' + esc(T("勤務情報を取得できませんでした。再読み込みしてください。")) + '<button id="st-retry" type="button">' + esc(T("再読み込み")) + '</button></p>' : "") + staff.map(card).join("");
     fitMore();
     // 開いている人の情報も最新にする（その人が指名を受け付けなくなったら閉じる）
     if (dlg.open && !renderDetail()) dlg.close();
   }
 
-  // quiet＝開いたままのページの更新（中身が変わったときだけ描き直す。失敗しても今の表示のまま）
+  // quiet＝開いたままのページの更新。失敗時は古い勤務情報で指名へ進ませない。
   let lastJson = "";
   // このページの版。書き換えられたら（詳細の画面を閉じているときに）新しい版へ読み込み直す
   let pageVer = null, newPage = false;
   const reloadIfNew = () => { if (newPage && !dlg.open && !document.hidden) location.reload(); };
   async function load(quiet) {
+    const request = ++sequence, date = selectedDate;
+    if (!quiet) { loading = true; render(); }
     try {
-      const r = await fetch("/api/staff/list", { cache: "no-store" });
+      const r = await fetch("/api/staff/list?date=" + encodeURIComponent(date), { cache: "no-store" });
       if (!r.ok) throw new Error("http " + r.status);
       const j = await r.json();
+      if (request !== sequence || selectedDate !== date) return;
+      if (j.date !== date || !Array.isArray(j.staff)) throw new Error("date mismatch");
       if (j.page) { if (pageVer === null) pageVer = j.page; else if (j.page !== pageVer) newPage = true; }
       if (newPage) return reloadIfNew();
-      const list2 = j.staff || [];
-      const txt = JSON.stringify(list2);
-      if (quiet && txt === lastJson) return;
-      lastJson = txt;
-      staff = list2;
-      failed = false;
+      const txt = JSON.stringify(j.staff), unchanged = quiet && !stale && !loading && txt === lastJson;
+      lastJson = txt; staff = j.staff; failed = false; stale = false; loading = false;
+      if (unchanged) return;
     } catch {
-      if (quiet) return;
-      failed = !staff;
+      if (request !== sequence) return;
+      failed = !staff; stale = true; loading = false;
     }
     render();
-    // 予約画面から「戻る」で来たときは、見ていた人の情報を開き直す
     const hs = history.state;
     if (!quiet && staff && hs && hs.stDetail && !dlg.open) openDetail(hs.stDetail, true);
   }
-  // 管理画面の「スタッフ情報」の変更は、開いたままのページにも反映する（1分ごと・画面に戻ったとき）
-  setInterval(() => { if (!document.hidden) load(true); }, 60000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(true); });
+  dateInput.addEventListener("change", () => {
+    if (!validDate(dateInput.value) || dateInput.value < businessDate() || dateInput.value > addDays(businessDate(), 84)) { dateInput.value = selectedDate; return; }
+    selectedDate = dateInput.value;
+    const url = new URL(location.href); url.searchParams.set("date", selectedDate); history.replaceState(history.state, "", url.pathname + url.search);
+    load(false);
+  });
+  function refresh() {
+    if (document.hidden) return;
+    dateInput.min = businessDate(); dateInput.max = addDays(businessDate(), 84);
+    if (selectedDate < dateInput.min) { selectedDate = dateInput.min; dateInput.value = selectedDate; load(false); } else load(true);
+  }
+  setInterval(refresh, 60000);
+  document.addEventListener("visibilitychange", refresh);
+  window.addEventListener("focus", refresh);
+  let updates = null, lastSeq = null, refreshTimer;
+  function connectUpdates() {
+    if (updates || typeof EventSource !== "function") return;
+    updates = new EventSource("/api/live");
+    updates.addEventListener("message", event => { const changed = lastSeq !== event.data; lastSeq = event.data; if (changed) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 200); } });
+  }
+  connectUpdates();
+  window.addEventListener("pagehide", () => { updates?.close(); updates = null; clearTimeout(refreshTimer); });
+  window.addEventListener("pageshow", event => { if (event.persisted) { connectUpdates(); refresh(); } });
 
   list.addEventListener("click", (e) => {
     if (e.target.closest("#st-retry")) { load(); return; }

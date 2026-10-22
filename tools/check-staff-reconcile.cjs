@@ -2,7 +2,9 @@
 // 送信無効の本番コピーと、照合済みの計画だけを使用。実データはリポジトリに含めない。
 // node tools/check-staff-reconcile.cjs <検証用フォルダ> <計画.json>
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-process.env.DEMO_EPHEMERAL='1';process.env.HP_MAIL='0';
+process.env.DEMO_EPHEMERAL='1';process.env.HP_MAIL='0';process.env.CLOUD='0';
+for(const key of Object.keys(process.env))if(/^(GH_|GITHUB_|MAIL_)/.test(key))delete process.env[key];
+assert(process.argv[2]&&process.argv[3],'検証用フォルダと計画JSONを指定してください');
 const root=path.resolve(process.argv[2]),plan=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
 assert(!fs.existsSync(path.join(root,'mail-config.json')));
 const api=require(path.join(root,'copy-api.cjs'));
@@ -45,6 +47,7 @@ const encode=v=>JSON.stringify(v,(_,x)=>x instanceof Map?{__pm_map__:[...x]}:x i
  const far='2028-01-01';getSchedule(far);assert.equal((state.shifts.get(far)||[]).length,0,'未登録日のシフトが自動で増える');
  assert.equal(state.mails.length,0);
  const raw=JSON.parse(fs.readFileSync(path.join(root,'safe-state.json'),'utf8'));
- raw.state=JSON.parse(encode(state));fs.writeFileSync(path.join(root,'reconciled-safe-state.json'),JSON.stringify(raw),{mode:0o600});
+ // 閲覧検査によって生成される将来日の空行を、反映済みデータへ混ぜない。
+ raw.state=JSON.parse(after);fs.writeFileSync(path.join(root,'reconciled-safe-state.json'),JSON.stringify(raw),{mode:0o600});
  console.log(JSON.stringify({ok:true,checks:'権限・競合・重複・不正日付・男女制限・履歴保持・再実行・登録名と表示名・自動生成停止',...result,publicStaff:publicStaffList().length}));process.exit(0);
 })().catch(e=>{console.error(e.message);process.exit(1);});
