@@ -118,14 +118,81 @@ async function ghFetch(gz) {
   const buf = Buffer.from(await r.arrayBuffer());
   return gz ? zlib.gunzipSync(buf).toString("utf8") : buf.toString("utf8");
 }
+// 外部応答をログへ直書きしない。原因は固定分類、詳しい応答は機密を除いたローカル診断だけに残す。
+const GH_ERROR_FIELDS = new Set(["sha", "branch", "path", "content", "message", "name", "email", "author", "committer", "ref"]);
+const GH_ERROR_CODES = new Set(["missing", "missing_field", "invalid", "already_exists", "unprocessable", "custom", "too_large", "not_found"]);
+async function ghErrorBody(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return {};
+  const chunks = []; let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > 32768) { await reader.cancel(); return { message: "[response too large]" }; }
+      chunks.push(Buffer.from(value));
+    }
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+function ghErrorCategory(status, data) {
+  const errors = Array.isArray(data.errors) ? data.errors : [];
+  const text = [data.message, ...errors.map(e => typeof e === "string" ? e : e?.message)].filter(x => typeof x === "string").join(" ").toLowerCase();
+  if (errors.some(e => e?.field === "sha" && ["missing", "missing_field"].includes(e.code)) || /sha.{0,60}(missing|required|not supplied|wasn't supplied|not provided)/.test(text)) return "missing_sha";
+  if (/sha.{0,80}(does not match|didn't match|mismatch|expected)|mismatch.{0,30}sha/.test(text)) return "sha_mismatch";
+  if (status === 429 || /rate limit|secondary rate|abuse|spamm/.test(text)) return "rate_limit";
+  if (/too (large|big)|larger than|exceed.{0,60}(size|bytes|mb|limit)|maximum.{0,30}(size|bytes)|size.{0,60}(limit|exceed)/.test(text) || errors.some(e => e?.code === "too_large")) return "size_limit";
+  if (/repository rule|rule violation|protected branch|branch protection|push protection|gh013|gh006/.test(text)) return "repository_rule";
+  if (/\b(committer|author|identity)\b/.test(text) || errors.some(e => ["name", "email", "author", "committer"].includes(e?.field))) return "identity";
+  if (/base64|content.{0,30}(invalid|valid|required)|invalid.{0,30}content/.test(text) || errors.some(e => e?.field === "content")) return "content_validation";
+  return "unknown";
+}
+function ghDiagnosticText(value, secrets, max) {
+  if (typeof value !== "string") return "";
+  let out = value;
+  for (const secret of secrets) if (typeof secret === "string" && secret.length >= 4) out = out.split(secret).join("[REDACTED]");
+  return out.replace(/\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]+/g, "[CREDENTIAL]")
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,;"']+/gi, "[CREDENTIAL]")
+    .replace(/\b(?:token|password|secret|authorization|content)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "[REDACTED]")
+    .replace(/https?:\/\/[^\s<>"']+/gi, "[URL]")
+    .replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[EMAIL]")
+    .replace(/\{[^}]*\}/g, "[DATA]")
+    .replace(/[A-Za-z0-9+/_=-]{80,}/g, "[LONG_VALUE]")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, max);
+}
+async function ghSaveError(response, requestJson, requestContent) {
+  const data = await ghErrorBody(response), category = ghErrorCategory(response.status, data);
+  const secrets = [requestJson, requestContent, ...Object.entries(process.env).filter(([k]) => /TOKEN|PASSWORD|PASS|SECRET|KEY|AUTH/.test(k)).map(([,v]) => v)];
+  const errors = (Array.isArray(data.errors) ? data.errors : []).slice(0, 8).map(e => ({
+    ...(GH_ERROR_FIELDS.has(e?.field) ? { field: e.field } : {}),
+    ...(GH_ERROR_CODES.has(e?.code) ? { code: e.code } : {}),
+    message: ghDiagnosticText(typeof e === "string" ? e : e?.message, secrets, 500),
+  }));
+  let saved = false;
+  try {
+    const file = dataFile() + ".github-error.json";
+    const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+    try {
+      fs.fchmodSync(fd, 0o600);
+      fs.writeFileSync(fd, JSON.stringify({ status: response.status, message: ghDiagnosticText(data.message, secrets, 1000), errors }));
+      saved = true;
+    } finally { fs.closeSync(fd); }
+  } catch {} // 診断の保存失敗で通常の保存やエラー報告を妨げない
+  const fields = [...new Set(errors.flatMap(e => e.field ? [e.field] : []))].join(",");
+  const codes = [...new Set(errors.flatMap(e => e.code ? [e.code] : []))].join(",");
+  return new Error("GitHub保存に失敗: HTTP " + response.status + " category=" + category +
+    (fields ? " fields=" + fields : "") + (codes ? " codes=" + codes : "") + " diagnostic=" + (saved ? "saved" : "unavailable"));
+}
 // GitHubへ保存（sha競合は一度だけ取り直して再試行）
 async function ghPut(json, sha, retry = true) {
+  const content = zlib.gzipSync(Buffer.from(json), { level: 9 }).toString("base64");
   const r = await fetch(ghUrl(), {
     method: "PUT",
     headers: { ...ghHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({
       message: "予約データ自動保存 " + new Date().toISOString(),
-      content: zlib.gzipSync(Buffer.from(json), { level: 9 }).toString("base64"),
+      content,
       branch: GH.branch(),
       ...(sha ? { sha } : {}),
     }),
@@ -133,7 +200,7 @@ async function ghPut(json, sha, retry = true) {
   if ((r.status === 409 || r.status === 422) && retry) {
     return ghPut(json, await ghSha(), false);
   }
-  if (!r.ok) throw new Error("GitHub保存に失敗: HTTP " + r.status);
+  if (!r.ok) throw await ghSaveError(r, json, content);
   return (await r.json()).content?.sha || null;
 }
 

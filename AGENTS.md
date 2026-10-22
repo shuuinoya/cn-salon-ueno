@@ -31,6 +31,7 @@
 ## 秘密の情報（絶対に GitHub に送らない・人に見せない）
 - `tools/mac-production.env`（GitHub の鍵・公開URLなど）、`data/`（お客様・予約のデータ）、`mail-config.json`、`tls/`
 - これらは .gitignore 済み。`git add -A` ではなく、変えたファイルを名前で指定して add する
+- **2026-10-22のユーザー許可による例外**：既存の非公開データ保存先への自動バックアップと、その復旧を許可。`persist.js` が行う既存の保存に限り、保存先が非公開であることを確認する。プログラムの保管場所・公開リポジトリへの個人情報の追加、秘密ファイルの `git add` は引き続き禁止。検証用コピーから実データを送信しない。
 
 ## 本番の公開用の保管場所（Render 用）
 - Render は止まっていて、今はMacが本番。Render 用の保管場所（remote `render`＝shuuinoya/cn-salon-ueno-app）は公開されているので、ここにも秘密を入れない
