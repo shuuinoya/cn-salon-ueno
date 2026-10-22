@@ -448,7 +448,8 @@
       const star = "★" + (d.star || "0");
       if (cell.dataset.pmstar !== star) cell.dataset.pmstar = star;
       row.classList.toggle("pm-pink", !!d.pink);
-      const lockInfo = window.__pmLocks?.[name];
+      const staffId = row.dataset.staffId;
+      const lockInfo = window.__pmLocks?.[staffId];
       // 名前の左の帯：管理画面の「スタッフ情報」の性別（読み込む前は従来の名前での判定）
       const female = lockInfo && lockInfo.gender ? lockInfo.gender === "female" : !!d.female;
       row.classList.toggle("pm-acc-f", female);
@@ -463,7 +464,7 @@
         b.addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const cur = window.__pmLocks?.[name];
+          const cur = window.__pmLocks?.[row.dataset.staffId];
           if (!cur || b.dataset.busy) return;
           const lockDate = ledgerDate();
           b.dataset.busy = "1";
@@ -500,11 +501,17 @@
             window.alert("受付停止の変更結果を確認できませんでした。最新の鍵の状態を確認してから操作してください。");
           } finally { delete b.dataset.busy; }
         }, true);
+        b.addEventListener("keydown", e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); b.click(); }
+        });
         cell.appendChild(b);
       }
       const btn = cell.querySelector(".pm-lockbtn");
       if (btn && lockInfo) {
         const md = ledgerDate().slice(5).replace("-", "/").replace(/^0/, "");
+        btn.setAttribute("aria-label", name + (lockInfo.locked ? "の予約ブロックを解除" : "の予約をこの日だけブロック"));
+        btn.setAttribute("aria-pressed", String(!!lockInfo.locked));
+        btn.setAttribute("aria-disabled", String(!!btn.dataset.busy));
         btn.title = lockInfo.locked
           ? name + " は " + md + " の予約受付を停止中です（指名あり・なしとも予約は入りません）。クリックで再開"
           : name + " の " + md + " の予約受付を停止する（この日だけ。ほかの日には反映しません）";
@@ -1888,7 +1895,7 @@
     }
     const t = np.querySelector("#pm-np-time");
     if (t && t.textContent !== timeText) t.textContent = timeText;
-    const lockedName = window.__pmTapStaff && window.__pmLocks?.[window.__pmTapStaff]?.locked ? window.__pmTapStaff : "";
+    const lockedName = window.__pmLocks?.[window.__pmTapStaffId]?.locked ? window.__pmTapStaff : "";
     np.querySelectorAll('[data-np="book"]').forEach((b) => { b.disabled = !!lockedName; b.style.opacity = lockedName ? "0.4" : ""; });
     let note = np.querySelector(".pm-np-locked");
     if (lockedName && !note) {
@@ -1903,7 +1910,10 @@
   }
   document.addEventListener("click", (e) => {
     const row = e.target.closest(".ledger-row");
-    if (row && e.target.closest(".ledger-track")) window.__pmTapStaff = row.querySelector(".ledger-staff-cell b")?.textContent || "";
+    if (row && e.target.closest(".ledger-track")) {
+      window.__pmTapStaff = row.querySelector(".ledger-staff-cell b")?.textContent || "";
+      window.__pmTapStaffId = row.dataset.staffId;
+    }
   }, true);
 
   // お会計（精算）モーダル：本物のPeakManagerと同じ構成
@@ -3066,7 +3076,7 @@
       const d = await r.json();
       if (window.__pmLocksFor !== d0) return; // 取得中に表示する日が変わった
       const map = {};
-      for (const l of d.locks) map[l.name] = l;
+      for (const l of d.locks) map[l.id] = l;
       window.__pmLocks = map;
     } catch {}
   }

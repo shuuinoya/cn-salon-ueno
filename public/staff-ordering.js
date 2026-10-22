@@ -4,6 +4,38 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const errors = { staffOrderingDateRequired: '掲載日の情報が古くなっています。画面を再読み込みしてください。', staffOrderingDayChanged: '営業日が変わりました。最新の情報を読み直して、今日の掲載順を設定してください。', staffOrderingInvalid: "No.は 1〜999999 の整数で入力してください。スタッフが増減した場合は読み直してください。", staffOrderingDuplicate: "同じ No. が重複しています。別の番号を入力してください。", staffOrderingConflict: "ほかの画面でスタッフ情報または掲載順位が変更されました。入力内容を控えてから最新の情報を読み直してください。", forbidden: '掲載順位の保存には管理者のログインが必要です。', staffOrderChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', staffOrderingChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', invalidOrder: 'No.は 1〜999999 の重複しない整数で入力してください。', invalid: '入力した No. とスタッフ情報を確認してください。', requestChanged: '先に送った内容と異なります。最新の情報を読み直してください。' };
   let current = null;
+  // 閉じる・詳細へ進む・別画面へ移る操作を同じ確認にそろえる。
+  function confirmLeave(app) {
+    if (app.busy) { setMessage(app, '保存・読み込み中です。完了後に戻れます。', false); return Promise.resolve(false); }
+    if (!app.dirty && !app.unknown) return Promise.resolve(true);
+    if (app.leavePrompt) return app.leavePrompt;
+    app.leavePrompt = new Promise(resolve => {
+      const focus = document.activeElement, prompt = document.createElement('dialog');
+      prompt.className = 'so-leave-dialog'; prompt.setAttribute('aria-labelledby', 'so-leave-title');
+      prompt.innerHTML = '<h2 id="so-leave-title">変更を破棄しますか？</h2><p>' + (app.unknown
+        ? '保存結果を確認できていません。この画面の入力を破棄して戻ります。すでに保存された内容は取り消されません。'
+        : '保存していない掲載順の変更があります。') + '</p><div><button type="button" data-leave="keep" autofocus>編集を続ける</button><button type="button" data-leave="discard">変更を破棄して戻る</button></div>';
+      let done = false;
+      const finish = discard => {
+        if (done) return; done = true; prompt.close(); prompt.remove(); app.leavePrompt = null;
+        if (!discard && focus?.isConnected) focus.focus(); resolve(discard);
+      };
+      prompt.addEventListener('click', e => { const action=e.target.closest('[data-leave]')?.dataset.leave; if(action)finish(action==='discard'); });
+      prompt.addEventListener('cancel', e => { e.preventDefault(); finish(false); });
+      document.body.appendChild(prompt); prompt.showModal(); prompt.querySelector('[data-leave="keep"]').focus();
+    });
+    return app.leavePrompt;
+  }
+  async function leave(app, action) {
+    if (app.leaving) return;
+    app.leaving = true;
+    try { if (await confirmLeave(app)) await action(); }
+    finally { app.leaving = false; }
+  }
+  function discardLocal(app) {
+    app.dirty=false; app.unknown=false; app.pending=null;
+    if (app.data && app.host.isConnected) render(app);
+  }
   function orders(app) {
     const inputs = [...app.host.querySelectorAll('[data-order-id]')];
     if (inputs.length !== app.data.staff.length) throw Error('一覧を取得し直してください。');
@@ -101,14 +133,13 @@
       if (!event.target.matches('[data-order-id]') || app.busy || app.unknown) return;
       app.dirty = true; controls(app); setMessage(app, '変更はまだ保存されていません。', false);
     });
-    host.addEventListener('click', event => {
+    host.addEventListener('click', async event => {
       const target = event.target.closest('[data-so]');
       if (!target || app.busy || app.dragging) return;
       const action = target.dataset.so;
       if (action === 'save') save(app);
       if (action === 'reload') {
-        if (app.dirty || app.unknown) host.querySelector('.so-discard').hidden = false;
-        else load(app);
+        await leave(app, () => load(app));
       }
       if (action === 'discard') load(app);
       if (action === 'keep') host.querySelector('.so-discard').hidden = true;
@@ -118,9 +149,11 @@
         if (other) { moveCards(card.parentNode, () => card.parentNode.insertBefore(card, action === 'up' ? other : other.nextSibling)); renumber(app); target.focus(); }
       }
       if (action === 'edit') {
-        if (app.dirty || app.unknown) { setMessage(app, '順位を保存するか、最新の情報を読み直してから詳細を編集してください。', true); return; }
-        if (app.cards) { app.host.closest('dialog').close(); app.host.closest('dialog').remove(); current = null; }
-        window.__pmEditStaff?.(target.dataset.id);
+        await leave(app, () => {
+          discardLocal(app);
+          const edit = () => (window.__pmEditStaff || window.__pmOpenStaffInfo)?.(target.dataset.id);
+          if (app.cards) app.dismiss?.(edit); else edit();
+        });
       }
     });
     const details = host.closest('details');
@@ -284,17 +317,37 @@
     dialog.id='staff-listing-dialog'; dialog.className='so-dialog'; dialog.setAttribute('aria-labelledby','staff-listing-title');
     dialog.innerHTML='<header><h2 id="staff-listing-title">スタッフ掲載情報一覧</h2><button type="button" data-listing-close>閉じる</button></header><div id="staff-listing-ordering"></div>';
     document.body.appendChild(dialog);
-    const close = () => {
-      current?.cancelDrag?.();
-      if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { setMessage(current,'変更が残っています。保存するか「最新の情報を読み直す」で変更を破棄してから閉じてください。',true); current.host.scrollTop=0; return; }
+    const appForDialog = () => current?.host.closest('dialog') === dialog ? current : null;
+    const historyKey = crypto.randomUUID(); let dismissed = false;
+    const finish = after => {
+      if (dismissed) return; dismissed = true;
+      window.removeEventListener('popstate', onBack, true);
       dialog.close(); dialog.remove(); current=null; opener?.focus();
+      if (history.state?.cnStaffListing === historyKey) {
+        if (after) window.addEventListener('popstate', after, { once:true });
+        history.back();
+      } else after?.();
     };
+    const close = async () => {
+      const app=appForDialog(); app?.cancelDrag?.();
+      if (!app) { finish(); return; }
+      await leave(app, () => { discardLocal(app); finish(); });
+    };
+    const onBack = event => {
+      if (history.state?.cnStaffListing === historyKey || dismissed) return;
+      event.stopImmediatePropagation();
+      history.pushState({ ...history.state, cnStaffListing:historyKey }, '', location.href);
+      close();
+    };
+    history.pushState({ ...history.state, cnStaffListing:historyKey }, '', location.href);
+    window.addEventListener('popstate', onBack, true);
     dialog.querySelector('[data-listing-close]').addEventListener('click',close);
     dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
     const position = () => { if(dialog.open) { current?.cancelDrag?.(); positionListing(dialog); } };
     dialog.addEventListener('close', () => { window.removeEventListener('resize',position); window.visualViewport?.removeEventListener('resize',position); window.visualViewport?.removeEventListener('scroll',position); });
     dialog.showModal(); position();
     window.addEventListener('resize',position); window.visualViewport?.addEventListener('resize',position); window.visualViewport?.addEventListener('scroll',position); mount();
+    if(appForDialog()) current.dismiss=finish;
   };
   window.__pmMountStaffOrdering = mount;
   window.addEventListener('beforeunload', event => { if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { event.preventDefault(); event.returnValue = ''; } });
@@ -305,14 +358,17 @@
   window.addEventListener('focus', refreshSaved);
   document.addEventListener('visibilitychange', refreshSaved);
   setInterval(refreshSaved, 60000);
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
     const app = current;
     if (!app?.host.isConnected || !(app.dirty || app.busy || app.unknown) || app.host.contains(event.target)) return;
     if (!event.target.closest('.ledger-nav button, .ledger-shopmenu button, .ledger-rail button, .staff-master-toolbar button, .staff-directory button, a[href]')) return;
     event.preventDefault(); event.stopImmediatePropagation();
-    const details = app.host.closest('details'); if (details) details.open = true;
-    setMessage(app, app.busy ? '保存しています。完了してから別の画面を開いてください。' : '掲載順位の入力が残っています。保存するか、最新の情報を読み直してから別の画面を開いてください。', true);
-    app.host.querySelector('.so-message')?.scrollIntoView({ block: 'center' });
+    const target=event.target.closest('.ledger-nav button, .ledger-shopmenu button, .ledger-rail button, .staff-master-toolbar button, .staff-directory button, a[href]');
+    await leave(app, () => {
+      discardLocal(app);
+      const proceed=()=>{ if(target?.isConnected)target.click(); };
+      if(app.cards)app.dismiss?.(proceed);else proceed();
+    });
   }, true);
   window.addEventListener('cn:seq', () => {
     if (current?.host.isConnected && current.data && (current.cards || current.host.closest('details')?.open)) {

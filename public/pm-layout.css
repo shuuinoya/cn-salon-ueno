@@ -23,13 +23,13 @@
   margin-left: auto;
   cursor: pointer;
   border-radius: 2px;
-  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23909090" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-.8"/></svg>') center no-repeat;
+  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="%23bdbdbd"><rect x="5" y="10" width="14" height="12" rx="2"/><path fill="none" stroke="%23bdbdbd" stroke-width="3" d="M8 11V7a4 4 0 0 1 8 0"/></svg>') center no-repeat;
 }
 /* 赤い枠は出さない（ホバー・クリック時とも控えめな表示に） */
 .pm-lockbtn:hover { background-color: #efe7da; }
 .pm-lockbtn:focus, .pm-lockbtn:focus-visible { outline: none; }
 .pm-locked .pm-lockbtn {
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="%23555555" stroke-width="2.4"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="%23424242"><rect x="5" y="10" width="14" height="12" rx="2"/><path fill="none" stroke="%23424242" stroke-width="3" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>');
 }
 /* 受付停止中はスタッフ欄も薄い青に */
 main.ledger-app .pm-locked > .ledger-staff-cell { background: #e2eefc !important; }
@@ -2249,3 +2249,10 @@ main.ledger-app .ledger-event.pm-parked-origin { outline: 2px dashed #6d4c33; ou
 .ledger-app .staff-master .staff-course-groups fieldset > div > label { display: flex; align-items: flex-start; gap: 8px; line-height: 1.7; white-space: normal; }
 .ledger-app .staff-master .staff-course-groups input[type=checkbox] { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; accent-color: #ed1970; }
 .ledger-app .staff-master-editing .staff-public-ordering { display: none; }
+
+/* 元台帳と同じ小さな鍵。閉＝受付停止、開＝受付中。枠や塗りの大きなボタンにしない。 */
+main.ledger-app .pm-lockbtn { flex:0 0 20px; width:20px; height:24px; box-sizing:border-box; border:0; background-size:16px 16px; background-color:transparent; border-radius:2px; }
+main.ledger-app .pm-lockbtn:focus-visible { outline:2px solid #906427; outline-offset:2px; }
+main.ledger-app .pm-lockbtn[data-busy] { opacity:.5; cursor:wait; }
+main.ledger-app .pm-lockbtn:hover { background-color:#efe7da; }
+@media (pointer:coarse) { main.ledger-app .pm-lockbtn { flex-basis:32px; width:32px; height:36px; } }

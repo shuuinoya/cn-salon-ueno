@@ -82,3 +82,12 @@
 #staff-listing-ordering .so-drag-placeholder { opacity:.24; border-style:dashed; }
 #staff-listing-ordering .so-drag-preview { position:fixed; left:0; top:0; margin:0; box-sizing:border-box; z-index:10; pointer-events:none; border-color:#b78b49; background:#fff9ec; box-shadow:0 5px 18px #0003; cursor:grabbing; will-change:transform; }
 #staff-listing-ordering .so-message { min-height:2.8em; font-size:12px; line-height:1.4; margin-bottom:6px; }
+
+.so-leave-dialog { position:fixed; inset:0; margin:auto; width:min(380px,calc(100% - 32px)); box-sizing:border-box; padding:20px; border:1px solid #d9c7ba; border-radius:10px; color:#333; background:#fff; }
+.so-leave-dialog::backdrop { background:#0006; }
+.so-leave-dialog h2 { margin:0 0 10px; font-size:18px; }
+.so-leave-dialog p { margin:0 0 18px; font-size:14px; line-height:1.7; }
+.so-leave-dialog > div { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.so-leave-dialog button { min-height:44px; padding:9px 12px; border:1px solid #bba484; border-radius:5px; background:#fff; color:#644b29; font:inherit; cursor:pointer; }
+.so-leave-dialog [data-leave="discard"] { background:#916d3b; color:white; }
+.so-leave-dialog button:focus-visible { outline:2px solid #906427; outline-offset:2px; }
