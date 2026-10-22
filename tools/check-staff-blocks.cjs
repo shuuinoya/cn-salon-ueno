@@ -22,7 +22,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await mod.exports.ready;
   const a = mod.exports.audit, state = a.state, course = '364323-4822701', realNow = Date.now;
   const date = a.addDays(a.todayJst(), 1), next = a.addDays(date, 1), actor = { user: 'test-manager', role: 'manager' };
-  const publicIds = new Set(a.publicStaffList().filter(s => s.courses.includes(course)).map(s => s.id));
+  const publicIds = new Set(a.publicStaffList().filter(s => s.courses.includes(course) && !a.staffInfoMissing(state.staff.find(x=>x.id===s.id)).length).map(s => s.id));
   const ready = state.staff.filter(s => publicIds.has(s.id)).slice(0, 2);
   const bare = state.staff.find(s => a.staffInfoMissing(s).length > 0);
   assert.equal(ready.length, 2); assert(bare);
@@ -144,13 +144,12 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     assert(!a.freeStaffIds(date, 900, 960, course, 'none').includes(A));
     block({ id, remove: true }); assert(a.freeStaffIds(date, 900, 960, course, 'none').includes(A));
   });
-  await check('業務を作成しても写真紹介不足の公開予約条件は緩めない', () => {
+  await check('写真紹介不足も紹介・指名へ載せ、業務中は予約拒否して勤務内の空きへ受け付ける', () => {
     block({ staffId: B });
-    assert(!a.publicStaffList().some(s => s.id === B)); assert(!a.nominatableStaff(course, 'none').some(s => s.id === B));
-    assert(!a.freeStaffIds(date, 900, 960, course, 'none').includes(B));
-    rejectUnchanged(() => reserve(B), 'staffUnavailable');
-    rejectUnchanged(() => a.postSchedule({ action: 'createBooking', date, revision: version(date), staffId: B,
-      start: 900, course, people: 1, consent: true, name: 'テスト予約' }, actor), 'staffInfoMissing');
+    assert(a.publicStaffList(date).some(s => s.id === B && s.nominatable));assert(a.nominatableStaff(course, 'none', date).some(s => s.id === B));
+    assert(a.freeStaffIds(date, 900, 960, course, 'none').includes(B));
+    rejectUnchanged(() => reserve(B), 'soldOut');
+    assert(reserve(B,900).id);
     rejectUnchanged(() => a.postSchedule({ action: 'shift', date: next, revision: version(next), staffId: B, start: 600, end: 1200 }, actor), 'staffInfoMissing');
   });
   const report = { ok: results.every(x => x.ok), checks: results.length, passed: results.filter(x => x.ok).length,

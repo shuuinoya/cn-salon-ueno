@@ -809,7 +809,7 @@
       const response = await origFetch("/api/staff/list" + (NOM_DATE ? "?date=" + encodeURIComponent(NOM_DATE) : ""), { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw Error('unavailable');
       const j = await response.json();
-      nomStaff = (j.staff || []).find((s) => s.id === NOM_ID) || null;
+      nomStaff = (j.staff || []).find((s) => s.id === NOM_ID && s.nominatable === true) || null;
     } catch {
       nomStaff = null;
     }

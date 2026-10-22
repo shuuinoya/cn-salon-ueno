@@ -1,6 +1,5 @@
 'use strict';
-// スタッフ情報（コース・画像・フリーメッセージ。性別は条件にしない）がそろっていない人には、新規シフト・予約を入れられず、
-// 新規受付・予約サイト・ホットペッパーの割り当てに出ないことを確かめる。
+// 写真・紹介文不足でも勤務者を掲載し、予約可能。コース情報の不正や重複は拒否する。
 // 管理用の既存シフトは情報未入力でも隠さず、スタッフ情報と同じ登録を表示する（2026-10-21）。
 // 登録済みの勤務時間内なら、掲載用の情報が未入力でも休憩・業務を管理できる。
 // 記録はすべて架空。メール設定のない検証用チェックアウトで実行する（メールは送らない）
@@ -60,10 +59,10 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   if (monthStart !== yesterday) assert.ok(monthSchedule.shifts.some((x) => x === first), '月の途中から開いても月初のシフトを失わない');
   assert.ok([...state.shifts.keys()].filter(d => d < todayJst()).every(d => oldDates.has(d)), '過去の未登録シフトは生成しない');
 
-  // 予約サイト：空き枠・指名候補・スタッフ紹介に出さない
-  assert.deepEqual(freeStaffIds(date, 720, 780, COURSE, 'none'), [ready.id]);
-  assert.ok(!nominatableStaff(COURSE, 'none', date).some((s) => s.id === bare.id));
-  assert.ok(!publicStaffList(date).some((s) => s.id === bare.id));
+  // 予約サイト：写真・紹介文がなくても空き枠・指名候補・スタッフ紹介に出す
+  assert.deepEqual(freeStaffIds(date, 720, 780, COURSE, 'none'), [ready.id,bare.id]);
+  assert.ok(nominatableStaff(COURSE, 'none', date).some((s) => s.id === bare.id));
+  assert.ok(publicStaffList(date).some((s) => s.id === bare.id));
 
   // シフト・まとめてシフト・予約の登録は断る（何も変えない）
   const before = JSON.stringify([...state.shifts]);
@@ -77,7 +76,9 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   assert.ok(addedBreak);
   assert.equal(postSchedule({ action: 'block', date, revision: rev(), id: addedBreak.id, remove: true }).ok, true);
   assert.ok(state.events.get(date).blocks.some(b => b.id === 'blk-bare'));
+  bare.courses='invalid';
   assert.throws(() => postSchedule({ action: 'createBooking', date, revision: rev(), staffId: bare.id, start: 720, course: COURSE, people: 1, consent: true, name: 'テスト 確認 店頭' }), code('staffInfoMissing'));
+  bare.courses=JSON.stringify([COURSE]);
   // シフトの削除はできる
   assert.equal(postSchedule({ action: 'bulkShift', date, remove: true, cells: [{ date, staffId: bare.id, revision: rev() }] }).ok, true);
   assert.ok(!state.shifts.get(date).some((x) => x.staff_id === bare.id));
@@ -85,22 +86,22 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
   // 入力がそろっている人には入れられる
   assert.equal(postSchedule({ action: 'bulkShift', date, start: 600, end: 1200, cells: [{ date: addDays(date, 2), staffId: ready.id, revision: rev(addDays(date, 2)) }] }).ok, true);
 
-  // ホットペッパー：未入力の人の名前で来ても割り当てない。名前の指定がなければ入力済みの人に割り当てる
+  // ホットペッパー：写真や紹介文の不足で指定スタッフを外さず、指名なしも空きを守る
   const hp = (rid, staffName) => hpNotify({ reservationId: rid, date, start: '12:00', minutes: 60, price: 6600, name: 'テスト 確認 客', menu: '全身整体 60分', staffName }, 'check');
-  assert.equal(hp('CHK-1', bare.name).status, 409);
+  assert.equal(hp('CHK-1', bare.name).status, 200);
   assert.equal(hp('CHK-2', '').status, 200);
   const hpBk = state.events.get(date).bookings.find((b) => b.reference === 'CHK-2');
   assert.deepEqual(state.events.get(date).assignments.filter((a) => a.booking_id === hpBk.id).map((a) => a.staff_id), [ready.id]);
-  // 予約を未入力の人へ移すことはできない
-  assert.throws(() => postSchedule({ action: 'moveBooking', date, revision: rev(), id: hpBk.id, staffId: bare.id, start: 720, end: 780 }), code('staffInfoMissing'));
+  // 写真不足でも移動候補にできるが、既存のHP予約との重複は拒否
+  assert.throws(() => postSchedule({ action: 'moveBooking', date, revision: rev(), id: hpBk.id, staffId: bare.id, start: 720, end: 780 }), code('soldOut'));
 
-  // 予約の担当がある人の情報があとで欠けても、その日の台帳には残す（予約が見えなくならない）。新しい予約は入れられない
+  // 予約の担当がある人の情報があとで欠けても、その日の台帳には残す（予約が見えなくならない）。写真だけを理由に新しい予約を断らない
   state.photos.delete(ready.id);
   sc = getSchedule(date);
   assert.deepEqual(sc.staff.map((s) => [s.id, s.info_missing]), [[ready.id, ['画像']], [bare.id, ['画像', 'フリーメッセージ']]]);
   assert.ok(sc.shifts.some((x) => x.staff_id === ready.id && x.date === date));
   assert.equal(postSchedule({ action: 'moveBooking', date, revision: rev(), id: hpBk.id, staffId: ready.id, start: 750, end: 810 }).ok, true, 'いまの担当のまま時間を変えるのはよい');
-  assert.throws(() => postSchedule({ action: 'createBooking', date, revision: rev(), staffId: ready.id, start: 900, course: COURSE, people: 1, consent: true, name: 'テスト 確認 店頭' }), code('staffInfoMissing'));
+  assert.equal(postSchedule({ action: 'createBooking', date, revision: rev(), staffId: ready.id, start: 900, course: COURSE, people: 1, consent: true, name: 'テスト 確認 店頭' }).ok,true);
   assert.deepEqual(getSchedule(next).staff.map(s => s.id), [ready.id, bare.id], 'どの日も同じ登録を参照する');
   state.photos.set(ready.id, 'data:image/jpeg;base64,/9j/');
 
@@ -132,5 +133,5 @@ m._compile(fs.readFileSync(m.filename, 'utf8') +
     assert.equal(row.courses.includes(femaleOil), gender === 'female', '全てでも女性指定の条件を守る');
   }
   assert.ok(state.mails.every((x) => !x.real), 'メールは実際には送らない（送信設定がないので記録だけ）');
-  console.log('PASS: registered staff and saved shifts remain consistent, including historical/month-start shifts; incomplete profiles cannot accept new shifts or bookings; synthetic records only');
+  console.log('PASS: registered staff and saved shifts remain consistent, including historical/month-start shifts; incomplete photos/messages allow bookings, invalid courses and overlaps are rejected; synthetic records only');
 })().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

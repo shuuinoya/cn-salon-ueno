@@ -3647,7 +3647,7 @@
     if (!st) return ng("このスタッフには置けません", "このスタッフには移動できません。");
     // 既存の担当は鍵・情報の未入力だけでは止めない。現在の対応メニュー・性別条件は毎回確かめる。
     const already = it.type === "booking" && sameDay && (d.assignments || []).some((a) => a.booking_id === it.id && a.staff_id === t.staffId);
-    if (it.type === "booking" && (st.info_missing || []).length && !already) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
+    if (it.type === "booking" && (st.booking_info_missing || []).length && !already) return ng("スタッフ情報が未入力です", ERR.staffInfoMissing);
     if (it.type === "booking" && st.locked && !already) return ng("受付停止（鍵）中です", ERR.staffLocked);
     const sh = (d.shifts || []).find((x) => x.staff_id === t.staffId && x.date === t.date);
     if (!sh || t.start < minOf(t.date, sh.start_at) || t.end > minOf(t.date, sh.end_at)) return ng("シフトの時間外です", ERR.outsideShift);

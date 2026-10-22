@@ -153,7 +153,6 @@
   .st-date { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
   .st-date input { max-width:100%; padding:8px; border:1px solid #d1d5db; border-radius:4px; font:inherit; font-size:16px; }
   .st-day-state { margin:0; color:#6b7280; font-size:12px; }
-  .st-book-unavailable { display:block; padding:10px 8px; text-align:center; background:#f3f4f6; color:#6b7280; border-radius:6px; font-size:13px; line-height:1.6; }
   .st-status button { margin-left: 6px; padding: 5px 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; font: inherit; cursor: pointer; }
   /* 「続きを読む」・写真を押したとき：その人の情報を画面の真ん中に小さめに出す（カードは伸ばさない）。
      パソコン・スマホとも縦1列で「写真 → 名前・性別・指名料（中央揃え）→ 紹介文（左揃え）→ 指名して予約する」の順。
@@ -206,9 +205,8 @@
   let selectedDate = validDate(initialDate) && initialDate >= businessDate() && initialDate <= addDays(businessDate(), 84) ? initialDate : businessDate();
   dateInput.value = selectedDate; dateInput.min = businessDate(); dateInput.max = addDays(businessDate(), 84);
   function bookingAction(s) {
-    if (stale || loading) return '<span class="st-book-unavailable">' + esc(T("勤務情報を確認しています。")) + '</span>';
-    if (s.working !== true) return '<span class="st-book-unavailable">' + esc(T("この日は勤務シフトがありません。別の日を選択してください。")) + '</span>';
-    if (s.accepting !== true) return '<span class="st-book-unavailable">' + esc(T("この日は受付を停止しています。")) + '</span>';
+    // 紹介カードには受付停止等の案内を繰り返さない。実際の空きは日時選択で確認する。
+    if (stale || loading || s.working !== true || s.nominatable !== true) return "";
     return '<a class="booking-button st-book" href="/book?staffId=' + encodeURIComponent(s.id) + '&amp;date=' + encodeURIComponent(selectedDate) + '">' + esc(T("指名して予約する")) + '</a>';
   }
 

@@ -98,7 +98,7 @@ function get(state, query, actor, c) {
   const { view, date } = query, l = state.ledger;
   if (!c.validDay(date)) throw c.err(400, "invalid");
   const day = state.days.get(date) || { version: 0, enabled: true }, ev = state.events.get(date) || emptyEvents();
-  const staff = state.staff.map(s => ({ id: s.id, name: c.staffDisplayName(s), registeredName: s.name, active: s.active, info_missing: c.staffInfoMissing(s) }));
+  const staff = state.staff.map(s => ({ id: s.id, name: c.staffDisplayName(s), registeredName: s.name, active: s.active, info_missing: c.staffInfoMissing(s), booking_info_missing: c.staffBookingMissing(s) }));
   const base = { view, date, revision: l.version, dayRevision: day.version, canManage: ["admin", "manager"].includes(actor.role), staff };
   const history = rows => rows.filter(x => x.date === date).map(clone);
   switch (view) {

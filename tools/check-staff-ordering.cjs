@@ -15,7 +15,7 @@ assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && sn
 const persist = require(path.join(root, 'persist.js'));
 persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {}; persist.requestSave = () => {};
 const file = path.join(root, 'demo-api.js'), code = fs.readFileSync(file, 'utf8');
-const exportsForAudit = '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,getStaffOrdering,publicStaffList,nominatableStaff,staffPickerDirectory,freeStaffIds,getAvailability,createPublicBooking,cancelBooking,findBooking,hpNotify,adminSessions,todayJst,addDays,minToMs};';
+const exportsForAudit = '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,getStaffOrdering,publicStaffList,nominationOf,nominatableStaff,staffPickerDirectory,freeStaffIds,getAvailability,createPublicBooking,cancelBooking,findBooking,hpNotify,adminSessions,todayJst,addDays,minToMs};';
 function load() { const mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root); mod._compile(code + exportsForAudit, file); return mod; }
 const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
 (async () => {
@@ -273,9 +273,38 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     a.postSchedule({action:'staff',date,id:'test-new',create:true,name:'テスト新規',gender:'male',active:false,allCourses:true,profile:{message:'テスト'},sortOrder:1},manager);
     assert.deepEqual(state.staff.slice(0,5).map(s=>[s.id,s.listing_order]),before);assert.equal(state.staff[5].listing_order,6);
   });
-  await check('非公開や写真不足は順位にかかわらず公開しない', () => {
+  await check('受付停止・写真不足・指名オフも当日の勤務者として掲載し、指名受付とは分ける', () => {
     staff('B').active=0;state.photos.delete('C');staff('E').profile=JSON.stringify({personalNomination:false,message:'テスト'});
-    assert.deepEqual(ids(a.publicStaffList(date)),[]);assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
+    for(const rows of [a.publicStaffList(date),a.staffPickerDirectory(course,'none',date)]){
+      assert.deepEqual(ids(rows),['B','C','E']);assert.equal(rows.find(s=>s.id==='C').nominatable,true);assert(rows.filter(s=>s.id!=='C').every(s=>s.nominatable===false));
+    }
+    assert.deepEqual(ids(a.nominatableStaff(course,'none',date)),['C']);
+    for(const id of ['B','E'])assert.equal(a.nominationOf(id,date),null);
+    assert.equal(a.nominationOf('C',date).id,'C');
+    for(const id of ['B','E']){
+      const before=encode(ev());assert.throws(()=>pub({staffId:id,expectedNominationFee:500}));assert.equal(encode(ev()),before);
+    }
+    assert.equal(a.getStaffOrdering(date,manager).staff.length,5);
+  });
+  await check('写真と紹介文が未入力でも対応メニューを指名予約でき、日時変更後も二重予約を拒否', () => {
+    state.photos.delete('B');staff('B').profile=JSON.stringify({personalNomination:true,nominationFee:500,message:''});
+    assert(a.publicStaffList(date).find(s=>s.id==='B').nominatable);
+    const available=a.getAvailability(new URLSearchParams({date,course,people:'1',staff:'none',staffId:'B'}));
+    assert.equal(available.nomination.id,'B');assert(available.days[0].slots.some(s=>s.minute===720&&s.available));
+    const p=pub({staffId:'B',expectedNominationFee:500});assert.deepEqual(assigned(p.id),['B']);
+    a.postSchedule({action:'moveBooking',date,revision:state.days.get(date).version,id:p.id,staffId:'B',start:900,end:960,confirmNominationMove:true,expect:{staffId:'B',start:720}},manager);
+    const before=encode(ev());assert.throws(()=>pub({staffId:'B',expectedNominationFee:500,start:a.minToMs(date,900)}));assert.equal(encode(ev()),before);
+    staff('B').courses='invalid';assert.equal(a.publicStaffList(date).find(s=>s.id==='B').nominatable,false);
+  });
+  await check('勤務前後・終日の業務と休憩・ブロックでも紹介に残し、勤務外や重複予約は拒否', () => {
+    for(const kind of ['work','break','block']){
+      reset();ev().blocks.push({id:'test-full-block',staff_id:'B',kind,start_at:a.minToMs(date,600),end_at:a.minToMs(date,1620)});
+      assert.deepEqual(ids(a.publicStaffList(date)),['B','C','E']);
+      assert(a.staffPickerDirectory(course,'none',date).some(s=>s.id==='B'));
+      assert(!a.freeStaffIds(date,720,780,course,'none').includes('B'));
+      const before=encode(ev());assert.throws(()=>pub({staffId:'B',expectedNominationFee:500}));assert.equal(encode(ev()),before);
+    }
+    reset();for(const start of [540,1620]){const before=encode(ev());assert.throws(()=>pub({staffId:'B',start:a.minToMs(date,start),expectedNominationFee:500}));assert.equal(encode(ev()),before);}
   });
   await check('複数勤務区間は実在する一つの区間内だけ受付、隙間をつなげない', () => {
     const sh=state.shifts.get(date).find(s=>s.staff_id==='B');sh.end_at=a.minToMs(date,660);
@@ -293,7 +322,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     const p=pub({people:2}),bk=a.findBooking(p.id).bk,price=a.courseStore.get(course).price;
     bk.services=[course,other.id].map(courseId=>({courseId,price:price/2,minutesBefore:0,minutesBody:30,minutesAfter:0,discountType:'none',discount:0}));
     bk.bulk_discount_type='none';bk.bulk_discount=0;staff('C').courses=JSON.stringify([course]);
-    a.postSchedule({action:'moveBooking',date,revision:state.days.get(date).version,id:p.id,staffId:'B',start:900,end:960,expect:{staffId:'B',start:720}},manager);
+    a.postSchedule({action:'moveBooking',date,revision:state.days.get(date).version,id:p.id,staffId:'B',start:900,end:960,confirmNominationMove:true,expect:{staffId:'B',start:720}},manager);
     assert.deepEqual(assigned(p.id),['B','E']);assert.equal(bk.total,price*2);
   });
   await check('HPの指名なし新規も掲載No優先、明示の指定本人は維持', () => {

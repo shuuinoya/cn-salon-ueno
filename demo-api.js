@@ -828,7 +828,7 @@ function withinShift(date, staffId, start, end) {
   return ensureShifts(date).some(sh => sh.staff_id === staffId && msToMin(date, sh.start_at) <= start && end <= msToMin(date, sh.end_at));
 }
 
-// 新しいシフト・予約と、予約サイトへの掲載のための入力条件（既存勤務内の業務・休憩には適用しない）。
+// 新しいシフトの入力条件とプロフィールの不足項目（紹介への掲載・指名予約・既存勤務内の業務/休憩には適用しない）。
 // コース・画像・フリーメッセージを確認する。管理画面の既存シフト・予約は隠さない。
 function staffInfoMissing(st) {
   if (!st) return ["スタッフ情報"];
@@ -842,6 +842,13 @@ function staffInfoMissing(st) {
   return missing;
 }
 const staffReady = (st) => staffInfoMissing(st).length === 0;
+// 写真・紹介文は予約資格にしない。勤務・スキル・受付停止などは各予約処理で必ず検査する。
+function staffBookingMissing(st) {
+  if (!st) return ["スタッフ情報"];
+  try { if (Array.isArray(JSON.parse(st.courses || "[]"))) return []; } catch {}
+  return ["コース"];
+}
+const staffBookingReady = st => staffBookingMissing(st).length === 0;
 // 管理画面の照合欄も、予約サイトと同じ保存済み設定から作る。
 function staffBookingStatus(st) {
   const pr = profileOf(st), missing = staffInfoMissing(st);
@@ -850,14 +857,15 @@ function staffBookingStatus(st) {
   if (!pr.personalNomination) reasons.push("個人指名がオフ");
   if (missing.length) reasons.push(missing.join("・") + "の入力が必要");
   return {
-    listed: reasons.length === 0,
+    listed: true, // 登録済みの勤務者は全員紹介する。指名受付の資格は別に判定する。
+    nominatable: st.active === 1 && !!pr.personalNomination && staffBookingReady(st),
     display_name: pr.nickname || st.name,
     reasons,
     course_ids: [...courseStore.values()].filter(c => !staffMismatch(st, c.id)).map(c => c.id),
   };
 }
 // 管理用の台帳・月間シフト・スタッフ情報は、同じ登録済みスタッフを参照する。
-// 未入力の項目があっても既存の記録を隠さない。新規受付の可否は staffReady で別に判定する。
+// 未入力の項目があっても既存の記録を隠さない。新規受付の可否は staffBookingReady と勤務・スキル・空き条件で別に判定する。
 function ledgerStaffIds() {
   return new Set(state.staff.map((st) => st.id));
 }
@@ -878,7 +886,7 @@ function getStaffOrdering(date, actor) {
       const pr = profileOf(st), status = staffBookingStatus(st), pv = staffPhotoVersion(st.id);
       return { id: st.id, name: pr.nickname || st.name, registeredName: st.name, listingOrder: listing.ranks.get(st.id),
         photo: pv ? `/api/staff/photo?id=${encodeURIComponent(st.id)}&v=${pv}` : "", message: pr.message || "",
-        active: st.active === 1, listed: status.listed, reasons: status.reasons, working: working.has(st.id), accepting: staffAcceptingOn(st.id, date),
+        active: st.active === 1, listed: status.listed, nominatable: status.nominatable, reasons: status.reasons, working: working.has(st.id), accepting: staffAcceptingOn(st.id, date),
         profileRevision: st.profile_revision || 0 };
     }) };
 }
@@ -896,7 +904,7 @@ function getSchedule(date) {
     shifts.push(...scheduleShifts(d).filter((x) => shown.has(x.staff_id)));
   }
   const ev = ensureEvents(date);
-  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_status: staffBookingStatus(st) });
+  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_info_missing: staffBookingMissing(st), booking_status: staffBookingStatus(st) });
   const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
   return {
     // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。
@@ -1130,7 +1138,7 @@ function postSchedule(body, actor) {
       if (mvTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中には移せない
       // すでにこの予約を担当している人（同じ日）は、スタッフ情報の未入力・鍵（受付停止＝新しい予約を止めるもの）があっても、そのまま時間を変えられる
       const already = toDate === date && cur.includes(staffId);
-      if (!staffReady(mvTarget) && !already) throw err(409, "staffInfoMissing");
+      if (!staffBookingReady(mvTarget) && !already) throw err(409, "staffInfoMissing");
       if (staffLockedOn(staffId, toDate) && !already) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       // 開始・終了は管理画面で変えられる（施術時間を延ばす等）。おかしな値は断り、指定された時間全体でシフト・重なりを確かめる
       if (!(validSpan(start, end) && end - start <= 600)) throw err(400, "invalid");
@@ -1208,7 +1216,7 @@ function postSchedule(body, actor) {
       if (consent !== true || !c || !cbTarget || !Number.isInteger(n) || n < 1 || n > 3) throw err(400, "invalid");
       rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない（管理画面から入れる予約も同じ）
       if (cbTarget.active !== 1) throw err(409, "staffUnavailable"); // 退職・停止中のスタッフには入れられない（移動と同じ）
-      if (!staffReady(cbTarget)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろっていない人には入れられない
+      if (!staffBookingReady(cbTarget)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろっていない人には入れられない
       if (staffLockedOn(staffId, date)) throw err(409, "staffLocked"); // その日に鍵（予約受付停止）のスタッフには入れられない
       const cbWhy = staffMismatch(cbTarget, course); // 担当メニュー外・性別の合わないスタッフには入れられない（管理者でも同じ）
       if (cbWhy) throw mismatchError(cbWhy);
@@ -1374,8 +1382,8 @@ function postSchedule(body, actor) {
       const warnings = [];
       const missing = staffInfoMissing(rec);
       if (missing.length) {
-        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、新しいシフト・予約の登録と予約サイトへの掲載はできません。\n` +
-          "登録済みのシフト・予約は管理画面に表示します。スタッフ情報ですべて入力して保存してください。");
+        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、新しいシフトの登録には入力が必要です。\n` +
+          "登録済みの勤務日は予約サイトに掲載します。写真・紹介文の不足では指名予約を止めません。スタッフ情報の内容も確認してください。");
       }
       if (affected.length) {
         warnings.push(`保存しました。ただし、このスタッフが担当できないメニュー（対応メニューのチェック・性別）の予約が ${affected.length}件 入っています。\n` +
@@ -2830,15 +2838,15 @@ function staffPhotoVersion(id) {
   return v;
 }
 
-// スタッフ紹介ページ用：選んだ営業日にシフトがあり、掲載条件を満たすスタッフ（写真・指名料・紹介文と、指名して予約できるメニュー）
-// 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・スタッフ情報の入力がそろっている・個人指名あり・メニュー対応・メニューの性別指定。
+// スタッフ紹介は選んだ営業日に勤務がある登録済みスタッフ全員。勤務前後・業務・休憩・鍵でも隠さない。
+// 写真・紹介文の不足で掲載・指名を止めない。指名資格は nominatable、実時間の空きは予約処理で判定する。
 // 毎回いまの登録内容から作るので、管理画面の「スタッフ情報」を保存すると次に開いたとき（開いたままのページも1分以内）に反映される
 function publicStaffList(date = todayJst()) {
   const listing = staffOrdering.view(state, date);
   const courses = [...courseStore.values()];
   const working = staffOrdering.workingIds(state.shifts, date);
   return staffOrdering.ordered(state, date)
-    .filter((st) => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+    .filter((st) => working.has(st.id))
     .map((st) => {
       const pr = profileOf(st);
       const pv = staffPhotoVersion(st.id);
@@ -2849,6 +2857,7 @@ function publicStaffList(date = todayJst()) {
         accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
         gender: st.gender,
+        nominatable: st.active === 1 && staffBookingReady(st) && !!pr.personalNomination,
         nominationFee: Number(pr.nominationFee) || 0,
         message: pr.message || "",
         // 写真のURLには写真の中身から作った印をつける（差し替えるとURLが変わり、古い写真が残らない）
@@ -2860,7 +2869,7 @@ function publicStaffList(date = todayJst()) {
 // 「指名して予約する」で来たメニュー選択ページ用：そのスタッフ（指名できなければ null）。紹介文は要らないので外す
 function nominationOf(staffId, date = todayJst()) {
   const st = publicStaffList(validDay(date) ? date : todayJst()).find((x) => x.id === staffId);
-  if (!st) return null;
+  if (!st || !st.nominatable) return null;
   const { message, ...rest } = st;
   return rest;
 }
@@ -2870,7 +2879,7 @@ function nominationCandidates(courseId, genderPref, date = todayJst()) {
   const listing = staffOrdering.view(state, date);
   const working = staffOrdering.workingIds(state.shifts, date);
   return staffOrdering.ordered(state, date)
-    .filter((st) => st.active === 1 && staffReady(st) && staffCanDo(st, courseId))
+    .filter((st) => st.active === 1 && staffBookingReady(st) && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => profileOf(st).personalNomination)
     .map((st) => {
@@ -2899,21 +2908,22 @@ function staffPickerDirectory(courseId, genderPref, date = todayJst()) {
   const listing = staffOrdering.view(state, date);
   const eligible = new Set(nominatableStaff(courseId, genderPref, date).map(s => s.id));
   const working = staffOrdering.workingIds(state.shifts, date);
-  return staffOrdering.ordered(state, date).filter(st => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+  return staffOrdering.ordered(state, date).filter(st => working.has(st.id))
     .map(st => {
       const pr = profileOf(st);
       return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
         listingOrder:listing.ranks.get(st.id), working:working.has(st.id), accepting:staffAcceptingOn(st.id, date),
+        nominatable:st.active === 1 && staffBookingReady(st) && !!pr.personalNomination,
         revision:st.profile_revision || 0, hasPhoto:state.photos.has(st.id), message:pr.message || '', eligible:eligible.has(st.id) };
     });
 }
 
 // 指定時間帯に施術できるスタッフID一覧
-// スタッフ情報の入力→対応メニュー→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
+// 対応メニューの登録→シフト内→休憩・業務→既存予約→受付停止（鍵）をすべて満たす人だけを返す
 function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookingId, online = false) {
   const shifts = ensureShifts(date);
   return state.staff
-    .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
+    .filter((st) => st.active === 1 && staffBookingReady(st) && !staffLockedOn(st.id, date) && staffCanDo(st, courseId)) // その日に鍵のスタッフは指名あり・なしとも不可
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => {
       return shifts.some((sh) => sh.staff_id === st.id && msToMin(date, sh.start_at) <= startMin && endMin <= msToMin(date, sh.end_at));
@@ -2992,7 +3002,7 @@ function hpNotify(b, via) {
     ...when, note: named.length ? "指定のスタッフ名が複数の登録と一致するため、担当者を特定できません" : "指定のスタッフ名に一致する登録がありません",
   });
   const capable = state.staff
-    .filter((st) => st.active === 1 && staffReady(st) && !staffLockedOn(st.id, date) && !bookingMismatch(st, bkLike))
+    .filter((st) => st.active === 1 && staffBookingReady(st) && !staffLockedOn(st.id, date) && !bookingMismatch(st, bkLike))
     .filter((st) => !named || st.id === named[0].id);
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
@@ -3575,7 +3585,7 @@ function reportStats(date) {
 
 // server.js から呼ばれる入口。処理した場合は true を返す。
 function ledgerContext() {
-  return { err, validDay, validSpan, todayJst, addDays, minToMs, msToMin, staffInfoMissing, staffReady, bookingMismatch, courseNameOf,
+  return { err, validDay, validSpan, todayJst, addDays, minToMs, msToMin, staffInfoMissing, staffBookingMissing, staffReady, bookingMismatch, courseNameOf,
     staffDisplayName: st => st ? profileOf(st).nickname || st.name : "",
     bookingBoothIssue: (bk, date) => {
       if (boothPolicy.bookingBoothIds(bk).length !== (bk.people || 1)) return "boothUnassigned";
@@ -3587,7 +3597,7 @@ function ledgerContext() {
 function bookingDetailsContext() {
   return { err, validDay, validSpan, minToMs, msToMin, getCourse, courses: () => [...courseStore.values()],
     sourceTiming: boothPolicy.sourceCourseTiming, courseBoothIds: boothPolicy.resolveCourseBoothIds,
-    courseGender, profileOf, staffInfoMissing, staffMismatch, overlaps, rejectTestData,
+    courseGender, profileOf, staffInfoMissing: staffBookingMissing, staffMismatch, overlaps, rejectTestData,
     booths: () => boothPolicy.resolveBooths(state), planBooths, setBookingBooths, queueChangeMails, queueBookingMails,
     bump: date => { ensureDay(date).version++; }, touch: sseTouch };
 }

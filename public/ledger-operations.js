@@ -173,8 +173,8 @@
       html = '<div class="lo-status-bar"><b>オンライン予約：' + (d.enabled ? '受付中' : '受付停止') + '</b>' + button(d.enabled ? 'この日の受付を停止' : 'この日の受付を再開', 'day-toggle', d.enabled ? '0' : '1') + '</div>';
       html += '<h3>オンラインブロック一覧</h3><div class="lo-actions">' + button('新規作成', 'new', '', 'lo-primary') + '</div><p class="lo-note">指定時間のオンライン予約受付だけを停止します。管理画面からの予約やスタッフの勤務時間は変更しません。</p>' + table(['スタッフ名', 'ブロック開始時間', 'ブロック終了時間', '備考', '操作'], (d.onlineBlocks || []).map(b => [(b.staffIds || [b.staffId]).map(id => esc((d.staff || []).find(s => s.id === id)?.name || id)).join('、'), hm(b.start), hm(b.end), esc(b.note), button('編集', 'online-edit', b.id) + button('削除', 'online-delete', b.id)]));
       const staffRows = rows => table(['スタッフ', '勤務時間', 'オンライン公開', '受付状況', '操作'], rows.map(s => {
-        const status = !d.enabled ? '全体受付停止' : s.active !== 1 ? '停止中' : s.start == null ? 'シフトなし' : (s.info_missing || []).length ? '情報入力待ち' : s.locked ? '受付停止' : '勤務内の空き時間に受付可';
-        return [esc(s.name), s.start == null ? 'シフトなし' : hm(s.start) + '〜' + hm(s.end), s.active !== 1 ? '停止中' : (s.info_missing || []).length ? esc(s.info_missing.join('・')) + 'の入力が必要' : '掲載可能', esc(status), s.start == null ? '—' : button(s.locked ? '個別の受付停止を解除' : '個別の受付を停止', 'staff-lock', s.id)];
+        const status = !d.enabled ? '全体受付停止' : s.active !== 1 ? '停止中' : s.start == null ? 'シフトなし' : (s.booking_info_missing || []).length ? '情報入力待ち' : s.locked ? '受付停止' : '勤務内の空き時間に受付可';
+        return [esc(s.name), s.start == null ? 'シフトなし' : hm(s.start) + '〜' + hm(s.end), s.start == null ? '勤務なし' : '掲載中', esc(status), s.start == null ? '—' : button(s.locked ? '個別の受付停止を解除' : '個別の受付を停止', 'staff-lock', s.id)];
       }));
       const working = (d.staff || []).filter(s => s.start != null), absent = (d.staff || []).filter(s => s.start == null);
       html += '<h3>勤務中・勤務予定のスタッフ</h3><p class="lo-note">受付可の表示でも、予約済み・休憩・業務・オンラインブロックの時間帯と対応外のコースは受け付けません。</p>' + staffRows(working);

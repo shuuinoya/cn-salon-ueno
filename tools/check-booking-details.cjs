@@ -179,9 +179,10 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await check('メール構文・改行・型・長さを予約やメール作成前に検査', () => {
     for(const extra of [{email:'bad'}, {email:'test@example.test\nBcc: x@example.test'}, {email:{}},{phone:{}},{phone:'000\r\n'}, {name:{}},{name:'   '},{name:'テスト\n別行'},{name:'あ'.repeat(121)}]) unchanged(()=>post(extra),'invalid');
   });
-  await check('新規担当の情報不足/鍵/停止は拒否・既存担当の情報不足は保持', () => {
+  await check('写真不足は予約を妨げず、コース情報不正/鍵/停止は拒否', () => {
     const p=post();state.photos.delete('A');update(p.id,{comment:'テスト既存担当維持'});
-    state.photos.delete('B');unchanged(()=>update(p.id,{staffIds:['B']}),'staffInfoMissing');
+    state.photos.delete('B');update(p.id,{staffIds:['B']});
+    state.staff.find(x=>x.id==='C').courses='invalid';unchanged(()=>update(p.id,{staffIds:['C']}),'staffInfoMissing');state.staff.find(x=>x.id==='C').courses='[]';
     state.days.get(date).locked=['C'];unchanged(()=>update(p.id,{staffIds:['C']}),'staffLocked');
     state.staff.find(x=>x.id==='D').active=0;unchanged(()=>update(p.id,{staffIds:['D']}),'staffUnavailable');
   });
