@@ -1,20 +1,35 @@
 .ledger-app .staff-public-ordering { margin: 12px 15px; border: 1px solid #d9c7ba; background: #fff; }
 .ledger-app .staff-public-ordering > summary { cursor: pointer; padding: 12px; font-weight: bold; color: #9c6d47; background: #f2ede7; }
-#staff-public-ordering { padding: 12px; min-width: 0; }
-#staff-public-ordering .so-help, #staff-public-ordering .so-message { margin: 0 0 10px; font-size: 13px; line-height: 1.7; }
-#staff-public-ordering .so-error { color: #b3261e; }
-#staff-public-ordering .so-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-#staff-public-ordering button { min-height: 40px; padding: 8px 12px; }
-#staff-public-ordering .so-scroll { overflow-x: auto; }
-#staff-public-ordering .so-table { width: 100%; min-width: 740px; border-collapse: collapse; table-layout: fixed; }
-#staff-public-ordering th, #staff-public-ordering td { padding: 8px; border: 1px solid #d9c7ba; text-align: left; vertical-align: top; }
-#staff-public-ordering th { background: #f2ede7; color: #9c6d47; }
-#staff-public-ordering th:nth-child(1) { width: 82px; } #staff-public-ordering th:nth-child(2) { width: 72px; }
-#staff-public-ordering th:nth-child(3) { width: 150px; } #staff-public-ordering th:nth-child(5) { width: 145px; } #staff-public-ordering th:nth-child(6) { width: 100px; }
-#staff-public-ordering input { width: 100%; min-height: 40px; box-sizing: border-box; font: inherit; }
-#staff-public-ordering img { object-fit: cover; border-radius: 3px; }
-#staff-public-ordering small { display: block; font-size: 12px; color: #666; overflow-wrap: anywhere; margin-top: 4px; }
-#staff-public-ordering .so-profile { margin: 0; max-height: 100px; overflow: auto; white-space: pre-line; font-size: 13px; line-height: 1.6; }
-#staff-public-ordering .so-muted { font-size: 11px; color: #666; }
-#staff-public-ordering .so-discard { padding: 12px; border: 1px solid #c39d62; background: #fffaf1; }
-@media (max-width: 760px) { .ledger-app .staff-public-ordering { margin: 10px 6px; } #staff-public-ordering { padding: 8px; } #staff-public-ordering input { font-size: 16px; } }
+:is(#staff-public-ordering,#staff-listing-ordering) { padding: 12px; min-width: 0; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-help, :is(#staff-public-ordering,#staff-listing-ordering) .so-message { margin: 0 0 10px; font-size: 13px; line-height: 1.7; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-error { color: #b3261e; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+:is(#staff-public-ordering,#staff-listing-ordering) button { min-height: 40px; padding: 8px 12px; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-scroll { overflow-x: auto; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-table { width: 100%; min-width: 740px; border-collapse: collapse; table-layout: fixed; }
+:is(#staff-public-ordering,#staff-listing-ordering) th, :is(#staff-public-ordering,#staff-listing-ordering) td { padding: 8px; border: 1px solid #d9c7ba; text-align: left; vertical-align: top; }
+:is(#staff-public-ordering,#staff-listing-ordering) th { background: #f2ede7; color: #9c6d47; }
+:is(#staff-public-ordering,#staff-listing-ordering) th:nth-child(1) { width: 82px; } :is(#staff-public-ordering,#staff-listing-ordering) th:nth-child(2) { width: 72px; }
+:is(#staff-public-ordering,#staff-listing-ordering) th:nth-child(3) { width: 150px; } :is(#staff-public-ordering,#staff-listing-ordering) th:nth-child(5) { width: 145px; } :is(#staff-public-ordering,#staff-listing-ordering) th:nth-child(6) { width: 100px; }
+:is(#staff-public-ordering,#staff-listing-ordering) input { width: 100%; min-height: 40px; box-sizing: border-box; font: inherit; }
+:is(#staff-public-ordering,#staff-listing-ordering) img { object-fit: cover; border-radius: 3px; }
+:is(#staff-public-ordering,#staff-listing-ordering) small { display: block; font-size: 12px; color: #666; overflow-wrap: anywhere; margin-top: 4px; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-profile { margin: 0; max-height: 100px; overflow: auto; white-space: pre-line; font-size: 13px; line-height: 1.6; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-muted { font-size: 11px; color: #666; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-discard { padding: 12px; border: 1px solid #c39d62; background: #fffaf1; }
+@media (max-width: 760px) { .ledger-app .staff-public-ordering { margin: 10px 6px; } :is(#staff-public-ordering,#staff-listing-ordering) { padding: 8px; } :is(#staff-public-ordering,#staff-listing-ordering) input { font-size: 16px; } }
+
+.so-dialog { width: min(960px, calc(100vw - 24px)); max-width: none; height: min(900px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid #d9c7ba; border-radius: 10px; color:#333; background:#f7f4ef; }
+.so-dialog::backdrop { background: #0006; }
+.so-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; background:white; border-bottom:1px solid #d9c7ba; }
+.so-dialog h2 { margin:0; font-size:20px; } .so-dialog > header button { min-height:44px; padding:8px 14px; }
+#staff-listing-ordering { height:calc(100% - 70px); overflow:auto; box-sizing:border-box; padding:16px; overscroll-behavior:contain; }
+.so-cards { display:flex; flex-direction:column; gap:12px; }
+.so-card { border:1px solid #d9c7ba; border-radius:8px; background:white; padding:12px; cursor:grab; user-select:none; }
+.so-card-grip { display:flex; gap:12px; align-items:center; touch-action:none; min-height:64px; }
+.so-card-grip > div { flex:1; min-width:0; } .so-rank { font-weight:bold; color:#98672c; min-width:24px; } .so-grip-mark { font-size:26px; color:#8f8273; }
+.so-photo-empty { width:48px; font-size:11px; color:#777; }
+.so-card .so-profile { margin:8px 0!important; max-height:42px!important; overflow:hidden!important; }
+.so-card-actions { display:flex; gap:8px; justify-content:flex-end; }
+.so-dragging { border:2px solid #b78b49; box-shadow:0 8px 24px #0003; background:#fff9ec; cursor:grabbing; }
+@media(max-width:600px) { .so-dialog h2{font-size:17px;} #staff-listing-ordering{padding:10px;} .so-card-grip{gap:8px;} }

@@ -23,7 +23,7 @@
   }
   function controls(app) {
     app.host.querySelectorAll('input,button').forEach(el => {
-      el.disabled = app.busy || (el.matches('[data-order-id]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-so=save]') && (!app.data?.canManage || !app.dirty));
+      el.disabled = app.busy || (el.matches('[data-so=up],[data-so=down]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-order-id]') && (!app.data?.canManage || app.unknown)) || (el.matches('[data-so=save]') && (!app.data?.canManage || !app.dirty));
     });
     app.host.setAttribute('aria-busy', String(app.busy));
     const save = app.host.querySelector('[data-so=save]');
@@ -36,11 +36,12 @@
       '<div class="so-actions"><button type="button" data-so="save" class="staff-primary">掲載順位を保存</button><button type="button" data-so="reload">最新の情報を読み直す</button><span>掲載中 ' + data.staff.filter(s => s.listed).length + '人 ／ 登録 ' + data.staff.length + '人</span></div>' +
       '<div class="so-scroll"><table class="so-table"><thead><tr><th>No.</th><th>写真</th><th>スタッフ名</th><th>プロフィール</th><th>公開状態</th><th>編集</th></tr></thead><tbody>' + data.staff.map(s => '<tr data-staff-id="' + esc(s.id) + '"><td><input type="number" min="1" max="999999" step="1" inputmode="numeric" required aria-label="' + esc(s.name) + 'の掲載順位 No." data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"></td><td>' + (s.photo ? '<img src="' + esc(s.photo) + '" alt="" width="48" height="64" loading="lazy">' : '<span class="so-muted">写真なし</span>') + '</td><td><b>' + esc(s.name) + '</b>' + (s.registeredName !== s.name ? '<small>' + esc(s.registeredName) + '</small>' : '') + '<small>ID: ' + esc(s.id.slice(0, 8)) + '</small></td><td><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p></td><td><b>' + (s.listed ? '掲載中' : '非掲載') + '</b><small>' + esc(s.listed ? '' : (s.reasons || []).join(' / ')) + '</small></td><td><button type="button" data-so="edit" data-id="' + esc(s.id) + '" aria-label="' + esc(s.name) + 'の詳細編集">詳細編集</button></td></tr>').join('') + '</tbody></table></div>' +
       '<div class="so-discard" hidden><p>入力中の順位を破棄して、最新の情報を読み直します。保存結果が分からない場合も、保存済みの順位をここで確認できます。</p><button type="button" data-so="discard">読み直す</button><button type="button" data-so="keep">入力に戻る</button></div>';
+    if (app.cards) renderCards(app);
     if (!data.canManage) setMessage(app, '掲載順位は閲覧のみです。保存は管理者が行えます。', false);
     controls(app);
   }
   async function load(app) {
-    if (app.busy || !app.host.isConnected) return;
+    if (app.busy || app.dragging || !app.host.isConnected) return;
     app.busy = true; controls(app);
     if (!app.data) app.host.innerHTML = '<p class="so-message" role="status">読み込み中…</p>';
     const sequence = ++app.sequence;
@@ -57,7 +58,7 @@
     } finally { app.busy = false; controls(app); }
   }
   async function save(app) {
-    if (app.busy || !app.data?.canManage || !app.dirty) return;
+    if (app.busy || app.dragging || !app.data?.canManage || !app.dirty) return;
     let payload;
     try {
       const values = orders(app);
@@ -90,9 +91,9 @@
     }
   }
   function mount() {
-    const host = document.getElementById('staff-public-ordering');
+    const host = document.getElementById('staff-listing-ordering') || document.getElementById('staff-public-ordering');
     if (!host || host === current?.host) return;
-    const app = current = { host, data: null, busy: false, dirty: false, unknown: false, sequence: 0 };
+    const app = current = { host, cards: host.id === 'staff-listing-ordering', data: null, busy: false, dirty: false, unknown: false, sequence: 0 };
     host.innerHTML = '<p class="so-message" role="status">掲載順位を確認できます。</p><button type="button" data-so="reload">掲載順位を読み込む</button>';
     host.addEventListener('input', event => {
       if (!event.target.matches('[data-order-id]') || app.busy || app.unknown) return;
@@ -109,20 +110,96 @@
       }
       if (action === 'discard') load(app);
       if (action === 'keep') host.querySelector('.so-discard').hidden = true;
+      if (action === 'up' || action === 'down') {
+        if (!app.data?.canManage || app.unknown) return;
+        const card = target.closest('.so-card'), other = action === 'up' ? card.previousElementSibling : card.nextElementSibling;
+        if (other) { card.parentNode.insertBefore(card, action === 'up' ? other : other.nextSibling); renumber(app); target.focus(); }
+      }
       if (action === 'edit') {
         if (app.dirty || app.unknown) { setMessage(app, '順位を保存するか、最新の情報を読み直してから詳細を編集してください。', true); return; }
+        if (app.cards) { app.host.closest('dialog').close(); app.host.closest('dialog').remove(); current = null; }
         window.__pmEditStaff?.(target.dataset.id);
       }
     });
     const details = host.closest('details');
     details?.addEventListener('toggle', () => { if (details.open && !app.data) load(app); });
-    if (details?.open) load(app);
+    if (details?.open || app.cards) load(app);
+    if (app.cards) bindCards(app);
   }
+  function renderCards(app) {
+    const table = app.host.querySelector('.so-scroll');
+    table.outerHTML = '<div class="so-cards" aria-label="スタッフの掲載順">' + app.data.staff.map(s =>
+      '<article class="so-card" data-staff-id="' + esc(s.id) + '"><div class="so-card-grip" title="つかんで上下に移動"><span class="so-grip-mark" aria-hidden="true">⠿</span><span class="so-rank">' + esc(s.listingOrder) + '</span>' +
+      (s.photo ? '<img src="' + esc(s.photo) + '" alt="" draggable="false" width="48" height="64">' : '<span class="so-photo-empty">写真なし</span>') +
+      '<div><b>' + esc(s.name) + '</b><small>' + (s.listed ? '掲載中' : '非掲載：' + esc((s.reasons || []).join(' / '))) + '</small></div></div>' +
+      '<input type="hidden" data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p><div class="so-card-actions"><button data-so="up" aria-label="' + esc(s.name) + 'を上へ">↑ 上へ</button><button data-so="down" aria-label="' + esc(s.name) + 'を下へ">↓ 下へ</button><button data-so="edit" data-id="' + esc(s.id) + '">詳細編集</button></div></article>').join('') + '</div>';
+    app.host.querySelector('.so-help').textContent = 'カードをつかんで上下に移動できます。スマホでは写真・名前の部分をつかんでください。「掲載順位を保存」で反映します。勤務者を優先し、その中で掲載順に表示します。';
+  }
+  function renumber(app) {
+    [...app.host.querySelectorAll('.so-card')].forEach((card, i) => { card.querySelector('[data-order-id]').value = i + 1; card.querySelector('.so-rank').textContent = i + 1; });
+    app.dirty = true; controls(app); setMessage(app, '順番を入れ替えました。掲載順位を保存してください。', false);
+  }
+  function bindCards(app) {
+    let drag = null, suppressClick = false;
+    const finish = cancel => {
+      if (!drag) return;
+      const d = drag; drag = null; cancelAnimationFrame(d.frame);
+      d.card.classList.remove('so-dragging'); d.card.style.transform = ''; app.dragging = false; app.host.releasePointerCapture?.(d.id);
+      if (cancel) d.original.forEach(card => d.list.appendChild(card));
+      else if (d.moved && d.original.some((card,i) => d.list.children[i] !== card)) renumber(app);
+      if (d.moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 0); }
+    };
+    app.host.addEventListener('click', e => { if (suppressClick) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+    app.host.addEventListener('pointerdown', e => {
+      const card = e.target.closest('.so-card');
+      if (!card || e.button !== 0 || !app.data?.canManage || app.busy || app.unknown || e.target.closest('button,input,a') || (e.pointerType === 'touch' && !e.target.closest('.so-card-grip'))) return;
+      const list = card.parentNode;
+      drag = { card, list, id: e.pointerId, x:e.clientX, y:e.clientY, lastY:e.clientY, original:[...list.children], moved:false, frame:0 };
+      app.dragging = true; app.host.setPointerCapture(e.pointerId);
+    });
+    const tick = () => {
+      if (!drag?.moved) return;
+      const d = drag, box = app.host.getBoundingClientRect();
+      if (d.lastY < box.top + 70) app.host.scrollTop -= 12;
+      if (d.lastY > box.bottom - 70) app.host.scrollTop += 12;
+      for (const other of [...d.list.children]) {
+        if (other === d.card) continue;
+        const r = other.getBoundingClientRect();
+        if (d.lastY >= r.top && d.lastY <= r.bottom) { d.list.insertBefore(d.card, d.lastY < r.top + r.height/2 ? other : other.nextSibling); break; }
+      }
+      d.frame = requestAnimationFrame(tick);
+    };
+    app.host.addEventListener('pointermove', e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.lastY = e.clientY;
+      if (!drag.moved && Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>6) { drag.moved=true; drag.card.classList.add('so-dragging'); tick(); }
+      if (drag.moved) e.preventDefault();
+    });
+    app.host.addEventListener('pointerup', e => { if(drag?.id===e.pointerId) finish(false); });
+    app.host.addEventListener('pointercancel', () => finish(true));
+    app.host.addEventListener('lostpointercapture', () => finish(true));
+    app.host.addEventListener('keydown', e => { if(e.key==='Escape' && drag) { e.preventDefault(); e.stopPropagation(); finish(true); } });
+  }
+  window.__pmOpenStaffListing = () => {
+    if (document.getElementById('staff-listing-dialog')) return;
+    if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) return;
+    const opener = document.activeElement, dialog = document.createElement('dialog');
+    dialog.id='staff-listing-dialog'; dialog.className='so-dialog'; dialog.setAttribute('aria-labelledby','staff-listing-title');
+    dialog.innerHTML='<header><h2 id="staff-listing-title">スタッフ掲載情報一覧</h2><button type="button" data-listing-close>閉じる</button></header><div id="staff-listing-ordering"></div>';
+    document.body.appendChild(dialog);
+    const close = () => {
+      if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { setMessage(current,'変更が残っています。保存するか「最新の情報を読み直す」で変更を破棄してから閉じてください。',true); current.host.scrollTop=0; return; }
+      dialog.close(); dialog.remove(); current=null; opener?.focus();
+    };
+    dialog.querySelector('[data-listing-close]').addEventListener('click',close);
+    dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
+    dialog.showModal(); mount();
+  };
   window.__pmMountStaffOrdering = mount;
   window.addEventListener('beforeunload', event => { if (current?.host.isConnected && (current.dirty || current.busy || current.unknown)) { event.preventDefault(); event.returnValue = ''; } });
   function refreshSaved() {
     if (document.hidden) return;
-    if (current?.host.isConnected && current.data && current.host.closest('details')?.open && !current.dirty && !current.busy && !current.unknown) load(current);
+    if (current?.host.isConnected && current.data && (current.cards || current.host.closest('details')?.open) && !current.dirty && !current.busy && !current.unknown) load(current);
   }
   window.addEventListener('focus', refreshSaved);
   document.addEventListener('visibilitychange', refreshSaved);
@@ -137,7 +214,7 @@
     app.host.querySelector('.so-message')?.scrollIntoView({ block: 'center' });
   }, true);
   window.addEventListener('cn:seq', () => {
-    if (current?.host.isConnected && current.data && current.host.closest('details')?.open) {
+    if (current?.host.isConnected && current.data && (current.cards || current.host.closest('details')?.open)) {
       if (current.dirty || current.busy || current.unknown) setMessage(current, 'スタッフ情報が更新されています。入力中の順位は保持しています。保存時に最新の情報と照合します。', false);
       else load(current);
     }

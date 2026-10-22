@@ -556,6 +556,7 @@
       [...shopMenu.children].forEach((el) => { el.style.display = "none"; });
       const shopItems = [
         ["店舗情報", openShopSettings],
+        ["スタッフ掲載情報一覧", () => window.__pmOpenStaffListing?.()],
         ["スタッフ情報", () => staffBtn?.click()],
         ["メニュー一覧", openMenuList],
         ["回数券管理", openTicketAdmin],
