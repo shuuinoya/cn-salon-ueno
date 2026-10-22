@@ -17,6 +17,8 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const crypto = require("crypto");
+const os = require("os");
+const childProcess = require("child_process");
 
 const TAG_MAP = "__pm_map__";
 const TAG_SET = "__pm_set__";
@@ -187,7 +189,15 @@ async function ghSaveError(response, requestJson, requestContent) {
 }
 const GH_CONTENTS_LIMIT = 20 * 1024 * 1024;
 const gitSha = value => typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
-let ghGitRefBlocked = false;
+let ghGitRefBlocked = false, ghGitRetryHead = null;
+const gitChildren = new Set(), gitTempDirs = new Set();
+function stopGitChildren() {
+  for (const child of gitChildren) try { process.kill(-child.pid, "SIGKILL"); } catch {}
+}
+process.on("exit", () => {
+  stopGitChildren();
+  for (const dir of gitTempDirs) try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+});
 async function ghJson(route, method = "GET", body, json = "", content = "", stage = "repository") {
   if (method !== "GET" && savesAborted) throw new Error("GitHub保存を中止: category=save_aborted");
   const r = await fetch(`${GH.api()}/repos/${GH.repo()}${route}`, {
@@ -204,42 +214,99 @@ async function ghPrivate() {
   const repo = await ghJson("");
   if (repo.private !== true) throw new Error("GitHub保存に失敗: category=repository_not_private");
 }
-// 大きな圧縮データは同じパス・同じgzipのままGitオブジェクトとして保存する。
-// 最後のref更新まで既存バックアップは変わらない。競合時は親を付け替えず止める。
-async function ghPutGit(json, compressed) {
-  if (ghGitRefBlocked) throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_ref");
-  const branch = GH.branch().split("/").map(encodeURIComponent).join("/"), file = GH.path() + ".gz";
-  if (!file || file.startsWith("/") || file.split("/").some(p => !p || p === "." || p === "..") || /[\u0000-\u001f\u007f]/.test(file)) throw new Error("GitHub保存に失敗: category=invalid_path");
-  const ref = await ghJson("/git/ref/heads/" + branch, "GET", undefined, "", "", "git_head");
-  ghCheck(ref.ref === "refs/heads/" + GH.branch() && ref.object?.type === "commit" && gitSha(ref.object.sha), "git_head");
-  const head = ref.object.sha, parent = await ghJson("/git/commits/" + head, "GET", undefined, "", "", "git_parent");
-  ghCheck(parent.sha === head && gitSha(parent.tree?.sha), "git_parent");
-  const expectedBlob = crypto.createHash("sha1").update("blob " + compressed.length + "\0").update(compressed).digest("hex");
-  const content = compressed.toString("base64");
-  const blob = await ghJson("/git/blobs", "POST", { content, encoding: "base64" }, json, content, "git_blob");
-  ghCheck(blob.sha === expectedBlob, "git_blob");
-  const tree = await ghJson("/git/trees", "POST", { base_tree: parent.tree.sha, tree: [{ path: file, mode: "100644", type: "blob", sha: blob.sha }] }, "", "", "git_tree");
-  ghCheck(gitSha(tree.sha), "git_tree");
-  const commit = await ghJson("/git/commits", "POST", { message: "予約データ自動保存 " + new Date().toISOString(), tree: tree.sha, parents: [head] }, "", "", "git_commit");
-  ghCheck(gitSha(commit.sha) && commit.tree?.sha === tree.sha && Array.isArray(commit.parents) && commit.parents.length === 1 && commit.parents[0].sha === head, "git_commit");
-  // 結果不明でも古い内容を新しい親へ重ねない。読取で結果を確かめ、旧headなら同じcommitだけ再試行。
-  ghGitRefBlocked = true;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const updated = await ghJson("/git/refs/heads/" + branch, "PATCH", { sha: commit.sha, force: false }, "", "", "git_ref");
-      ghCheck(updated.ref === "refs/heads/" + GH.branch() && updated.object?.type === "commit" && updated.object.sha === commit.sha, "git_ref");
-      ghGitRefBlocked = false; return blob.sha;
-    } catch (error) {
-      if (savesAborted) throw error;
-      let current;
-      try { current = await ghJson("/git/ref/heads/" + branch, "GET", undefined, "", "", "git_ref_verify"); }
-      catch { throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_ref"); }
-      ghCheck(current.ref === "refs/heads/" + GH.branch() && current.object?.type === "commit" && gitSha(current.object.sha), "git_ref_verify");
-      if (current.object.sha === commit.sha) { ghGitRefBlocked = false; return blob.sha; }
-      if (current.object.sha !== head) throw new Error("GitHub保存に失敗: category=ref_conflict stage=git_ref");
-      if (attempt === 1) { ghGitRefBlocked = false; throw error; }
-    }
+// Gitの出力には認証情報や保存内容が混じり得るため、生の出力を例外・ログへ渡さない。
+function gitFailure(stderr, stage) {
+  const kind = /non-fast-forward|fetch first|\[rejected\]/i.test(stderr) ? "ref_conflict"
+    : /protected branch|repository rule|GH013|GH006/i.test(stderr) ? "repository_rule"
+    : /too large|exceeds.{0,50}(limit|size)|larger than/i.test(stderr) ? "size_limit"
+    : /authentication failed|could not read Username|access denied|permission denied/i.test(stderr) ? "authentication"
+    : /unable to access|could not resolve|connection|timed out|RPC failed|remote end hung up/i.test(stderr) ? "git_transport" : "git_command";
+  return new Error("GitHub保存に失敗: category=" + kind + " stage=" + stage);
+}
+function gitRun(dir, args, env, input, stage) {
+  return new Promise((resolve, reject) => {
+    let child;
+    // 一時的に制限を強めて子へ引き継ぎ、同期的に戻す。シェルや利用者のGit設定を実行しない。
+    const previous = process.umask(0o077);
+    try { child = childProcess.spawn("/usr/bin/git", args, { cwd: dir, env, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] }); }
+    catch { reject(gitFailure("", stage)); return; }
+    finally { process.umask(previous); }
+    gitChildren.add(child);
+    const timer = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 180000);
+    timer.unref?.();
+    const done = () => { clearTimeout(timer); gitChildren.delete(child); };
+    let stdout = "", stderr = "", overflow = false;
+    child.stdout.on("data", data => { if (stdout.length + data.length > 65536) { overflow = true; try { process.kill(-child.pid, "SIGKILL"); } catch {} } else stdout += data.toString(); });
+    child.stderr.on("data", data => { if (stderr.length < 65536) stderr += data.toString().slice(0, 65536 - stderr.length); });
+    child.on("error", () => { done(); reject(gitFailure("", stage)); });
+    child.on("close", code => { done(); code === 0 && !overflow ? resolve(stdout.trim()) : reject(gitFailure(stderr, stage)); });
+    child.stdin.on("error", () => {}); // 子の早期終了時のEPIPEはcloseの終了コードで処理する
+    child.stdin.end(input || undefined);
+  });
+}
+function gitEnvironment(dir) {
+  const env = {};
+  for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"]) if (process.env[key]) env[key] = process.env[key];
+  Object.assign(env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: "/dev/null", GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", SSH_ASKPASS: "/usr/bin/false", GCM_INTERACTIVE: "Never",
+    GIT_DIR: dir, GIT_INDEX_FILE: path.join(dir, "backup-index") });
+  const config = [["credential.helper", ""], ["core.hooksPath", "/dev/null"], ["commit.gpgSign", "false"],
+    ["user.name", "CNsalon backup"], ["user.email", "backup@invalid.local"], ["http.followRedirects", "false"],
+    ["gc.auto", "0"], ["maintenance.auto", "false"],
+    ["http.https://github.com/" + GH.repo() + ".git.extraheader", "Authorization: Basic " + Buffer.from("x-access-token:" + GH.token()).toString("base64")]];
+  env.GIT_CONFIG_COUNT = String(config.length);
+  config.forEach(([key, value], i) => { env["GIT_CONFIG_KEY_" + i] = key; env["GIT_CONFIG_VALUE_" + i] = value; });
+  return env;
+}
+async function restrictGitFiles(dir) {
+  for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) { await fs.promises.chmod(file, 0o700); await restrictGitFiles(file); }
+    else if (entry.isFile()) await fs.promises.chmod(file, 0o600);
   }
+}
+// 大容量はContents/Git blob APIの入力制限を避け、同じgzipを通常のGit pushで保存する。
+// checkoutをせず既存treeの1ファイルだけを変更。認証は子の環境だけに渡し、一時作業場は必ず破棄。
+async function ghPutGit(json, compressed) {
+  if (ghGitRefBlocked) throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_push");
+  if (compressed.length > 100 * 1024 * 1024) throw new Error("GitHub保存に失敗: category=size_limit stage=git_blob");
+  const branch = GH.branch(), file = GH.path() + ".gz";
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(GH.repo()) || GH.api() !== "https://api.github.com") throw new Error("GitHub保存に失敗: category=invalid_repository");
+  if (!file || file.startsWith("/") || file.split("/").some(p => !p || p === "." || p === "..") || /[\u0000-\u001f\u007f]/.test(file)) throw new Error("GitHub保存に失敗: category=invalid_path");
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "cnsalon-gh-backup-"));
+  gitTempDirs.add(dir);
+  const env = gitEnvironment(dir), remote = "https://github.com/" + GH.repo() + ".git", ref = "refs/heads/" + branch;
+  const run = (args, stage, input) => gitRun(dir, args, env, input, stage);
+  try {
+    await fs.promises.chmod(dir, 0o700);
+    await run(["check-ref-format", ref], "git_branch");
+    await run(["init", "--bare", "--template=", dir], "git_init");
+    await run(["fetch", "--depth=1", "--no-tags", "--no-recurse-submodules", remote, ref], "git_fetch");
+    const head = await run(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], "git_head"); ghCheck(gitSha(head), "git_head");
+    if (ghGitRetryHead && ghGitRetryHead !== head) { ghGitRefBlocked = true; throw new Error("GitHub保存に失敗: category=ref_conflict stage=git_fetch"); }
+    ghGitRetryHead = head; // 失敗後の次周期も、別の更新を新しい親として勝手に取り込まない。
+    await run(["read-tree", head + "^{tree}"], "git_tree");
+    const expectedBlob = crypto.createHash("sha1").update("blob " + compressed.length + "\0").update(compressed).digest("hex");
+    const blob = await run(["hash-object", "-w", "--stdin"], "git_blob", compressed); ghCheck(blob === expectedBlob, "git_blob");
+    await run(["update-index", "--add", "--cacheinfo", "100644", blob, file], "git_index");
+    const tree = await run(["write-tree"], "git_tree"); ghCheck(gitSha(tree), "git_tree");
+    const commit = await run(["commit-tree", tree, "-p", head], "git_commit", "予約データ自動保存 " + new Date().toISOString() + "\n"); ghCheck(gitSha(commit), "git_commit");
+    await restrictGitFiles(dir);
+    if (savesAborted) throw new Error("GitHub保存を中止: category=save_aborted");
+    ghGitRefBlocked = true;
+    let pushError;
+    try { await run(["push", "--porcelain", remote, commit + ":" + ref], "git_push"); } catch (e) { pushError = e; }
+    let current;
+    try {
+      const lines = await run(["ls-remote", "--refs", remote, ref], "git_verify");
+      const rows = lines.split("\n").map(line => line.split(/\s+/)).filter(row => row[1] === ref);
+      ghCheck(rows.length === 1 && gitSha(rows[0][0]), "git_verify"); current = rows[0][0];
+    } catch { throw new Error("GitHub保存に失敗: category=ref_update_unconfirmed stage=git_push"); }
+    if (current === commit) { ghGitRefBlocked = false; ghGitRetryHead = null; return blob; }
+    if (current !== head) throw new Error("GitHub保存に失敗: category=ref_conflict stage=git_push");
+    ghGitRefBlocked = false; // 旧headのまま＝未更新を確認済み。次の定期処理は許可する。
+    throw pushError || new Error("GitHub保存に失敗: category=git_push_unconfirmed stage=git_push");
+  } finally { await fs.promises.rm(dir, { recursive: true, force: true }); gitTempDirs.delete(dir); }
 }
 // 小さいファイルは従来のContents API（SHA競合を一度だけ再確認）。圧縮は予約受付を塞がない。
 async function ghPut(json, sha, retry = true) {
@@ -298,7 +365,7 @@ async function loadSnapshotWithRemote() {
 // 分かったときに呼ぶ。以後この プロセスからは一切保存しない
 // （終了時フックが古いスナップショットで本物のデータを上書きするのを防ぐ）
 let savesAborted = false;
-function abortSaves() { savesAborted = true; }
+function abortSaves() { savesAborted = true; stopGitChildren(); }
 
 // 変更の直後に保存する（startSaver が始まるまでは何もしない）
 let saveSoon = () => {};
