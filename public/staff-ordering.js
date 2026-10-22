@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const errors = { staffOrderingInvalid: "No.は 1〜999999 の整数で入力してください。スタッフが増減した場合は読み直してください。", staffOrderingDuplicate: "同じ No. が重複しています。別の番号を入力してください。", staffOrderingConflict: "ほかの画面でスタッフ情報または掲載順位が変更されました。入力内容を控えてから最新の情報を読み直してください。", forbidden: '掲載順位の保存には管理者のログインが必要です。', staffOrderChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', staffOrderingChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', invalidOrder: 'No.は 1〜999999 の重複しない整数で入力してください。', invalid: '入力した No. とスタッフ情報を確認してください。', requestChanged: '先に送った内容と異なります。最新の情報を読み直してください。' };
+  const errors = { staffOrderingDateRequired: '掲載日の情報が古くなっています。画面を再読み込みしてください。', staffOrderingDayChanged: '営業日が変わりました。最新の情報を読み直して、今日の掲載順を設定してください。', staffOrderingInvalid: "No.は 1〜999999 の整数で入力してください。スタッフが増減した場合は読み直してください。", staffOrderingDuplicate: "同じ No. が重複しています。別の番号を入力してください。", staffOrderingConflict: "ほかの画面でスタッフ情報または掲載順位が変更されました。入力内容を控えてから最新の情報を読み直してください。", forbidden: '掲載順位の保存には管理者のログインが必要です。', staffOrderChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', staffOrderingChanged: 'ほかの画面でスタッフ情報または掲載順位が変更されました。最新の情報を読み直してから設定してください。', invalidOrder: 'No.は 1〜999999 の重複しない整数で入力してください。', invalid: '入力した No. とスタッフ情報を確認してください。', requestChanged: '先に送った内容と異なります。最新の情報を読み直してください。' };
   let current = null;
   function orders(app) {
     const inputs = [...app.host.querySelectorAll('[data-order-id]')];
@@ -31,9 +31,9 @@
   }
   function render(app) {
     const data = app.data;
-    app.host.innerHTML = '<p class="so-help">予約サイトには選んだ日の勤務者だけを No. 順に掲載します。管理画面ではシフトのないスタッフも情報・順位・シフトを編集できます。</p>' +
+    app.host.innerHTML = '<p class="so-help">予約サイトには選んだ日の勤務者を掲載します。並べ替えはその日だけ適用し、翌営業日はシフト順に戻ります。台帳や月間シフトの順番は変わりません。</p>' +
       '<p class="so-message" role="status"></p>' +
-      '<div class="so-actions"><button type="button" data-so="save" class="staff-primary">掲載順位を保存</button><button type="button" data-so="reload">最新の情報を読み直す</button><span>本日掲載 ' + data.staff.filter(s => s.listed && s.working).length + '人 ／ 登録 ' + data.staff.length + '人</span></div>' +
+      '<div class="so-actions"><button type="button" data-so="save" class="staff-primary">掲載順位を保存</button><button type="button" data-so="reload">最新の情報を読み直す</button><span>' + esc(data.date) + ' のみ ／ 掲載 ' + data.staff.filter(s => s.listed && s.working).length + '人 ／ 登録 ' + data.staff.length + '人</span></div>' +
       '<div class="so-scroll"><table class="so-table"><thead><tr><th>No.</th><th>写真</th><th>スタッフ名</th><th>プロフィール</th><th>公開状態</th><th>編集</th></tr></thead><tbody>' + data.staff.map(s => '<tr data-staff-id="' + esc(s.id) + '"><td><input type="number" min="1" max="999999" step="1" inputmode="numeric" required aria-label="' + esc(s.name) + 'の掲載順位 No." data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"></td><td>' + (s.photo ? '<img src="' + esc(s.photo) + '" alt="" width="48" height="64" loading="lazy">' : '<span class="so-muted">写真なし</span>') + '</td><td><b>' + esc(s.name) + '</b>' + (s.registeredName !== s.name ? '<small>' + esc(s.registeredName) + '</small>' : '') + '<small>ID: ' + esc(s.id.slice(0, 8)) + '</small></td><td><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p></td><td><b>' + (s.listed ? s.working ? '掲載中' : '勤務なし' : '非掲載') + '</b><small>' + esc(s.listed ? '' : (s.reasons || []).join(' / ')) + '</small></td><td><button type="button" data-so="edit" data-id="' + esc(s.id) + '" aria-label="' + esc(s.name) + 'の詳細編集">詳細編集</button></td></tr>').join('') + '</tbody></table></div>' +
       '<div class="so-discard" hidden><p>入力中の順位を破棄して、最新の情報を読み直します。保存結果が分からない場合も、保存済みの順位をここで確認できます。</p><button type="button" data-so="discard">読み直す</button><button type="button" data-so="keep">入力に戻る</button></div>';
     if (app.cards) renderCards(app);
@@ -49,7 +49,7 @@
     try {
       const response = await fetch('/api/demo/staff-ordering', { cache: 'no-store' });
       const data = await response.json();
-      if (!response.ok || !Array.isArray(data.staff) || !data.version) throw Error(errors[data.error] || '掲載順位を読み込めませんでした。');
+      if (!response.ok || !Array.isArray(data.staff) || !data.version || !/^\d{4}-\d{2}-\d{2}$/.test(data.date || '')) throw Error(errors[data.error] || '掲載順位を読み込めませんでした。');
       if (!app.host.isConnected || sequence !== app.sequence) return;
       app.data = data; app.dirty = false; app.unknown = false; app.pending = null; render(app);
       return true;
@@ -63,7 +63,7 @@
     let payload;
     try {
       const values = orders(app);
-      payload = app.unknown && app.pending ? app.pending : { version: app.data.version, orders: values, requestKey: crypto.randomUUID() };
+      payload = app.unknown && app.pending ? app.pending : { date: app.data.date, version: app.data.version, orders: values, requestKey: crypto.randomUUID() };
     } catch (error) { setMessage(app, error.message, true); return; }
     app.busy = true; app.pending = payload; controls(app); setMessage(app, '保存しています…', false);
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
@@ -86,7 +86,8 @@
     if (success) {
       const refreshed = await load(app);
       setMessage(app, refreshed
-        ? app.data.version === savedVersion ? '掲載順位を保存しました。予約サイトに反映されます。' : '掲載順位の保存後に別の変更がありました。最新の保存済み順位を表示しています。'
+        ? app.data.date !== payload.date ? payload.date + 'の掲載順位を保存しました。現在の営業日の掲載順を表示しています。'
+        : app.data.version === savedVersion ? '掲載順位を保存しました。この日だけ予約サイトに反映されます。' : '掲載順位の保存後に別の変更がありました。最新の保存済み順位を表示しています。'
         : '掲載順位は保存されましたが、最新の表示を取得できませんでした。「最新の情報を読み直す」で確認してください。', !refreshed);
       window.__pmKickSync?.();
     }
@@ -135,7 +136,7 @@
       '<div><b title="' + esc(s.name) + '">' + esc(s.name) + '</b><small title="' + esc((s.reasons || []).join(' / ')) + '">' + (s.listed ? s.working ? '掲載中' : '勤務なし' : '非掲載') + '</small></div></div>' +
       '<input type="hidden" data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p><div class="so-card-actions"><button data-so="up" aria-label="' + esc(s.name) + 'を上へ">↑</button><button data-so="down" aria-label="' + esc(s.name) + 'を下へ">↓</button><button data-so="edit" data-id="' + esc(s.id) + '">詳細</button></div></article>').join('') + '</div>';
     app.host.querySelector('.so-help').hidden = true;
-    setMessage(app, 'カードをつかんで並べ替え、保存してください。掲載は勤務者のみです。', false);
+    setMessage(app, '並べ替えはこの日だけ。翌営業日はシフト順に戻ります。', false);
   }
   function renumber(app) {
     [...app.host.querySelectorAll('.so-card')].forEach((card, i) => { card.querySelector('[data-order-id]').value = i + 1; card.querySelector('.so-rank').textContent = i + 1; });

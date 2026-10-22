@@ -545,7 +545,9 @@ const state = {
   photos: new Map(),   // staffId -> dataURL
   staffReconciliation: null, // 照合の結果と直前の復旧用記録（顧客情報なし）
   staffIdHigh: 10000000,
-  staffOrderingKeys: new Map(), // 掲載No保存の再送キー（既存スタッフIDと同じ保存先）
+  staffOrderingKeys: new Map(), // 掲載No保存の再送キー
+  staffListingDays: new Map(), // 営業日 -> {revision, orders}。台帳の並びとは独立
+  staffListingDailyVersion: 0, // 旧全日共通の順位を移行した版
   staffSkillCatalog: null, // 管理専用の原本階層と、販売メニューへの明示ID対応
   staffSkillKeys: new Map(),
   days: new Map(),     // date -> {version, enabled}
@@ -758,6 +760,7 @@ const persistReady = (() => {
     }
     ledgerOperations.migrate(state);
     staffOrdering.initialize(state.staff);
+    staffOrdering.migrate(state, todayJst());
     // メールのHTML（本文から作り直せる）は保存しない：保存データ・GitHubへの通信量を約4割減らす
     persist.startSaver(() => ({ savedAt: Date.now(), state: { ...state, mails: state.mails.map(({ html, ...m }) => m) }, sessions: [...adminSessions.entries()] }));
   })();
@@ -869,10 +872,11 @@ function getStaffOrdering(date, actor) {
   if (!actor || !["admin", "manager", "staff"].includes(actor.role)) throw err(403, "forbidden");
   if (!validDay(date)) throw err(400, "invalid");
   const working = staffOrdering.workingIds(state.shifts, date);
-  return { ok: true, date, version: staffOrdering.version(state), canManage: ["admin", "manager"].includes(actor.role),
-    staff: [...state.staff].sort(staffOrdering.compare).map(st => {
+  const listing = staffOrdering.view(state, date);
+  return { ok: true, date, custom: listing.custom, version: staffOrdering.version(state, date), canManage: ["admin", "manager"].includes(actor.role),
+    staff: listing.staff.map(st => {
       const pr = profileOf(st), status = staffBookingStatus(st), pv = staffPhotoVersion(st.id);
-      return { id: st.id, name: pr.nickname || st.name, registeredName: st.name, listingOrder: st.listing_order,
+      return { id: st.id, name: pr.nickname || st.name, registeredName: st.name, listingOrder: listing.ranks.get(st.id),
         photo: pv ? `/api/staff/photo?id=${encodeURIComponent(st.id)}&v=${pv}` : "", message: pr.message || "",
         active: st.active === 1, listed: status.listed, reasons: status.reasons, working: working.has(st.id), accepting: staffAcceptingOn(st.id, date),
         profileRevision: st.profile_revision || 0 };
@@ -2830,16 +2834,17 @@ function staffPhotoVersion(id) {
 // 条件は予約画面の指名候補（nominatableStaff）と同じ：受付中・スタッフ情報の入力がそろっている・個人指名あり・メニュー対応・メニューの性別指定。
 // 毎回いまの登録内容から作るので、管理画面の「スタッフ情報」を保存すると次に開いたとき（開いたままのページも1分以内）に反映される
 function publicStaffList(date = todayJst()) {
+  const listing = staffOrdering.view(state, date);
   const courses = [...courseStore.values()];
   const working = staffOrdering.workingIds(state.shifts, date);
-  return staffOrdering.ordered(state.staff, state.shifts, date)
+  return staffOrdering.ordered(state, date)
     .filter((st) => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .map((st) => {
       const pr = profileOf(st);
       const pv = staffPhotoVersion(st.id);
       return {
         id: st.id,
-        listingOrder: st.listing_order,
+        listingOrder: listing.ranks.get(st.id),
         working: working.has(st.id),
         accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
@@ -2862,8 +2867,9 @@ function nominationOf(staffId, date = todayJst()) {
 
 // 指名の資格。週表示で選択済みの本人を保持するため、勤務日の絞り込みとは分ける。
 function nominationCandidates(courseId, genderPref, date = todayJst()) {
+  const listing = staffOrdering.view(state, date);
   const working = staffOrdering.workingIds(state.shifts, date);
-  return staffOrdering.ordered(state.staff, state.shifts, date)
+  return staffOrdering.ordered(state, date)
     .filter((st) => st.active === 1 && staffReady(st) && staffCanDo(st, courseId))
     .filter((st) => genderPref === "none" || st.gender === genderPref)
     .filter((st) => profileOf(st).personalNomination)
@@ -2871,7 +2877,7 @@ function nominationCandidates(courseId, genderPref, date = todayJst()) {
       const pr = profileOf(st);
       return {
         id: st.id,
-        listingOrder: st.listing_order,
+        listingOrder: listing.ranks.get(st.id),
         working: working.has(st.id),
         accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
@@ -2890,13 +2896,14 @@ function nominatableStaff(courseId, genderPref, date = todayJst()) {
 
 // 勤務者のプロフィールを案内する。対応メニュー外ならメニュー選択へ戻す。
 function staffPickerDirectory(courseId, genderPref, date = todayJst()) {
+  const listing = staffOrdering.view(state, date);
   const eligible = new Set(nominatableStaff(courseId, genderPref, date).map(s => s.id));
   const working = staffOrdering.workingIds(state.shifts, date);
-  return staffOrdering.ordered(state.staff, state.shifts, date).filter(st => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
+  return staffOrdering.ordered(state, date).filter(st => working.has(st.id) && st.active === 1 && staffReady(st) && profileOf(st).personalNomination)
     .map(st => {
       const pr = profileOf(st);
       return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
-        listingOrder:st.listing_order, working:working.has(st.id), accepting:staffAcceptingOn(st.id, date),
+        listingOrder:listing.ranks.get(st.id), working:working.has(st.id), accepting:staffAcceptingOn(st.id, date),
         revision:st.profile_revision || 0, hasPhoto:state.photos.has(st.id), message:pr.message || '', eligible:eligible.has(st.id) };
     });
 }
@@ -2913,7 +2920,7 @@ function freeStaffIds(date, startMin, endMin, courseId, genderPref, ignoreBookin
     })
     .filter((st) => !overlaps(date, st.id, startMin, endMin, ignoreBookingId))
     .filter((st) => !online || !ledgerOperations.onlineBlocked(state, date, st.id, startMin, endMin, { minToMs }))
-    .sort(staffOrdering.compare)
+    .sort(staffOrdering.comparator(state, date))
     .map((st) => st.id);
 }
 
@@ -2990,7 +2997,7 @@ function hpNotify(b, via) {
   const candidates = capable
     .filter((st) => withinShift(date, st.id, start, end) && !overlaps(date, st.id, start, end))
     .filter((st) => !ledgerOperations.onlineBlocked(state, date, st.id, start, end, { minToMs }))
-    .sort(staffOrdering.compare);
+    .sort(staffOrdering.comparator(state, date));
   if (!capable.length) return failed(409, "noCapableStaff", when); // このメニューを担当できるスタッフがいない
   if (!candidates.length) return failed(409, "slotTaken", when);
   const boothPlan = planBooths(date, start, end, course, 1, { online: true });
@@ -3696,7 +3703,7 @@ function handleDemoApi(req, res, url) {
         try {
           if (tooLarge) throw err(413, "tooLarge");
           let body; try { body = JSON.parse(raw || "{}"); } catch { throw err(400, "invalid"); }
-          const result = staffOrdering.save(state, body, sessionAccount(req), err);
+          const result = staffOrdering.save(state, body, sessionAccount(req), err, todayJst());
           sseTouch(); reply(200, result);
         } catch (e) { reply(e.status || 500, { error: e.status ? e.message : "unavailable" }); }
       });

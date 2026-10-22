@@ -25,10 +25,10 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   const results = [], err = (status, code) => Object.assign(new Error(code), { status });
   function reset() {
     state.staff = ['A', 'B', 'C', 'D', 'E'].map((id, i) => ({ id, name: 'テスト担当' + id, active: 1, gender: 'male', courses: '[]',
-      sort_order: 50 - i, listing_order: i + 1, profile_revision: 0,
+      sort_order: i + 1, listing_order: i + 1, profile_revision: 0,
       profile: JSON.stringify({ nickname: 'テスト表示' + id, message: 'テスト紹介', personalNomination: true, nominationFee: 500 }) }));
     state.photos = new Map(state.staff.map(s => [s.id, 'data:image/jpeg;base64,/9j/']));
-    state.staffReconciliation = { version: 1 }; state.staffOrderingKeys = new Map();
+    state.staffReconciliation = { version: 1 }; state.staffOrderingKeys = new Map(); state.staffListingDays = new Map(); state.staffListingDailyVersion = 1; state.staffSkillCatalog = null; state.staffSkillKeys = new Map();
     state.events = new Map(); state.days = new Map(); state.shifts = new Map(); state.bookingIndex = new Map(); state.requestKeys = new Map();
     state.hpKeys = new Map(); state.hpLog = []; state.tickets = new Map(); state.ticketUseByBooking = new Map(); state.members = new Map();
     state.mailRelay = { url: '', secret: '' }; state.mails = [];
@@ -43,9 +43,8 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     a.adminSessions.clear(); a.adminSessions.set('aaaa', { user: manager.user, created: Date.now() }); a.adminSessions.set('bbbb', { user: worker.user, created: Date.now() });
   }
   const staff = id => state.staff.find(s => s.id === id), ev = (d = date) => state.events.get(d);
-  const protectedData = () => encode({ ...state, staffOrderingKeys: undefined,
-    staff: state.staff.map(({ listing_order, ...s }) => s) });
-  const body = (orders = state.staff.map(s => ({ id:s.id, listingOrder:6-s.listing_order }))) => ({ version:order.version(state), orders, requestKey:crypto.randomUUID() });
+  const protectedData = () => encode({ ...state, staffOrderingKeys: undefined, staffListingDays: undefined });
+  const body = (orders = state.staff.map(s => ({ id:s.id, listingOrder:6-s.listing_order }))) => ({ date, version:order.version(state,date), orders, requestKey:crypto.randomUUID() });
   const save = b => order.save(state, b || body(), manager, err);
   const reject = (b, expected) => { const before = encode(state); assert.throws(() => save(b), e => e.message === expected); assert.equal(encode(state),before); };
   const pubBody = (extra = {}) => ({ requestKey:crypto.randomUUID(), date, start:a.minToMs(date,720), course, people:1, staff:'none',
@@ -81,7 +80,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   }catch(e){results.push({name:'本番コピー全スタッフ照合',ok:false,error:e.message.split('\n').slice(0,2).join(' ')});}
 
   await check('初回Noは既存管理順を保ち、二度目の初期化と名前変更で不変', () => {
-    for(const s of state.staff)delete s.listing_order;
+    for(const [i,s] of state.staff.entries()){delete s.listing_order;s.sort_order=50-i;}
     const before=state.staff.map(s=>({...s}));order.initialize(state.staff);
     assert.deepEqual([...state.staff].sort(order.compare).map(s=>s.id),['E','D','C','B','A']);
     assert.deepEqual(state.staff.map(({listing_order,...s})=>s),before);
@@ -126,9 +125,54 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
     reject({...b,orders:[...b.orders].reverse()},'requestChanged');
   });
   await check('保存と再起動の往復でID別No・元管理順を保持', async () => {
-    save();const before=state.staff.map(s=>[s.id,s.listing_order,s.sort_order]);
+    save();const before=state.staff.map(s=>[s.id,s.listing_order,s.sort_order]), daily=encode(state.staffListingDays);
     const restored=JSON.parse(encode({state}),revive);persist.loadSnapshotWithRemote=async()=>({enabled:false,data:restored});
-    const reload=load();await reload.exports.ready;assert.deepEqual(reload.exports.audit.state.staff.map(s=>[s.id,s.listing_order,s.sort_order]),before);
+    const reload=load();await reload.exports.ready;assert.deepEqual(reload.exports.audit.state.staff.map(s=>[s.id,s.listing_order,s.sort_order]),before);assert.equal(encode(reload.exports.audit.state.staffListingDays),daily);assert.deepEqual(ids(reload.exports.audit.getStaffOrdering(date,manager).staff),['E','D','C','B','A']);
+  });
+  await check('当日だけ並べ替え、翌日はその日の勤務者をシフト順に戻す', () => {
+    const ledger=ids(a.getSchedule(date).staff), shifts=encode(state.shifts), staffBefore=encode(state.staff);
+    save();assert.deepEqual(ids(a.publicStaffList(date)),['E','C','B']);
+    assert.deepEqual(ids(a.publicStaffList(next)),['A','D']);
+    assert.deepEqual(ids(a.getSchedule(date).staff),ledger);assert.equal(encode(state.shifts),shifts);assert.equal(encode(state.staff),staffBefore);
+    assert.equal(a.getStaffOrdering(date,manager).custom,true);assert.equal(a.getStaffOrdering(next,manager).custom,false);
+  });
+  await check('別の日を並べ替えても当日の設定と取得版は変わらない', () => {
+    const b=body(), v=order.version(state,date), tomorrow={...body(),date:next,version:order.version(state,next)};
+    save(tomorrow);assert.equal(order.version(state,date),v);save(b);
+    assert.deepEqual(ids(a.publicStaffList(next)),['D','A']);assert.deepEqual(ids(a.publicStaffList(date)),['E','C','B']);
+  });
+  await check('前日から開いた未保存の入力は翌日へ適用せず拒否', () => {
+    const before=encode(state),b=body();
+    assert.throws(()=>order.save(state,b,manager,err,next),e=>e.message==='staffOrderingDayChanged');assert.equal(encode(state),before);
+  });
+  await check('前日に保存済みの再送結果だけ確認し翌日は変えない', () => {
+    const b=body(),r=save(b),before=encode(state);
+    assert.deepEqual(order.save(state,b,manager,err,next),r);assert.equal(encode(state),before);
+    reject({...b,date:next},'requestChanged');assert.equal(state.staffListingDays.has(next),false);
+  });
+  await check('日付なしの旧画面や実在しない日付を拒否する', () => {
+    for(const date of [undefined,'2026-02-30','2026-13-01','2026-10-23T00:00:00Z'])reject({...body(),date},'staffOrderingDateRequired');
+  });
+  await check('シフト順・勤務時間が読込後に変わった場合は保存を拒否', () => {
+    let b=body();staff('B').sort_order=99;reject(b,'staffOrderingConflict');
+    b=body();state.shifts.get(date)[0].end_at-=60000;reject(b,'staffOrderingConflict');
+  });
+  await check('元のシフト順が同順位でも登録配列順をそのまま表示', () => {
+    state.staff.reverse();state.staff.forEach(s=>s.sort_order=0);
+    assert.deepEqual(ids(a.getStaffOrdering(date,manager).staff),ids(a.getSchedule(date).staff));
+  });
+  await check('旧全日共通の手動順は移行当日だけ保護し翌日へ持ち越さない', () => {
+    state.staffListingDailyVersion=0;state.staff.forEach((s,i)=>s.listing_order=5-i);
+    const before=encode(state.staff);order.migrate(state,date);
+    assert.equal(encode(state.staff),before);assert.deepEqual(ids(a.publicStaffList(date)),['E','C','B']);
+    assert.deepEqual(ids(a.publicStaffList(next)),['A','D']);const saved=encode(state.staffListingDays);
+    order.migrate(state,next);assert.equal(encode(state.staffListingDays),saved);assert.equal(state.staffListingDays.has(next),false);
+  });
+  await check('当日並べ替え後の追加登録は末尾、翌日は登録されたシフト順', () => {
+    save();state.staff.push({...staff('A'),id:'F',sort_order:0,listing_order:6});
+    assert.equal(a.getStaffOrdering(date,manager).staff.at(-1).id,'F');
+    assert.equal(a.getStaffOrdering(next,manager).staff[0].id,'F');
+    state.staff=state.staff.filter(s=>s.id!=='C');assert(!a.getStaffOrdering(date,manager).staff.some(s=>s.id==='C'));
   });
   await check('勤務ありB/C/Eだけを掲載No順に公開し、非勤務A/Dは載せない', () => {
     for(const list of [a.publicStaffList(date),a.nominatableStaff(course,'none',date),a.staffPickerDirectory(course,'none',date)]){
