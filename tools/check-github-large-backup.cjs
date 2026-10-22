@@ -30,6 +30,7 @@ function fixture(options={}){
       if(options.conflict){state.head=OTHER;return reply(409,{message:'test conflict'});}
       if(options.lostResponse){state.head=COMMIT;throw Error('test connection lost');}
       if(options.transient&&state.patches===1)throw Error('test transient connection failure');
+      if(options.oldHeadFailures&&state.patches<=options.oldHeadFailures)throw Error('test confirmed no update');
       if(options.unknownRef)throw Error('test connection lost');
       if(options.abortOnRef)throw Error('test abort');
       state.head=COMMIT;return reply(200,{ref:'refs/heads/main',object:{type:'commit',sha:COMMIT}});
@@ -45,7 +46,7 @@ function fixture(options={}){
   return {a:sandbox.module.exports.audit,p:sandbox.module.exports,state,sandbox};
 }
 const sample=JSON.stringify({savedAt:1,state:{test:'テストコピー',photos:{__pm_map__:[['test','test-photo-data']]},mailRelay:{url:'',secret:''},mails:[]}}),compressed=zlib.gzipSync(sample);
-const results=[];async function check(name,fn){await fn();results.push(name);}
+const results=[];async function check(name,fn){if(process.argv[3]&&process.argv[3]!==name)return;await fn();results.push(name);}
 (async()=>{
   await check('小さい保存は非公開確認後Contents経路を維持',async()=>{
     const f=fixture(),result=await f.a.ghPut(sample,null);assert.equal(result,blobHash(f.state.blob));assert.deepEqual(f.state.calls.map(x=>x.method),['GET','PUT']);assert(zlib.gunzipSync(f.state.blob).equals(Buffer.from(sample)));
@@ -72,6 +73,11 @@ const results=[];async function check(name,fn){await fn();results.push(name);}
   });
   await check('旧headのままの一時通信断は同じcommitだけ1回再試行',async()=>{
     const f=fixture({transient:true});assert.equal(await f.a.ghPutGit(sample,compressed),blobHash(compressed));assert.equal(f.state.patches,2);assert.equal(f.state.calls.filter(x=>x.route==='/git/commits').length,1);
+  });
+  await check('2回失敗しても旧headを確認できれば次の定期保存を許可',async()=>{
+    const json=JSON.stringify({test:crypto.randomBytes(21*1024*1024).toString('base64')}),f=fixture({oldHeadFailures:2});
+    await assert.rejects(()=>f.a.ghPut(json,null),/test confirmed no update/);assert.equal(f.state.head,HEAD);assert.equal(f.state.patches,2);
+    const n=f.state.calls.length;const out=await f.a.ghPut(json,null);assert(f.state.calls.length>n);assert.equal(f.state.head,COMMIT);assert.equal(f.state.patches,3);assert.equal(out,blobHash(f.state.blob));
   });
   await check('refの結果確認もできないときは成功扱いせず停止',async()=>{
     const f=fixture({unknownRef:true,onRequest:({route,state})=>{if(state.patches&&route==='/git/ref/heads/main')throw Error('test GET failure');}});

@@ -237,7 +237,7 @@ async function ghPutGit(json, compressed) {
       ghCheck(current.ref === "refs/heads/" + GH.branch() && current.object?.type === "commit" && gitSha(current.object.sha), "git_ref_verify");
       if (current.object.sha === commit.sha) { ghGitRefBlocked = false; return blob.sha; }
       if (current.object.sha !== head) throw new Error("GitHub保存に失敗: category=ref_conflict stage=git_ref");
-      if (attempt === 1) throw error;
+      if (attempt === 1) { ghGitRefBlocked = false; throw error; }
     }
   }
 }
