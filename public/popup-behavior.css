@@ -1,0 +1,24 @@
+/* 予約サイト・管理画面で共通。小窓は見えている画面の中央に収める。 */
+html.cn-popup-open { overflow:hidden !important; overscroll-behavior:none; }
+html.cn-popup-open body { position:fixed !important; top:var(--cn-popup-scroll-y) !important; left:var(--cn-popup-scroll-x) !important; width:calc(100% - var(--cn-popup-gutter, 0px)) !important; box-sizing:border-box; overflow:hidden !important; }
+dialog[data-cn-popup] {
+  position:fixed !important; inset:auto !important;
+  left:var(--cn-popup-x, 50vw) !important; top:var(--cn-popup-y, 50dvh) !important;
+  margin:0 !important; transform:translate(-50%, -50%) !important;
+  max-width:calc(var(--cn-popup-width, 100vw) - 24px) !important;
+  max-height:calc(var(--cn-popup-height, 100dvh) - 24px) !important;
+  box-sizing:border-box; overflow:auto; overscroll-behavior:contain;
+}
+[data-cn-popup="overlay"] {
+  position:fixed !important; inset:auto !important;
+  left:var(--cn-popup-x, 50vw) !important; top:var(--cn-popup-y, 50dvh) !important;
+  width:var(--cn-popup-width, 100vw) !important; height:var(--cn-popup-height, 100dvh) !important;
+  transform:translate(-50%, -50%) !important;
+  display:flex !important; align-items:center !important; justify-content:center !important;
+  padding:12px !important; box-sizing:border-box; overflow:hidden !important;
+}
+[data-cn-popup="overlay"] > [role="dialog"] {
+  margin:0 !important; min-width:0; min-height:0; box-sizing:border-box;
+  max-width:100% !important; max-height:100% !important; overflow:auto; overscroll-behavior:contain;
+}
+[data-cn-popup] [role="dialog"], [data-cn-popup] .staff-picker-list, [data-cn-popup] .fm-doc-body { overscroll-behavior:contain; }

@@ -265,19 +265,17 @@
     if (!renderDetail()) { curId = null; return; }
     if (!dlg.open) dlg.showModal();
     dlg.scrollTop = 0;
-    document.documentElement.style.overflow = "hidden";
     if (fromHistory) pushed = true;
     else { try { history.pushState({ stDetail: id }, ""); pushed = true; } catch {} }
     dlg.querySelector(".st-d-close").focus();
   }
   dlg.addEventListener("close", () => {
-    document.documentElement.style.overflow = "";
     curId = null;
     if (pushed) { pushed = false; history.back(); }
     setTimeout(reloadIfNew, 300);
   });
   // 「×」・まわりの暗いところで閉じる（Escキーでも閉じる）
-  dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest(".st-d-close")) dlg.close(); });
+  dlg.addEventListener("click", (e) => { if (e.target.closest(".st-d-close")) dlg.close(); });
   dlg.addEventListener("error", (e) => {
     const img = e.target;
     if (img && img.tagName === "IMG" && img.parentElement) img.parentElement.innerHTML = USER;

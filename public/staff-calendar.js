@@ -22,11 +22,6 @@
     document.body.appendChild(dialog);
     let shown = input.value.slice(0,7) + '-01', focused = input.value, signature = '';
     const action = name => dialog.querySelector('[data-action="' + name + '"]');
-    function place() {
-      const r = trigger.getBoundingClientRect(), w = dialog.offsetWidth, h = dialog.offsetHeight, width = document.documentElement.clientWidth;
-      dialog.style.left = (width <= 600 ? Math.max(12, (width-w)/2) : Math.max(12, Math.min(r.left, width-w-12))) + 'px';
-      dialog.style.top = Math.max(12, Math.min(r.bottom+8, innerHeight-h-12)) + 'px';
-    }
     function draw(focus) {
       focused = clamp(focused); shown = clamp(shown).slice(0,7) + '-01';
       dialog.querySelector('#st-calendar-title').textContent = t('勤務日を選択');
@@ -50,7 +45,7 @@
         b.setAttribute('aria-pressed',String(value===input.value)); if(value===input.min)b.setAttribute('aria-current','date');
         td.appendChild(b);
       }
-      if(dialog.open){place();if(focus)dialog.querySelector('[data-date="'+focused+'"]')?.focus();}
+      if(dialog.open && focus)dialog.querySelector('[data-date="'+focused+'"]')?.focus({preventScroll:true});
     }
     function refresh() {
       trigger.textContent = format(input.value,{year:'numeric',month:'2-digit',day:'2-digit'}) + '  ▾';
@@ -63,7 +58,7 @@
       input.value=value; input.dispatchEvent(new Event('change',{bubbles:true})); refresh();dialog.close();
     }
     trigger.addEventListener('click',()=>{focused=clamp(input.value);shown=focused.slice(0,7)+'-01';draw(false);dialog.showModal();trigger.setAttribute('aria-expanded','true');draw(true);});
-    dialog.addEventListener('close',()=>{trigger.setAttribute('aria-expanded','false');trigger.focus();});
+    dialog.addEventListener('close',()=>{trigger.setAttribute('aria-expanded','false');trigger.focus({preventScroll:true});});
     dialog.addEventListener('click',event=>{
       const b=event.target.closest('button');
       if(b?.dataset.date){choose(b.dataset.date);return;}
@@ -71,7 +66,6 @@
       if(a==='close')dialog.close();
       if(a==='today')choose(input.min);
       if(a==='prev'||a==='next'){shown=month(shown,a==='prev'?-1:1);focused=clamp(shown);draw(false);}
-      if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}
     });
     dialog.addEventListener('keydown',event=>{
       if(!event.target.dataset.date)return;
@@ -84,7 +78,6 @@
       else return;
       event.preventDefault();focused=clamp(value);shown=focused.slice(0,7)+'-01';draw(true);
     });
-    window.addEventListener('resize',()=>{if(dialog.open)place();});
     window.addEventListener('popstate',()=>{if(dialog.open)dialog.close();});
     refresh(); return { refresh };
   }

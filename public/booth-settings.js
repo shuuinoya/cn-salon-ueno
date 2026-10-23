@@ -29,7 +29,7 @@
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(messages[data.error || data.code] || "ブース情報を読み込めませんでした。");
       if (app !== current) return;
-      current.data = data; current.pending = null; current.editor = null;
+      current.data = data; current.pending = null; current.editor = null; current.dirty = false;
       render(); current.dialog.scrollTop = 0; notice("最新の設定を表示しています。");
     } catch (error) { if (app === current) notice(error.message || "読み込めませんでした。もう一度お試しください。", true); }
   }
@@ -126,7 +126,9 @@
     dialog.className = "bs-dialog"; dialog.setAttribute("aria-labelledby", "bs-title");
     dialog.innerHTML = '<header class="bs-header"><h2 id="bs-title">ブース情報</h2><div><button type="button" data-reload>最新情報を読み直す</button><button type="button" data-close aria-label="ブース情報を閉じる">×</button></div></header><p class="bs-message" role="status" aria-live="polite"></p><main class="bs-main"></main>';
     document.body.appendChild(dialog); app = { dialog, previousFocus, tab: "rooms", data: null, busy: false, pending: null, editor: null };
-    const close = () => { if (app?.busy) return; dialog.close(); dialog.remove(); app = null; if (previousFocus?.isConnected) previousFocus.focus(); };
+    const close = () => { if (app?.busy) return; if (app?.dirty && !window.confirm("保存していない変更を破棄して閉じますか？")) return; dialog.close(); dialog.remove(); app = null; if (previousFocus?.isConnected) previousFocus.focus(); };
+    dialog.addEventListener("input", () => { if (app) app.dirty = true; });
+    dialog.addEventListener("change", () => { if (app) app.dirty = true; });
     dialog.querySelector("[data-close]").addEventListener("click", close);
     dialog.querySelector("[data-reload]").addEventListener("click", () => { if (!app.busy) load(); });
     dialog.addEventListener("cancel", e => { e.preventDefault(); close(); });
