@@ -43,6 +43,8 @@
       "Vom {start}. bis zum {end}. jedes Monats bieten wir Inhabern einer Mehrfachkarte exklusive Preise an."],
     "このメニューは対応していません。対応メニューを選ぶ": ["Not available for this treatment. Choose an available treatment.","无法提供此项目。请选择可提供的项目。","이 메뉴는 담당하지 않습니다. 가능한 메뉴를 선택하세요.","Ce soin n’est pas disponible avec ce praticien. Choisissez un soin disponible.","Este tratamiento no está disponible con este terapeuta. Elija uno disponible.","Questo trattamento non è disponibile con questo terapista. Scegli un trattamento disponibile.","Diese Behandlung ist bei dieser Fachkraft nicht verfügbar. Wählen Sie eine verfügbare Behandlung."],
 
+    "このメニューは対応していません。予約枠は×になります。": ["This therapist cannot provide this treatment. Booking slots are marked ×.","该员工无法提供此项目。预约时段将显示为×。","이 직원은 해당 메뉴를 제공할 수 없습니다. 예약 시간대는 ×로 표시됩니다.","Ce praticien ne propose pas ce soin. Les créneaux sont indiqués par ×.","Este terapeuta no ofrece este tratamiento. Los horarios aparecen con ×.","Questo terapista non offre questo trattamento. Gli orari sono contrassegnati con ×.","Diese Fachkraft bietet diese Behandlung nicht an. Termine werden mit × gekennzeichnet."],
+
     // ---- 予約フォーム・回数券（booking-tweaks.js）----
     "（必須）": ["(required)", "（必填）", "(필수)", "(obligatoire)", "(obligatorio)", "(obbligatorio)", "(Pflichtfeld)"],
     "回数券の残り回数が0のため、ご予約いただけません。": [
