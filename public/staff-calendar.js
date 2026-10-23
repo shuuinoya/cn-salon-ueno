@@ -1,13 +1,18 @@
-/* 勤務日の選択。日付の確定だけ既存の change に渡し、シフト・予約の判定は変更しない。 */
+/* 勤務日・予約日の共通カレンダー。日付の確定だけ呼び出し元に渡す。 */
 (function () {
   'use strict';
+  if (window.CNStaffCalendar) return;
   const day = value => new Date(value + 'T12:00:00Z');
   const iso = date => date.toISOString().slice(0, 10);
   const add = (value, n) => { const d = day(value); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
   const month = (value, n) => { const d = day(value.slice(0, 7) + '-01'); d.setUTCMonth(d.getUTCMonth() + n); return iso(d); };
-  function mount(input) {
-    const i18n = window.CNI18N, t = key => i18n?.t(key) || key;
-    const locale = () => i18n?.LOCALE[i18n.lang()] || 'ja-JP';
+  function mount(input, options = {}) {
+    const t = key => window.CNI18N?.t(key, undefined, options.language?.()) || key;
+    const locale = () => window.CNI18N?.LOCALE[options.language?.() || window.CNI18N.lang()] || 'ja-JP';
+    const title = options.titleKey || '勤務日を選択';
+    if (!document.querySelector('link[href="/staff-calendar.css"]')) {
+      const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/staff-calendar.css'; document.head.appendChild(css);
+    }
     const format = (value, opts) => new Intl.DateTimeFormat(locale(), { ...opts, timeZone: 'UTC', calendar: 'gregory' }).format(day(value));
     const clamp = v => v < input.min ? input.min : v > input.max ? input.max : v;
     const trigger = document.createElement('button');
@@ -24,7 +29,7 @@
     const action = name => dialog.querySelector('[data-action="' + name + '"]');
     function draw(focus) {
       focused = clamp(focused); shown = clamp(shown).slice(0,7) + '-01';
-      dialog.querySelector('#st-calendar-title').textContent = t('勤務日を選択');
+      dialog.querySelector('#st-calendar-title').textContent = t(title);
       dialog.querySelector('#st-calendar-month').textContent = format(shown, {year:'numeric', month:'long'});
       action('prev').setAttribute('aria-label', t('前の月')); action('next').setAttribute('aria-label', t('次の月'));
       action('close').setAttribute('aria-label', t('閉じる')); action('today').textContent = t('今日');
@@ -49,16 +54,19 @@
     }
     function refresh() {
       trigger.textContent = format(input.value,{year:'numeric',month:'2-digit',day:'2-digit'}) + '  ▾';
-      trigger.setAttribute('aria-label', t('勤務日を選択') + ': ' + format(input.value,{year:'numeric',month:'long',day:'numeric'}));
+      trigger.setAttribute('aria-label', t(title) + ': ' + format(input.value,{year:'numeric',month:'long',day:'numeric'}));
       const next=[input.value,input.min,input.max,locale()].join('|');
       if(next!==signature){signature=next; if(dialog.open)draw(document.activeElement?.hasAttribute('data-date'));}
     }
     function choose(value) {
       if(value<input.min||value>input.max)return;
-      input.value=value; input.dispatchEvent(new Event('change',{bubbles:true})); refresh();dialog.close();
+      input.value=value;
+      if (options.onChange) options.onChange(value);
+      else input.dispatchEvent(new Event('change',{bubbles:true}));
+      refresh();dialog.close();
     }
     trigger.addEventListener('click',()=>{focused=clamp(input.value);shown=focused.slice(0,7)+'-01';draw(false);dialog.showModal();trigger.setAttribute('aria-expanded','true');draw(true);});
-    dialog.addEventListener('close',()=>{trigger.setAttribute('aria-expanded','false');trigger.focus({preventScroll:true});});
+    dialog.addEventListener('close',()=>{trigger.setAttribute('aria-expanded','false');if(trigger.isConnected)trigger.focus({preventScroll:true});});
     dialog.addEventListener('click',event=>{
       const b=event.target.closest('button');
       if(b?.dataset.date){choose(b.dataset.date);return;}
@@ -78,8 +86,9 @@
       else return;
       event.preventDefault();focused=clamp(value);shown=focused.slice(0,7)+'-01';draw(true);
     });
-    window.addEventListener('popstate',()=>{if(dialog.open)dialog.close();});
-    refresh(); return { refresh };
+    const onPopState=()=>{if(dialog.open)dialog.close();};
+    window.addEventListener('popstate',onPopState);
+    refresh(); return { refresh, destroy() { window.removeEventListener('popstate',onPopState);if(dialog.open)dialog.close();dialog.remove();trigger.remove();input.hidden=false; } };
   }
   window.CNStaffCalendar = { mount };
 })();

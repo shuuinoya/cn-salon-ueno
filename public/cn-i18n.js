@@ -21,6 +21,8 @@
     "次の月": ["Next month", "下个月", "다음 달", "Mois suivant", "Mes siguiente", "Mese successivo", "Nächster Monat"],
     "前の月": ["Previous month", "上个月", "이전 달", "Mois précédent", "Mes anterior", "Mese precedente", "Vorheriger Monat"],
     "勤務日を選択": ["Choose work date", "选择工作日期", "근무일 선택", "Choisir la date de travail", "Elegir fecha de trabajo", "Scegli il giorno di lavoro", "Arbeitstag auswählen"],
+    "予約日を選択": ["Choose appointment date", "选择预约日期", "예약일 선택", "Choisir la date du rendez-vous", "Elegir fecha de la cita", "Scegli la data dell’appuntamento", "Termindatum auswählen"],
+    "予約日": ["Appointment date", "预约日期", "예약일", "Date du rendez-vous", "Fecha de la cita", "Data dell’appuntamento", "Termindatum"],
     "この日は受付を停止しています。": ["Bookings are closed for this day.", "当天暂停接受预约。", "해당 날짜에는 예약 접수를 중단하고 있습니다.", "Les réservations sont fermées pour ce jour.", "No se aceptan reservas para este día.", "Le prenotazioni per questo giorno sono chiuse.", "Für diesen Tag werden keine Buchungen angenommen."],
     "勤務日": ["Work date", "工作日期", "근무일", "Date de travail", "Fecha de trabajo", "Giorno di lavoro", "Arbeitstag"],
     "この日は勤務シフトがありません。別の日を選択してください。": ["This staff member is not scheduled on this day. Please select another day.", "此员工当天没有排班。请选择其他日期。", "이 직원은 해당 날짜에 근무 일정이 없습니다. 다른 날짜를 선택해 주세요.", "Ce membre du personnel n’est pas prévu ce jour-là. Veuillez choisir une autre date.", "Este miembro del personal no tiene turno ese día. Seleccione otra fecha.", "Questo membro del personale non ha un turno in questo giorno. Seleziona un’altra data.", "Für diese Fachkraft ist an diesem Tag keine Schicht geplant. Bitte wählen Sie einen anderen Tag."],
@@ -550,11 +552,12 @@
 
   const missing = new Set();
   const fill = (s, vars) => (vars ? String(s).replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m)) : s);
-  function t(ja, vars) {
-    if (cur === "ja") return fill(ja, vars);
+  function t(ja, vars, language) {
+    const selected = norm(language) || cur;
+    if (selected === "ja") return fill(ja, vars);
     const row = D[ja];
     if (!row) { missing.add(ja); return fill(ja, vars); }
-    return fill(row[IDX[cur]] || row[0], vars);
+    return fill(row[IDX[selected]] || row[0], vars);
   }
   // 予約サイト本体の辞書と同じ文言（ボタン・見出し等）。画面部品が出す文言を、どの言語でも見分けるのに使う
   const bt = (key, l) => { const v = BT[key]; return v ? v[LANGS.indexOf(l || cur)] : ""; };
