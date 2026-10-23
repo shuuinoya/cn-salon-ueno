@@ -858,9 +858,9 @@
       bar.innerHTML = "<h2>" + esc2(T("指名スタッフ")) + "</h2>" +
         '<div style="display:flex;gap:14px;align-items:center;padding:14px 16px">' +
         '<div style="flex:none;width:72px;height:96px;border-radius:6px;overflow:hidden;background:#f6efe4;display:grid;place-items:center">' +
-        (nomStaff.photo ? '<img src="' + esc2(nomStaff.photo) + '" alt="' + esc2(nomStaff.name) + '" style="width:100%;height:100%;object-fit:cover;display:block"/>' : user) + "</div>" +
+        (nomStaff.photo ? '<img src="' + esc2(nomStaff.photo) + '" alt="' + esc2(window.CNI18N?.staffName(nomStaff) || nomStaff.name) + '" style="width:100%;height:100%;object-fit:cover;display:block"/>' : user) + "</div>" +
         '<div style="min-width:0;line-height:1.6">' +
-        '<b style="font-size:18px;overflow-wrap:anywhere">' + esc2(nomStaff.name) + "</b>" +
+        '<b style="font-size:18px;overflow-wrap:anywhere">' + esc2(window.CNI18N?.staffName(nomStaff) || nomStaff.name) + "</b>" +
         '<div style="color:#8a6420;font-size:14px">' + esc2(T("指名料")) + " <b>" + esc2(price(nomStaff.nominationFee)) + "</b></div>" +
         '<div style="color:#6b7280;font-size:13px">' + esc2(T(none ? "このスタッフが担当できるメニューは現在ありません。" : "このスタッフが担当できるメニューを表示しています。")) + "</div>" +
         links + "</div></div>";

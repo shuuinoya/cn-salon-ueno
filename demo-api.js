@@ -19,6 +19,7 @@ const boothPolicy = require("./booth-policy");
 const bookingDetails = require("./booking-details");
 const staffOrdering = require("./staff-ordering");
 const staffSkills = require("./staff-skills");
+const { staffLatinName } = require("./staff-names");
 const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（予約確認・変更・取消の通知のみ送信します）";
 const BOOKING_TICKET_NOTICE_STOP_REASON = "この予約の回数券利用・残り回数は予約確認メールに記載済みのため、別の残数通知は送信しません";
 function isBookingReminder(m) { return m?.type === "remind" || (m?.tpl?.name === "booking" && /Remind$/.test(m.tpl.variant || "")); }
@@ -2856,6 +2857,7 @@ function publicStaffList(date = todayJst()) {
         working: working.has(st.id),
         accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
+        nameLatin: staffLatinName(st, pr),
         gender: st.gender,
         nominatable: st.active === 1 && staffBookingReady(st) && !!pr.personalNomination,
         nominationFee: Number(pr.nominationFee) || 0,
@@ -2890,6 +2892,7 @@ function nominationCandidates(courseId, genderPref, date = todayJst()) {
         working: working.has(st.id),
         accepting: staffAcceptingOn(st.id, date),
         name: pr.nickname || st.name,
+        nameLatin: staffLatinName(st, pr),
         nominationFee: Number(pr.nominationFee) || 0,
         revision: st.profile_revision || 0,
         hasPhoto: state.photos.has(st.id),
@@ -2911,7 +2914,7 @@ function staffPickerDirectory(courseId, genderPref, date = todayJst()) {
   return staffOrdering.ordered(state, date).filter(st => working.has(st.id))
     .map(st => {
       const pr = profileOf(st);
-      return { id:st.id, name:pr.nickname || st.name, nominationFee:Number(pr.nominationFee) || 0,
+      return { id:st.id, name:pr.nickname || st.name, nameLatin:staffLatinName(st, pr), nominationFee:Number(pr.nominationFee) || 0,
         listingOrder:listing.ranks.get(st.id), working:working.has(st.id), accepting:staffAcceptingOn(st.id, date),
         nominatable:st.active === 1 && staffBookingReady(st) && !!pr.personalNomination,
         revision:st.profile_revision || 0, hasPhoto:state.photos.has(st.id), message:pr.message || '', eligible:eligible.has(st.id) };

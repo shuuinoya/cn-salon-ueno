@@ -12,8 +12,9 @@
     margin: 0;
     background: #fff;
     color: #333;
-    font-family: Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif;
-    font-size: 13px;
+    font-family: Verdana, Roboto, "Droid Sans", Meiryo, "ＭＳ Ｐゴシック", sans-serif;
+    font-size: 14px;
+    line-height: 20px;
   }
   header.top {
     background: #987050;
@@ -39,7 +40,7 @@
     font-weight: 700;
     font-size: 14px;
     padding: 8px 14px;
-    border-bottom: 2px solid #e6cfa8;
+    border-bottom: 2px solid #ddc8b8;
   }
   .wrap { padding: 14px 14px 50px; max-width: 1400px; }
   table {
@@ -47,26 +48,29 @@
     border-collapse: collapse;
     margin-bottom: 24px;
   }
-  th, td { border: 1px solid #e6cfa8; }
+  th, td { border: 1px solid #ddc8b8; }
   th {
-    width: 21%;
+    width: 300px;
     text-align: left;
     font-weight: 400;
-    padding: 11px 14px;
+    padding: 5px;
     vertical-align: middle;
   }
-  td { padding: 5px 10px; }
+  td { padding: 5px; height: 45px; }
   .req { color: #e9625b; margin-left: 2px; }
-  input[type="text"], input[type="tel"], input[type="email"], select, textarea {
+  input[type="text"], input[type="tel"], input[type="email"], input[type="date"], select, textarea {
     width: 100%;
     font: inherit;
-    font-family: Georgia, "Times New Roman", serif;
-    border: 1px solid #c9c9c9;
+    font-family: inherit;
+    font-weight: 400;
+    min-height: 34px;
+    border: 1px solid #ddc8b8;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 5px;
     background: #fff;
   }
   select { font-family: inherit; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #987050; outline-offset: 1px; }
   textarea { min-height: 78px; resize: vertical; font-family: inherit; }
   input:disabled, .ro { background: #ececec; color: #555; }
   .radios { display: flex; align-items: center; gap: 22px; }
@@ -94,14 +98,14 @@
   @media (max-width: 600px) {
     .wrap { padding: 10px 10px 40px; }
     table, tbody, tr, th, td { display: block; width: 100%; }
-    tr { border-bottom: 1px solid #e6cfa8; }
+    tr { border-bottom: 1px solid #ddc8b8; }
     th, td { border: 0; }
     th { width: 100%; background: #fbf4e6; padding: 8px 10px 6px; }
-    td { padding: 6px 10px 10px; }
-    table { border: 1px solid #e6cfa8; border-bottom: 0; }
-    input[type="text"], input[type="tel"], input[type="email"], select, textarea { min-height: 40px; font-size: 16px; }
+    td { padding: 6px 10px 10px; height:auto; }
+    table { border: 1px solid #ddc8b8; border-bottom: 0; }
+    input[type="text"], input[type="tel"], input[type="email"], input[type="date"], select, textarea { min-height: 44px; font-size: 16px; }
     .radios { flex-wrap: wrap; gap: 10px 22px; }
-    .radios label { min-height: 36px; }
+    .radios label { min-height: 44px; }
     .actions button { min-height: 44px; width: 100%; }
     .actions { flex-direction: column; }
     header.top { flex-wrap: wrap; }
