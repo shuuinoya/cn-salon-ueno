@@ -8,6 +8,8 @@ let passed=0;for(const file of ['NativeCalendar-pm2.js','NativeCalendar-Dk__jLyl
  for(const eligible of [true,false]){log.length=0;ctx.select({id:'test-staff',name:'テストスタッフ',working:true,accepting:true,nominatable:true,eligible});assert.deepEqual(log,[['select','test-staff'],['retain','テストスタッフ'],['open',false]]);passed++;}
  for(const flag of ['working','accepting','nominatable']){log.length=0;ctx.select({id:'test-staff',working:true,accepting:true,nominatable:true,[flag]:false});assert.equal(log.length,0);passed++;}
  assert(src.includes('X=Y??G?.staffDirectory?.find(e=>e.id===I)'));passed++;
+ const notice=src.match(/children:\[(X\?\.eligible===!1.*?):n\.staffUnavailable,/);assert(notice);
+ for(const translated of [false,true]){const message=vm.runInNewContext(notice[1]+':n.staffUnavailable',{X:{eligible:false},window:{CNI18N:translated?{t:x=>x}:undefined},n:{staffUnavailable:'旧案内'}});assert.equal(message,'このメニューは対応していません。予約枠は×になります。');passed++;}
  const expressions=src.match(/children:q\?`…`:n\?`×`:`－`/);assert(expressions,'空きなしは×のまま描画');passed++;
 }
 const ctx={window:{addEventListener(){},dispatchEvent(){}},document:{documentElement:{}},localStorage:{getItem(){return null}},setInterval(){}};
