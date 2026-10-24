@@ -74,7 +74,8 @@
   // ---- 見た目（本物のログインモーダルと同じ構成） ----
   const CSS =
     "#cn-login-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:28px 16px;overflow:auto}" +
-    ".cn-login-card{background:#fff;border-radius:12px;width:100%;max-width:480px;box-shadow:0 12px 40px rgba(0,0,0,.25);font-family:inherit;color:#222}" +
+    // 共通小窓の max-width:100% が適用されても、カード自体の幅を制限する。
+    ".cn-login-card{background:#fff;border-radius:12px;width:min(380px,100%);max-width:380px;min-width:0;box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.25);font-family:inherit;color:#222}" +
     ".cn-lh{padding:20px 22px;border-bottom:1px solid #e6e6e6}.cn-lh h2{margin:0;font-size:20px;font-weight:700}" +
     ".cn-lf{padding:18px 22px 10px}.cn-lf label{display:block;font-size:17px;margin:0 0 14px}" +
     ".cn-lf label small{color:#888;font-size:13px;margin-left:6px}" +
@@ -90,6 +91,15 @@
     ".cn-ok{color:#2e6b34;background:#eef7ee;border:1px solid #cfe5cf;border-radius:6px;font-size:14px;line-height:1.7;padding:10px 12px;margin:0 0 10px}" +
     ".cn-lfoot{padding:18px 22px;border-top:1px solid #e6e6e6;text-align:center}" +
     ".cn-cancel{border:1px solid #9a9a9a;background:#fff;border-radius:8px;padding:14px 34px;font-size:17px;color:#333;cursor:pointer}" +
+    // ログイン・会員登録・再設定の小窓を共通のコンパクトな寸法にする。右側の常設フォームには適用しない。
+    "#cn-login-ov .cn-lh,#cn-login-ov .cn-lfoot{padding:12px 16px}" +
+    "#cn-login-ov .cn-lh h2{font-size:18px}#cn-login-ov .cn-lf{padding:12px 16px 8px}#cn-login-ov .cn-lf label{font-size:14px;margin-bottom:10px}" +
+    "#cn-login-ov .cn-in{height:44px;margin-top:6px}#cn-login-ov .cn-in input{font-size:16px}" +
+    "#cn-login-ov button{box-sizing:border-box;white-space:normal;overflow-wrap:anywhere;line-height:1.45}" +
+    "#cn-login-ov .cn-gold{height:auto;min-height:44px;padding:9px 12px;font-size:16px}" +
+    "#cn-login-ov .cn-switch{min-height:44px;padding:10px 12px;font-size:14px;margin:8px 0 4px}" +
+    "#cn-login-ov .cn-forgot{font-size:13px;line-height:1.5;padding:6px 0;margin:6px 0}" +
+    "#cn-login-ov .cn-cancel{min-height:44px;padding:10px 24px;font-size:15px}" +
     ".cn-inline .cn-lf{padding:6px 22px 16px}" +
     // 右の列（幅240px）のログイン欄・会員メニュー：既存の side-login-card の見た目のまま中身だけ
     ".cn-side .cn-lf{padding:14px 16px 16px}.cn-side .cn-lf label{font-size:14px;margin-bottom:10px}" +
