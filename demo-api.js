@@ -1854,6 +1854,13 @@ function validLabel(months) {
   return (y ? y + "年" : "") + (m ? m + "か月" : "") + "間";
 }
 const planMonths = (p) => (p && Number.isInteger(p.valid_months) && p.valid_months >= 1 ? p.valid_months : 12);
+// 回数・価格・期限は丸めずに検証する。小数や無限大を保存しない。
+function ticketInteger(value, min, max, code = "invalid") {
+  if ((typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && !value.trim())) throw err(400, code);
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < min || n > max) throw err(400, code);
+  return n;
+}
 function jstDateStr(ms) {
   const d = new Date(ms + 9 * 3600e3);
   return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
@@ -4601,23 +4608,27 @@ function handleDemoApi(req, res, url) {
         const member = memberOf(req);
         const name = String(b.name || (member ? member.name : "") || "").trim().slice(0, 120);
         const email = member ? member.email : String(b.email || "").trim().toLowerCase().slice(0, 254);
-        if (!plan || plan.active !== 1 || !name || !email.includes("@")) throw err(400, "invalid");
+        if (!name || !email.includes("@")) throw err(400, "invalid");
         rejectTestData({ name, email }); // 本番に試しの回数券購入を入れさせない
         // 会員のみ購入可（ログイン中の会員、または予約実績のあるメールアドレス）。
         // 画面の表示制御だけに頼らず、サーバー側で必ず確認する
         if (!member && !isRepeatEmail(email)) throw err(403, "memberOnly");
         // 多重送信防止：同じ購入キーは同じ結果を返す（再読み込み・再送信・APIの再実行で二重に購入・復活しない）
-        const rk = String(b.requestKey || "").slice(0, 100);
+        if (b.requestKey !== undefined && (typeof b.requestKey !== "string" || b.requestKey.length > 100)) throw err(400, "invalid");
+        const rk = b.requestKey || "";
+        const fingerprint = rk ? bookingRequestFingerprint(b, member) : null;
         if (rk && state.ticketPurchaseKeys.has(rk)) {
           const prev = state.ticketPurchaseKeys.get(rk);
           const pt = state.tickets.get(prev.ticketId);
-          if (!pt || prev.email !== email) throw err(409, "requestKeyUsed");
+          if (!pt || prev.email !== email || !prev.fingerprint || prev.fingerprint !== fingerprint) throw err(409, "requestKeyUsed");
           const rv = pt.revival && pt.revival.ticket_id ? state.tickets.get(pt.revival.ticket_id) : null;
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, repeated: true, ticket: { ...ticketPublicJson(pt), token: pt.token },
             revival: rv ? { total: pt.revival.total, ticket: { ...ticketPublicJson(rv), token: rv.token } } : null }));
           return;
         }
+        // 完了済みの再送は、後から販売を停止・削除しても元の購入結果を返す。
+        if (!plan || plan.active !== 1) throw err(400, "invalid");
         const serialBefore = state.ticketSerial;
         state.ticketSerial++;
         const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
@@ -4655,7 +4666,7 @@ function handleDemoApi(req, res, url) {
           throw err(500, "purchaseFailed");
         }
         if (rk) {
-          state.ticketPurchaseKeys.set(rk, { ticketId: tid, email, at: now });
+          state.ticketPurchaseKeys.set(rk, { ticketId: tid, email, fingerprint, at: now });
           if (state.ticketPurchaseKeys.size > 3000) state.ticketPurchaseKeys.delete(state.ticketPurchaseKeys.keys().next().value);
         }
         // 購入メール（既存メールと同じ書式・実送信はallowToのみ）。
@@ -4913,9 +4924,9 @@ function handleDemoApi(req, res, url) {
           const b = JSON.parse(raw || "{}");
           const norm = (p2) => {
             const name = String(b.name ?? p2?.name ?? "").trim().slice(0, 120);
-            const price = Math.round(Number(b.price ?? p2?.price));
-            const uses = Math.round(Number(b.uses ?? p2?.uses));
-            if (!name || !(price >= 0) || !(uses >= 1 && uses <= 200)) throw err(400, "invalid");
+            const price = ticketInteger(b.price ?? p2?.price, 0, 1000000000);
+            const uses = ticketInteger(b.uses ?? p2?.uses, 1, 200);
+            if (!name) throw err(400, "invalid");
             // 対象メニュー："all" または 存在するメニューIDの配列（1つ以上）
             let scope = b.menu_scope ?? p2?.menu_scope ?? "all";
             if (scope !== "all") {
@@ -4926,11 +4937,9 @@ function handleDemoApi(req, res, url) {
             const group = String(b.revive_group ?? p2?.revive_group ?? "").trim().slice(0, 40);
             const revive = b.revive === undefined ? (p2 ? p2.revive !== false : true) : !!b.revive;
             // 有効期限：購入日から○か月（1〜60か月）。変更は以後の購入から（購入済みの券の期限は変わらない）
-            const months = Math.round(Number(b.valid_months ?? p2?.valid_months ?? 12));
-            if (!(months >= 1 && months <= 60)) throw err(400, "invalidMonths");
+            const months = ticketInteger(b.valid_months ?? p2?.valid_months ?? 12, 1, 60, "invalidMonths");
             // 通常価格（任意）：価格より高いときだけ割引として表示
-            const regular = Math.round(Number(b.regular_price ?? p2?.regular_price ?? 0)) || 0;
-            if (regular < 0) throw err(400, "invalid");
+            const regular = ticketInteger(b.regular_price ?? p2?.regular_price ?? 0, 0, 1000000000);
             if (b.active !== undefined && typeof b.active !== "boolean") throw err(400, "invalid");
             return { active: b.active === undefined ? (p2 ? p2.active : 1) : (b.active ? 1 : 0), name, price, uses, description: String(b.description ?? p2?.description ?? "").slice(0, 300),
               menu_scope: scope, revive_group: group, revive, valid_months: months, regular_price: regular,
@@ -4964,10 +4973,11 @@ function handleDemoApi(req, res, url) {
             if (j >= 0 && j < list.length) [list[i], list[j]] = [list[j], list[i]];
             list.forEach((p2, k) => { p2.sort = k + 1; });
           } else if (b.action === "add") {
+            const values = norm(null);
             state.ticketPlanSerial++;
             const id2 = "tp-c" + state.ticketPlanSerial;
             const maxSort = Math.max(0, ...[...state.ticketPlans.values()].map((p2) => p2.sort || 0));
-            state.ticketPlans.set(id2, { id: id2, active: 1, sort: maxSort + 1, ...norm(null) });
+            state.ticketPlans.set(id2, { id: id2, active: 1, sort: maxSort + 1, ...values });
           } else if (b.action === "update") {
             const p2 = state.ticketPlans.get(String(b.id || ""));
             if (!p2) throw err(404, "notFound");
@@ -5036,19 +5046,23 @@ function handleDemoApi(req, res, url) {
           if (b.action !== "adjust") throw err(400, "invalid");
           const t = state.tickets.get(String(b.id || ""));
           if (!t) throw err(404, "notFound");
-          const note = String(b.note || "").slice(0, 200);
+          const note = String(b.note || "").trim().slice(0, 200);
           if (!note) throw err(400, "noteRequired"); // 誤操作防止：理由の記録を必須にする
-          const usesDelta = Math.round(Number(b.usesDelta || 0));
-          const extendDays = Math.round(Number(b.extendDays || 0));
+          const usesDelta = ticketInteger(b.usesDelta ?? 0, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+          const extendDays = ticketInteger(b.extendDays ?? 0, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+          const next = t.uses_left + usesDelta;
+          if (!Number.isSafeInteger(next) || next < 0 || next > ticketMaxLeft(t)) throw err(400, "outOfRange");
+          const nextExpiry = t.expires_at + extendDays * 86400e3;
+          if (!Number.isSafeInteger(nextExpiry) || !Number.isFinite(new Date(nextExpiry).getTime()) ||
+              !(nextExpiry >= Date.parse(t.purchased_at))) throw err(400, "outOfRange");
+          // 両方の検証が済んでから保存し、期限の入力ミスで回数だけ変わるのを防ぐ。
           if (usesDelta) {
-            const next = t.uses_left + usesDelta;
-            if (next < 0 || next > ticketMaxLeft(t)) throw err(400, "outOfRange");
             t.uses_left = next;
             t.history.push({ at: new Date().toISOString(), type: "adjust", delta: usesDelta, left_after: t.uses_left, note });
           }
           if (extendDays) {
             const before = t.expires_at;
-            t.expires_at += extendDays * 86400e3;
+            t.expires_at = nextExpiry;
             t.history.push({ at: new Date().toISOString(), type: "extend", delta: 0, left_after: t.uses_left,
               expires_before: before, expires_after: t.expires_at,
               note: `${note}（期限${extendDays > 0 ? "+" : ""}${extendDays}日）` });

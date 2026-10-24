@@ -18,6 +18,7 @@
   }
   .tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 22px;
     max-width: 980px;
     margin: 0 auto;
@@ -98,6 +99,30 @@
     main { padding: 12px 12px 96px; }
     .rowline { gap: 14px; }
   }
+
+  .mp-ticket-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:16px; }
+  .mp-ticket { min-width:0; padding:18px; border:1px solid #e5ddcf; border-radius:10px; background:#fff; }
+  .mp-ticket-title { display:flex; gap:12px; align-items:flex-start; justify-content:space-between; }
+  .mp-ticket-title h3 { margin:0; font-size:17px; line-height:1.5; overflow-wrap:anywhere; }
+  .mp-ticket-status { padding:3px 9px; border-radius:4px; background:#f2eadb; color:#7b5728; font-size:12px; white-space:nowrap; }
+  .mp-ticket-status.inactive { background:#f2f2f2; color:#666; }
+  .mp-ticket-scope { font-size:13px; line-height:1.65; margin:6px 0 10px; color:#65605a; overflow-wrap:anywhere; }
+  .mp-ticket-dates { display:flex; gap:8px 24px; flex-wrap:wrap; margin:0; font-size:13px; line-height:1.6; }
+  .mp-ticket-dates dt { color:#706b64; font-size:12px; margin-bottom:3px; }
+  .mp-ticket-dates dd { margin:0; }
+  .mp-ticket-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
+  .mp-ticket-bottom>strong { color:#80602b; font-size:21px; }
+  .mp-ticket-bottom .cn-ticket-use { background:#967039; min-width:100px; padding:9px 18px; }
+  .mp-ticket-more { font-size:12px; color:#655f56; margin-top:4px; }
+  .mp-ticket-more summary { cursor:pointer; width:fit-content; min-height:36px; display:flex; align-items:center; gap:8px; }
+  .mp-ticket-more summary::after { content:'＋'; } .mp-ticket-more[open] summary::after { content:'−'; }
+  .mp-ticket-more p { line-height:1.7; margin:4px 0; }
+  .mp-ticket-purchase>summary { padding:18px 22px; cursor:pointer; font-weight:600; }
+  .mp-ticket-purchase-note { padding:0 18px; font-size:13px; line-height:1.7; color:#666; }
+  .mp-ticket-buy { margin-top:12px; text-align:right; } .mp-ticket-buy .gold { background:white; border:1px solid #b79255; color:#805a25; font-size:14px; padding:10px 18px; min-height:44px; }
+  .mp-ticket-sale .mp-ticket-title { flex-wrap:wrap; } .mp-ticket-sale s { color:#777; font-size:12px; font-weight:400; }
+  .mp-ticket-area .cn-ticket-offer { font-size:13px; line-height:1.7; padding:12px 16px; margin:16px 16px 0; }
+  @media(max-width:640px) { .mp-ticket-grid {grid-template-columns:1fr;padding:12px;gap:10px;} .mp-ticket{padding:16px;} .mp-ticket-area .cn-ticket-offer{margin:12px 12px 0;} }
 </style>
 </head>
 <body>
@@ -419,46 +444,28 @@
 
   const jd = (iso) => { const ms = typeof iso === "number" ? iso : Date.parse(iso); return Number.isFinite(ms) ? new Date(ms + 9 * 3600e3).toISOString().slice(0, 10) : ""; };
   function ticketsView() {
-    const own = myTickets.map((tk) => {
-      const stCls = tk.status === "有効" ? "" : " gray";
+    const own = [...myTickets].sort((a, b) => Number(window.CNTickets.usable(b)) - Number(window.CNTickets.usable(a))).map((tk) => {
       const revival = tk.kind === "revival";
-      // 残数の根拠：復活分は「どの購入分から何回」、購入した券は「この購入で復活した回数」、元の券は「復活で移した回数」
-      const why = revival
-        ? (tk.revived_from || []).map((x) => esc(tr("{date}購入の「{plan}」から{n}回", { date: dateLabel(x.purchased_label), plan: plan(x.plan_name), n: x.count }))).join("<br>")
-        : "";
-      return '<div class="card">' +
-        '<div class="rowline"><span class="badge' + stCls + '">' + esc(tr(tk.status)) + '</span><span class="when">' + esc(plan(tk.plan_name)) + "</span></div>" +
-        '<div class="rowline"><span class="k">' + esc(tr("対象メニュー")) + "</span><span>" + esc(window.CNTickets.scope(tk)) + "</span></div>" +
-        '<div class="rowline"><span class="k">' + esc(tr(revival ? "復活した日" : "購入日")) + "</span><span>" + esc(window.CNTickets.date(tk.purchased_at)) + "</span></div>" +
-        '<div class="rowline"><span class="k">' + esc(tr(revival ? "復活した回数" : "利用可能回数")) + "</span><span>" + esc(tr("{n}回", { n: tk.uses_total })) + "</span></div>" +
-        (revival ? '<div class="rowline"><span class="k">' + esc(tr("内訳")) + "</span><span>" + esc(tr("前回までの購入分から復活")) + "<br>" + why + "</span></div>" : "") +
-        '<div class="rowline"><span class="k">' + esc(tr("残り回数")) + '</span><span><b style="font-size:16px">' + esc(tr("{n}回", { n: tk.uses_left })) + "</b>" +
-        esc(tk.revived_out
-          ? tr("（利用済み {n}回・期限切れ後に{m}回を新しい回数券へ復活）", { n: tk.used, m: tk.revived_out })
-          : tr("（利用済み {n}回）", { n: tk.used })) + "</span></div>" +
-        (tk.revival ? '<div class="rowline"><span class="k">' + esc(tr("復活")) + "</span><span>" + esc(tr("このご購入で、期限切れの未使用{n}回を復活しました（「復活分」の回数券）", { n: tk.revival.total })) + "</span></div>" : "") +
-        '<div class="rowline"><span class="k">' + esc(tr("有効期限")) + "</span><span>" + esc(window.CNTickets.date(tk.expires_at)) + "</span></div>" +
-        (window.CNTickets.usable(tk) ? '<div class="btnrow">' + window.CNTickets.useLink(tk) + '</div>' : '') +
-        "</div>";
+      const why = (tk.revived_from || []).map(x => esc(tr("{date}購入の「{plan}」から{n}回", { date: dateLabel(x.purchased_label), plan: plan(x.plan_name), n: x.count }))).join("<br>");
+      return '<article class="mp-ticket"><div class="mp-ticket-title"><h3>' + esc(plan(tk.plan_name)) + '</h3><span class="mp-ticket-status' + (window.CNTickets.usable(tk) ? '' : ' inactive') + '">' + esc(tr(tk.status)) + '</span></div>' +
+        '<p class="mp-ticket-scope">' + esc(tr("対象メニュー")) + '：' + esc(window.CNTickets.scope(tk)) + '</p>' +
+        '<dl class="mp-ticket-dates"><div><dt>' + esc(tr(revival ? "復活した日" : "購入日")) + '</dt><dd>' + esc(window.CNTickets.date(tk.purchased_at)) + '</dd></div><div><dt>' + esc(tr("有効期限")) + '</dt><dd>' + esc(window.CNTickets.date(tk.expires_at)) + '</dd></div></dl>' +
+        '<div class="mp-ticket-bottom"><strong>' + esc(tr("残り {n}回", { n: tk.uses_left })) + '</strong>' + window.CNTickets.useLink(tk) + '</div>' +
+        '<details class="mp-ticket-more"><summary>' + esc(tr("詳細を見る")) + '</summary><p>' + esc(tr("利用可能回数")) + '：' + esc(tr("{n}回", { n: tk.uses_total })) + ' ' +
+        esc(tk.revived_out ? tr("（利用済み {n}回・期限切れ後に{m}回を新しい回数券へ復活）", { n: tk.used, m: tk.revived_out }) : tr("（利用済み {n}回）", { n: tk.used })) + '</p>' +
+        (why ? '<p>' + why + '</p>' : '') + (tk.revival ? '<p>' + esc(tr("このご購入で、期限切れの未使用{n}回を復活しました（「復活分」の回数券）", { n: tk.revival.total })) + '</p>' : '') + '</details></article>';
     }).join("");
-    const plans = ticketPlans.map((pl) =>
-      '<div class="card">' +
-      '<div class="rowline"><span class="when">' + esc(plan(pl.name)) + "</span><span>" +
-      (pl.regular_price > pl.price ? '<s style="color:#999;margin-right:6px">' + esc(price(pl.regular_price)) + "</s>" : "") +
-      "<b>" + esc(price(pl.price)) + "</b></span></div>" +
-      '<div class="rowline"><span class="k">' + esc(tr("{uses}回分／有効期限は購入日から{valid}", { uses: pl.uses, valid: I18N ? I18N.validFor(pl.valid_label || "1年間") : (pl.valid_label || "1年間") })) + "</span></div>" +
-      (pl.menu_names && pl.menu_names.length ? '<div class="rowline"><span class="k">' + esc(tr("対象メニュー：{names}", { names: joinNames(pl.menu_names.map(menuName)) })) + "</span></div>" : "") +
-      '<p class="empty" style="margin:6px 0">' + esc(pl.description ? tr(pl.description) : "") + "</p>" +
-      '<div class="btnrow"><button type="button" class="gold" style="border:0;cursor:pointer" data-buy="' + esc(pl.id) + '">' + esc(tr("この回数券を購入")) + "</button></div>" +
-      "</div>").join("");
-    // ログイン中の会員だけが購入できる（判定はサーバー側でも必ず行う）
+    const plans = ticketPlans.map(pl => '<article class="mp-ticket mp-ticket-sale"><div class="mp-ticket-title"><h3>' + esc(plan(pl.name)) + '</h3><strong>' +
+      (pl.regular_price > pl.price ? '<s>' + esc(price(pl.regular_price)) + '</s> ' : '') + esc(price(pl.price)) + '</strong></div><p class="mp-ticket-scope">' +
+      esc(tr("{uses}回分／有効期限は購入日から{valid}", { uses: pl.uses, valid: I18N ? I18N.validFor(pl.valid_label || "1年間") : (pl.valid_label || "1年間") })) + '</p>' +
+      (pl.menu_names?.length ? '<p class="mp-ticket-scope">' + esc(tr("対象メニュー：{names}", { names: joinNames(pl.menu_names.map(menuName)) })) + '</p>' : '') +
+      (pl.description ? '<p class="mp-ticket-scope">' + esc(tr(pl.description)) + '</p>' : '') +
+      '<div class="mp-ticket-buy"><button type="button" class="gold" data-buy="' + esc(pl.id) + '">' + esc(tr("この回数券を購入")) + '</button></div></article>').join('');
     if (!member) return loginGate();
-    return '<div class="card"><h2>' + esc(tr("保有中の回数券")) + "</h2>" +
-      window.CNTickets.offer(memberData?.ticketSettings) +
-      (own || '<p class="empty">' + esc(tr("保有中の回数券はありません。")) + "</p>") + "</div>" +
-      '<div class="card"><h2>' + esc(tr("回数券のご購入")) + "</h2>" +
-      '<p class="empty" style="margin:0 0 8px">' + esc(ticketNote ? tr(ticketNote) : "") + "</p>" +
-      (plans || '<p class="empty">' + esc(tr("現在販売中の回数券はありません。")) + "</p>") + "</div>";
+    return '<div class="card mp-ticket-area"><h2>' + esc(tr("保有中の回数券")) + '</h2>' + window.CNTickets.offer(memberData?.ticketSettings) +
+      '<div class="mp-ticket-grid">' + (own || '<p class="empty">' + esc(tr("保有中の回数券はありません。")) + '</p>') + '</div></div>' +
+      '<details class="card mp-ticket-purchase"' + (!myTickets.some(t => window.CNTickets.usable(t)) ? ' open' : '') + '><summary>' + esc(tr("回数券のご購入")) + '</summary>' +
+      (ticketNote ? '<p class="mp-ticket-purchase-note">' + esc(tr(ticketNote)) + '</p>' : '') + '<div class="mp-ticket-grid">' + (plans || '<p class="empty">' + esc(tr("現在販売中の回数券はありません。")) + '</p>') + '</div></details>';
   }
 
   // 会員情報・パスワードの変更（フォーム送信）

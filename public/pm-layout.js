@@ -2442,16 +2442,17 @@
     wrap.id = "pm-ticket-modal";
     wrap.innerHTML =
       '<section role="dialog" aria-modal="true">' +
-      '<header class="pm-ticket-head"><h2>店舗マスタ｜回数券管理</h2><button type="button" id="pm-tk-close-top" aria-label="回数券管理を閉じる">閉じる ×</button></header>' +
-      '<p class="pm-shop-sub">回数券の作成・編集・公開/非公開と、お客様が保有する回数券の残り回数・利用履歴・復活・期限前リマインドの確認ができます。残数の手動変更は必ず履歴に残ります。</p>' +
+      '<header class="pm-ticket-head"><h2>回数券管理</h2><button type="button" id="pm-tk-close-top" aria-label="回数券管理を閉じる">閉じる ×</button></header>' +
+      '<div class="pm-tk-tabs" role="tablist" aria-label="回数券の操作"><button type="button" role="tab" id="pm-tk-owned-tab" aria-controls="pm-tk-owned-panel" aria-selected="true" data-ticket-tab="owned">お客様の回数券</button><button type="button" role="tab" id="pm-tk-settings-tab" aria-controls="pm-tk-settings-panel" aria-selected="false" tabindex="-1" data-ticket-tab="settings">販売・設定</button></div>' +
+      '<div id="pm-tk-settings-panel" role="tabpanel" aria-labelledby="pm-tk-settings-tab" hidden>' +
       "<h3 class=\"pm-tk-h\">回数券プラン</h3>" +
-      '<div class="pm-menu-new">' +
+      '<details class="pm-tk-section"><summary>新しい回数券を追加</summary><div class="pm-menu-new">' +
       '<input type="text" id="pm-tk-name" placeholder="回数券の名称（例：回数券 5回券）" maxlength="120">' +
       '<input type="number" id="pm-tk-price" placeholder="価格(円)" min="0" step="100">' +
       '<input type="number" id="pm-tk-uses" placeholder="回数" min="1" max="200">' +
       '<span class="pm-tk-fixed">追加したあと、下で有効期限・説明文・対象メニューなどを細かく設定できます</span>' +
       '<button type="button" class="pm-red" id="pm-tk-add">追加</button>' +
-      "</div>" +
+      "</div></details>" +
       '<div class="pm-tk-plans">読み込み中…</div>' +
       '<details class="pm-tk-section"><summary>期限切れ分の復活について</summary><p class="pm-tk-note">【期限切れ分の復活】会員が回数券を購入すると、その会員の期限切れの回数券のうち<b>「復活の組」と「対象メニュー」が同じもの</b>の未使用回数を、' +
       "「復活分」の回数券として、新しく購入した回数券と同じ有効期限で使えるようにします（元の購入・利用の記録はそのまま残ります）。復活の組が空欄のプランは、同じプランどうしだけが対象です。</p></details>" +
@@ -2459,8 +2460,9 @@
       '<div class="pm-tk-site">読み込み中…</div></details>' +
       '<details class="pm-tk-section"><summary>有効期限前のリマインドメール</summary>' +
       '<div class="pm-tk-remind">読み込み中…</div></details>' +
-      "<h3 class=\"pm-tk-h\">お客様の保有回数券</h3>" +
-      '<div class="pm-tk-list">読み込み中…</div>' +
+      '</div><div id="pm-tk-owned-panel" role="tabpanel" aria-labelledby="pm-tk-owned-tab">' +
+      '<div class="pm-tk-toolbar"><label>お客様・回数券を探す<input type="search" class="pm-tk-search" data-ui-only placeholder="お名前・メール・券名" aria-label="お客様・回数券を探す"></label><span class="pm-tk-count" aria-live="polite"></span></div>' +
+      '<div class="pm-tk-list">読み込み中…</div><p class="pm-tk-no-match" hidden>該当する回数券がありません。</p></div>' +
       '<div class="pm-shop-actions"><button type="button" id="pm-tk-close">閉じる</button></div>' +
       "</section>";
     document.body.appendChild(wrap);
@@ -2474,7 +2476,7 @@
     const previousFocus = document.activeElement;
     const close = () => {
       if (wrap.getAttribute("aria-busy") === "true") return;
-      const dirty = [...wrap.querySelectorAll("input,textarea,select")].some(el => el.type === "checkbox" ? el.checked !== el.defaultChecked : el.tagName === "SELECT" ? el.value !== ([...el.options].find(o => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue);
+      const dirty = [...wrap.querySelectorAll("input:not([data-ui-only]),textarea,select")].some(el => el.type === "checkbox" ? el.checked !== el.defaultChecked : el.tagName === "SELECT" ? el.value !== ([...el.options].find(o => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue);
       if (dirty && !window.confirm("保存していない変更を破棄して閉じますか？")) return;
       wrap.remove(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };
@@ -2490,6 +2492,27 @@
       return new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
     };
 
+    function filterTickets() {
+      const q = wrap.querySelector('.pm-tk-search').value.trim().toLocaleLowerCase(); let found = 0;
+      wrap.querySelectorAll('.pm-tk-mainrow').forEach(row => {
+        const match = !q || row.dataset.search.includes(q); row.hidden = !match;
+        if (match) found++;
+        else { row.nextElementSibling.hidden = true; row.nextElementSibling.nextElementSibling.hidden = true; row.querySelector('.tk-hist')?.setAttribute('aria-expanded', 'false'); }
+      });
+      wrap.querySelector('.pm-tk-count').textContent = found + '件';
+      wrap.querySelector('.pm-tk-no-match').hidden = !q || found > 0;
+    }
+    wrap.querySelector('.pm-tk-search').addEventListener('input', filterTickets);
+    function showTicketTab(key) {
+      wrap.querySelectorAll('[data-ticket-tab]').forEach(button => { const selected = button.dataset.ticketTab === key; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; });
+      wrap.querySelector('#pm-tk-owned-panel').hidden = key !== 'owned';
+      wrap.querySelector('#pm-tk-settings-panel').hidden = key !== 'settings';
+    }
+    wrap.querySelector('.pm-tk-tabs').addEventListener('keydown', e => {
+      if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return; e.preventDefault();
+      const key = e.key === 'Home' ? 'owned' : e.key === 'End' ? 'settings' : e.target.dataset.ticketTab === 'owned' ? 'settings' : 'owned';
+      showTicketTab(key); wrap.querySelector('[data-ticket-tab="' + key + '"]').focus();
+    });
     let courses = [];
     const dt16 = (ms) => ms ? new Date(ms + 9 * 3600e3).toISOString().replace("T", " ").slice(0, 16) : "-";
     async function loadPlans() {
@@ -2625,9 +2648,9 @@
       const box = wrap.querySelector(".pm-tk-list");
       try {
         const tks = (await (await fetch("/api/demo/tickets", { cache: "no-store" })).json()).tickets || [];
-        if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; return; }
+        if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; filterTickets(); return; }
         box.innerHTML =
-          '<table class="pm-tk-table"><thead><tr><th>顧客名</th><th>回数券</th><th>購入日</th><th>初期</th><th>利用済</th><th>残り</th><th>有効期限</th><th>期限リマインド</th><th>状態</th><th></th></tr></thead><tbody>' +
+          '<table class="pm-tk-table pm-tk-owned-table"><thead><tr><th>お客様</th><th>回数券</th><th>残り</th><th>有効期限</th><th>操作</th></tr></thead><tbody>' +
           tks.map((t) => {
             // 復活の内訳（どの購入分から何回／この購入で何回復活／新しい券へ何回移したか）
             const rvInfo = t.kind === "revival"
@@ -2636,13 +2659,12 @@
                 (t.revived_out ? '<br><small class="pm-tk-rv">未使用' + t.revived_out + "回を復活済み（" + t.revived_to.map((x) => esc(x.ticket_id)).join("・") + "へ）</small>" : "");
             const rp = (t.remind_plan || []).map((r) => (r.days === 1 ? "前日" : r.days + "日前") + "：" +
               (r.merged ? "同じ期限の券とまとめて" : "") + ({ waiting: dt16(r.dueAt).slice(5) + "予定", sent: "送信済み", failed: "送信失敗", skipped: "送信中止", pending: "送信予定", sending: "送信中", superseded: "省略", legacy: "送信済み", queued: "送信予定" }[r.state] || r.state)).join("<br>");
-            return '<tr data-tk="' + esc(t.id) + '"><td>' + esc(t.buyer_name) + "<br><small>" + esc(t.buyer_email) + "</small></td>" +
-            "<td>" + (t.kind === "revival" ? '<span class="pm-tk-badge">復活分</span> ' : "") + esc(t.plan_name) + "<br><small>" + esc(t.id) + "</small><br><small>対象：" + esc(t.menu_scope === 'all' ? 'すべてのメニュー' : (t.menu_names || []).filter(Boolean).join('・') || '対象メニューを確認してください') + "</small>" + rvInfo + "</td><td>" + jd(t.purchased_at) + "</td>" +
-            "<td>" + t.uses_total + "回</td><td>" + t.used + "回</td><td><b>" + t.uses_left + "回</b></td>" +
-            "<td>" + jd(t.expires_at) + "</td><td><small>" + (rp || (t.remind_sent ? "送信済み" : "対象外")) + "</small></td><td>" + esc(t.status) + "</td>" +
-            '<td>' + (t.status === '有効' && t.uses_left > 0 && t.expires_at >= Date.now() ? '<button type="button" class="tk-book pm-red">予約する</button> ' : '') + '<button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-mail">メール</button> <button type="button" class="tk-adj">調整</button>' +
-            (t.kind !== "revival" && !(t.revival && t.revival.total) ? ' <button type="button" class="tk-revive-run" title="この購入に対して、期限切れの未使用分を復活できるか確認します（同じ購入で二重に復活はしません）">復活確認</button>' : "") + "</td></tr>" +
-            '<tr class="pm-tk-histrow" hidden><td colspan="10">' +
+            return '<tr class="pm-tk-mainrow" data-tk="' + esc(t.id) + '" data-search="' + esc([t.buyer_name, t.buyer_email, t.plan_name, t.id].join(' ').toLocaleLowerCase()) + '"><td class="pm-tk-customer"><b>' + esc(t.buyer_name) + '</b></td>' +
+            '<td class="pm-tk-ticket"><b>' + esc(t.plan_name) + '</b><small>購入 ' + jd(t.purchased_at) + '</small><small>' + esc(t.menu_scope === 'all' ? 'すべてのメニュー' : (t.menu_names || []).filter(Boolean).join('・') || '対象メニューを確認してください') + '</small></td>' +
+            '<td class="pm-tk-balance"><b>' + t.uses_left + '回</b><small>' + esc(t.status) + '</small></td><td class="pm-tk-expiry">' + jd(t.expires_at) + '</td>' +
+            '<td class="pm-tk-ops">' + (t.status === '有効' && t.uses_left > 0 && t.expires_at >= Date.now() && (t.menu_scope === 'all' || t.menu_names?.some(Boolean)) ? '<button type="button" class="tk-book pm-red">予約する</button>' : '') + '<button type="button" class="tk-hist" aria-expanded="false">詳細</button></td></tr>' +
+            '<tr class="pm-tk-histrow" data-tk="' + esc(t.id) + '" hidden><td colspan="5"><div class="pm-tk-record-meta">' + esc(t.buyer_email) + ' ／ ' + esc(t.id) + '<br>購入 ' + jd(t.purchased_at) + ' ／ 初期 ' + t.uses_total + '回・利用済み ' + t.used + '回' + rvInfo + '<br>期限のお知らせ：' + (rp || '対象外') + '</div><div class="pm-tk-record-actions"><button type="button" class="tk-mail">メールを確認</button> <button type="button" class="tk-adj">回数・期限を調整</button>' +
+            (t.kind !== 'revival' && !(t.revival && t.revival.total) ? ' <button type="button" class="tk-revive-run">期限切れ分の復活を確認</button>' : '') + '</div><b>利用・変更の履歴</b><br>' +
             (Array.isArray(t.history) ? t.history : []).map((h) =>
               esc(String(h.at).replace("T", " ").slice(0, 16)) + "　" +
               ({ purchase: "購入", use: "利用", refund: "返却", adjust: "残数調整", extend: "期限変更",
@@ -2653,9 +2675,10 @@
               (h.note ? "　※" + esc(h.note) : "")).join("<br>") +
             "</td></tr>" +
             // この回数券について送ったメールと、送信時点の残り回数・有効期限（台帳と照合）
-            '<tr class="pm-tk-mailrow" hidden><td colspan="10">' + ticketMailsHtml(t) + "</td></tr>";
+            '<tr class="pm-tk-mailrow" hidden><td colspan="5">' + ticketMailsHtml(t) + "</td></tr>";
           }).join("") +
           "</tbody></table>";
+        filterTickets();
       } catch { box.textContent = "読み込みに失敗しました"; }
     }
     loadPlans();
@@ -2680,6 +2703,7 @@
         wrap.querySelectorAll("button,input,textarea,select").forEach(el => { el.dataset.tkWasDisabled = el.disabled ? "1" : "0"; el.disabled = true; });
       }
       try {
+      const tab = e.target.closest('[data-ticket-tab]'); if (tab) { showTicketTab(tab.dataset.ticketTab); return; }
       const planRow = e.target.closest("[data-plan]");
       if (planRow && e.target.classList.contains("tk-detail-toggle")) {
         const details = planRow.querySelector(".pm-tk-details"); details.hidden = !details.hidden; e.target.setAttribute("aria-expanded", String(!details.hidden)); e.target.textContent = details.hidden ? "詳細設定" : "詳細を閉じる"; return;
@@ -2693,7 +2717,7 @@
         };
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { window.alert("名称・価格・回数（1〜200）を確認してください。"); return; }
-        wrap.querySelector("#pm-tk-name").value = "";
+        ['#pm-tk-name', '#pm-tk-price', '#pm-tk-uses'].forEach(selector => { const field = wrap.querySelector(selector); field.value = ''; field.defaultValue = ''; });
         loadPlans();
         return;
       }
@@ -2788,14 +2812,15 @@
         loadPlans();
         return;
       }
-      const tkRow = e.target.closest("[data-tk]");
+      let tkRow = e.target.closest("[data-tk]");
+      if (tkRow?.classList.contains('pm-tk-histrow')) tkRow = tkRow.previousElementSibling;
       if (tkRow && e.target.classList.contains("tk-book")) {
         if (!window.__pmOpenBookingEditor) { window.alert("予約画面を読み込めませんでした。画面を開き直してください。"); return; }
         window.__pmOpenBookingEditor({ ticketId: tkRow.dataset.tk, onSaved: loadTickets }); return;
       }
       if (tkRow && e.target.classList.contains("tk-hist")) {
         const hist = tkRow.nextElementSibling;
-        if (hist) hist.hidden = !hist.hidden;
+        if (hist) { hist.hidden = !hist.hidden; e.target.setAttribute('aria-expanded', String(!hist.hidden)); if (hist.hidden) hist.nextElementSibling.hidden = true; }
         return;
       }
       if (tkRow && e.target.classList.contains("tk-mail")) {
@@ -2816,14 +2841,15 @@
         if (d === null) return;
         const ext = window.prompt("有効期限を延ばす日数を入力してください（例：30、短くする場合は -7。変更しない場合は0）", "0");
         if (ext === null) return;
+        if (![d, ext].every(v => v.trim() && Number.isSafeInteger(Number(v)))) { window.alert("回数と日数は整数で入力してください。"); return; }
         if (!(Number(d) || Number(ext))) { window.alert("変更する内容がありません。"); return; }
         const note = window.prompt("調整理由（必須・履歴に残ります）", "");
-        if (!note) { window.alert("調整理由は必須です。"); return; }
+        if (!note?.trim()) { window.alert("調整理由は必須です。"); return; }
         const r = await fetch("/api/demo/tickets", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "adjust", id: tkRow.dataset.tk, usesDelta: Number(d) || 0, extendDays: Number(ext) || 0, note }) });
+          body: JSON.stringify({ action: "adjust", id: tkRow.dataset.tk, usesDelta: Number(d), extendDays: Number(ext), note: note.trim() }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
-          window.alert(j.error === "outOfRange" ? "残り回数は0〜初期回数の範囲でしか変更できません。" : "調整できませんでした。");
+          window.alert(j.error === "outOfRange" ? "残り回数または有効期限が変更できる範囲を超えています。入力を確認してください。" : "調整できませんでした。");
           return;
         }
         loadTickets();

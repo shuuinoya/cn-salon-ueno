@@ -60,7 +60,8 @@
     try { if (memoryChoice) sessionStorage.setItem(choiceKey, JSON.stringify({ id: memoryChoice, at: Date.now() })); else sessionStorage.removeItem(choiceKey); } catch {}
   }
   function useLink(ticket) {
-    return usable(ticket) ? '<a class="cn-ticket-use" href="' + esc(bookingHref(ticket)) + '">' + esc(tr("使用する")) + '</a>' : "";
+    const hasMenu = ticket?.menu_scope === 'all' || ticket?.menu_names?.some(name => !!name);
+    return usable(ticket) && hasMenu ? '<a class="cn-ticket-use" href="' + esc(bookingHref(ticket)) + '">' + esc(tr("使用する")) + '</a>' : "";
   }
   if (typeof location !== "undefined" && location.pathname && !location.pathname.startsWith("/book")) choose("");
   window.CNTickets = { date, scope, summary, offer, bookingHref, usable, allows, bookingIssue, choice, choose, useLink };

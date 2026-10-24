@@ -17,6 +17,7 @@
 
   /* 辞書 */
   const D = {
+    "詳細を見る": ["View details", "查看详情", "상세 보기", "Voir les détails", "Ver detalles", "Vedi dettagli", "Details ansehen"],
     "使用する": ["Use", "使用", "사용하기", "Utiliser", "Usar", "Usa", "Verwenden"],
     "選択した回数券は現在使用できません。回数券を選び直してください。": ["This pass cannot be used now. Please choose another pass.", "所选次数卡目前无法使用，请重新选择。", "선택한 이용권은 현재 사용할 수 없습니다. 이용권을 다시 선택해 주세요.", "Ce forfait ne peut pas être utilisé actuellement. Veuillez en choisir un autre.", "Este bono no se puede usar ahora. Elige otro bono.", "Questo carnet non è attualmente utilizzabile. Scegli un altro carnet.", "Diese Mehrfachkarte ist derzeit nicht verwendbar. Bitte wählen Sie eine andere."],
     "回数券は1名の予約で使用できます。人数を1名に戻してください。": ["Passes can be used for one-person bookings. Please set the number of people to one.", "次数卡仅限1人预约使用，请将人数改为1人。", "이용권은 1명 예약에 사용할 수 있습니다. 인원을 1명으로 변경해 주세요.", "Les forfaits sont utilisables pour une réservation d’une personne. Veuillez sélectionner une personne.", "Los bonos se pueden usar en reservas de una persona. Cambia el número de personas a una.", "I carnet si possono usare per prenotazioni di una persona. Imposta il numero di persone su uno.", "Mehrfachkarten können für Buchungen für eine Person verwendet werden. Bitte wählen Sie eine Person."],

@@ -139,8 +139,10 @@ function post(state, body, actor, c) {
     useTicket = c.ticketForAdmin(body.ticketId, text(body.email, 254), services[0].courseId, now);
   }
   if (old?.ticket_id && (people !== (old.people || 1) || services.length !== oldServices.length ||
-      services.some((s, i) => s.courseId !== oldServices[i].courseId || s.discountType !== oldServices[i].discountType || s.discount !== oldServices[i].discount) ||
+      services.some((s, i) => s.courseId !== oldServices[i].courseId || s.discountType !== oldServices[i].discountType || s.discount !== oldServices[i].discount ||
+        s.minutesBefore + s.minutesBody + s.minutesAfter !== oldServices[i].minutesBefore + oldServices[i].minutesBody + oldServices[i].minutesAfter) ||
       bulkType !== (old.bulk_discount_type || "none") || bulkValue !== (old.bulk_discount || 0))) throw c.err(409, "hasTicket");
+  if (old?.ticket_id && text(body.email, 254).toLowerCase() !== String(old.email || "").trim().toLowerCase()) throw c.err(409, "ticketOwner");
   const amount = (old?.ticket_id || useTicket ? 0 : serviceTotal) + (old?.source !== "hotpepper" && start >= 1320 ? 2000 * people : 0) + fee;
   if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1000000000) throw c.err(400, "invalid");
   if (old && (old.paid_at || old.paid_amount > 0) && amount !== old.total) throw c.err(409, "alreadyPaid");
