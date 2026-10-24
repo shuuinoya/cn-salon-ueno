@@ -26,6 +26,33 @@ check(() => assert.equal(scope(t, [{ id: 'course-a', name: '変更後のメニ�
 check(() => assert.match(scope(t, []), /未登録メニュー/));
 check(() => assert.match(scope({ menu_scope: [] }, []), /確認/));
 
+// 保有券が販売設定より先に届いても、販売終了と誤表示しない。取得失敗も0人にしない。
+const fields = new Map(), contextText = {}, contextButton = {}, holderButton = { dataset: { planId: 'plan-a' } };
+context.wrap = {
+  querySelector(selector) {
+    if (!fields.has(selector)) fields.set(selector, { value: '', querySelector: key => key === 'span' ? contextText : contextButton });
+    return fields.get(selector);
+  },
+  querySelectorAll: selector => selector === '.tk-holders' ? [holderButton] : [],
+};
+Object.assign(context, { plans: [], ownedTickets: [t], courses: [], selectedPlan: 'plan-a', ticketsLoaded: true, ticketsFailed: false, plansLoaded: false, plansFailed: false, esc: String });
+vm.runInContext(source.slice(source.indexOf('    function filterTickets()'), source.indexOf("    wrap.querySelector('.pm-tk-search').addEventListener")) + source.slice(source.indexOf('    function refreshTicketFilters()'), source.indexOf('    function openPlanSettings(')), context);
+context.refreshTicketFilters();
+check(() => assert(!fields.get('.pm-tk-plan-filter').innerHTML.includes('販売終了')));
+check(() => assert.equal(contextText.textContent, '回数券の設定を確認中'));
+context.plansFailed = true; context.refreshTicketFilters();
+check(() => assert.match(contextText.textContent, /読み込めません/));
+check(() => assert(!fields.get('.pm-tk-plan-filter').innerHTML.includes('販売終了')));
+context.plansLoaded = true; context.plansFailed = false; context.refreshTicketFilters();
+check(() => assert(fields.get('.pm-tk-plan-filter').innerHTML.includes('販売終了')));
+context.plans = [{ id: 'plan-a', name: '更新後の販売名' }]; context.refreshTicketFilters();
+check(() => assert.equal(contextText.textContent, '更新後の販売名 のお客様'));
+check(() => assert.equal(holderButton.textContent, '保有者を見る（1人）'));
+context.ticketsLoaded = false; context.ticketsFailed = true; context.refreshTicketFilters();
+check(() => assert.equal(fields.get('.pm-tk-count').textContent, '確認できません'));
+check(() => assert.equal(holderButton.textContent, '保有者を確認できません'));
+check(() => assert.equal(holderButton.disabled, true));
+
 (async () => {
   const root = fs.realpathSync(process.argv[2]); assert(root.startsWith('/private/tmp/')); assert(!fs.existsSync(path.join(root, 'mail-config.json')));
   for (const key of Object.keys(process.env)) if (/^(MAIL_|GH_|ADMIN_PASS)/.test(key)) delete process.env[key];

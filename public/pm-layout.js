@@ -2514,7 +2514,7 @@
       return new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
     };
 
-    let plans = [], ownedTickets = [], ticketsLoaded = false;
+    let plans = [], ownedTickets = [], plansLoaded = false, plansFailed = false, ticketsLoaded = false, ticketsFailed = false;
     let selectedPlan = String(options.planId || '');
     function filterTickets() {
       const filter = { query: wrap.querySelector('.pm-tk-search').value, plan: selectedPlan, menu: wrap.querySelector('.pm-tk-menu-filter').value, status: wrap.querySelector('.pm-tk-status-filter').value };
@@ -2523,11 +2523,11 @@
         const match = ids.has(row.dataset.tk); row.hidden = !match;
         if (!match) { row.nextElementSibling.hidden = true; row.nextElementSibling.nextElementSibling.hidden = true; row.querySelector('.tk-hist')?.setAttribute('aria-expanded', 'false'); }
       });
-      wrap.querySelector('.pm-tk-count').textContent = ticketsLoaded ? new Set(matched.map(ticketOwnerKey)).size + '人 ／ ' + matched.length + '枚' : '確認中';
+      wrap.querySelector('.pm-tk-count').textContent = ticketsLoaded ? new Set(matched.map(ticketOwnerKey)).size + '人 ／ ' + matched.length + '枚' : ticketsFailed ? '確認できません' : '確認中';
       wrap.querySelector('.pm-tk-no-match').hidden = !ticketsLoaded || matched.length > 0 || !(filter.query.trim() || selectedPlan || filter.menu || filter.status);
       const context = wrap.querySelector('.pm-tk-filter-context'), plan = plans.find(p => p.id === selectedPlan);
       context.hidden = !selectedPlan;
-      context.querySelector('span').textContent = plan ? plan.name + ' のお客様' : '販売終了・削除済みの回数券の記録';
+      context.querySelector('span').textContent = plan ? plan.name + ' のお客様' : plansLoaded ? '販売終了・削除済みの回数券の記録' : plansFailed ? '回数券の設定を読み込めませんでした。画面を開き直してください。' : '回数券の設定を確認中';
       context.querySelector('button').hidden = !plan;
     }
     wrap.querySelector('.pm-tk-search').addEventListener('input', filterTickets);
@@ -2535,7 +2535,7 @@
     ['.pm-tk-menu-filter', '.pm-tk-status-filter'].forEach(s => wrap.querySelector(s).addEventListener('change', filterTickets));
     function refreshTicketFilters() {
       const choices = new Map(plans.map(p => [p.id, p.name]));
-      ownedTickets.forEach(t => { if (!choices.has(t.plan_id)) choices.set(t.plan_id, '販売終了：' + t.plan_name); });
+      ownedTickets.forEach(t => { if (!choices.has(t.plan_id)) choices.set(t.plan_id, (plansLoaded ? '販売終了：' : '') + t.plan_name); });
       const names = new Map(); choices.forEach(name => names.set(name, (names.get(name) || 0) + 1));
       wrap.querySelector('.pm-tk-plan-filter').innerHTML = '<option value="">すべての回数券</option>' + [...choices].map(([id, name]) => '<option value="' + esc(id) + '">' + esc(name + (names.get(name) > 1 ? '（' + id + '）' : '')) + '</option>').join('');
       wrap.querySelector('.pm-tk-plan-filter').value = selectedPlan;
@@ -2544,7 +2544,7 @@
       menu.innerHTML = '<option value="">すべてのメニュー</option>' + [...menus].map(([id, name]) => '<option value="' + esc(id) + '">' + esc(name) + '</option>').join(''); menu.value = previous;
       wrap.querySelectorAll('.tk-holders').forEach(button => {
         const count = new Set(ownedTickets.filter(t => t.plan_id === button.dataset.planId).map(ticketOwnerKey)).size;
-        button.textContent = ticketsLoaded ? '保有者を見る（' + count + '人）' : '保有者を確認中'; button.disabled = !ticketsLoaded;
+        button.textContent = ticketsLoaded ? '保有者を見る（' + count + '人）' : ticketsFailed ? '保有者を確認できません' : '保有者を確認中'; button.disabled = !ticketsLoaded;
       });
       filterTickets();
     }
@@ -2574,7 +2574,7 @@
         if (!response.ok) throw new Error('load'); const j = await response.json();
         const courseResponse = await fetch("/api/demo/courses", { cache: "no-store" });
         if (!courseResponse.ok) throw new Error('load'); courses = (await courseResponse.json()).courses || [];
-        plans = j.plans || [];
+        plans = j.plans || []; plansLoaded = true; plansFailed = false;
         box.innerHTML = plans.length ? plans.map((p2, idx) => {
           const some = Array.isArray(p2.menu_scope);
           const months = p2.valid_months || 12;
@@ -2616,7 +2616,7 @@
         renderRemind(j);
         refreshTicketFilters();
         if (options.tab === 'settings' && options.planId) { openPlanSettings(options.planId); options = { ...options, planId: '' }; }
-      } catch { box.textContent = "読み込みに失敗しました"; }
+      } catch { plansFailed = true; box.textContent = "読み込みに失敗しました"; refreshTicketFilters(); }
     }
     const RESEND_ERR = { alreadyResent: "このメールはすでに再送しています。", notFailed: "送信失敗のメールだけ再送できます。", hasSecret: "パスワードを含むメールは再送できません。",
       bookingGone: "予約が見つからないため再送できません。", bookingChanged: "予約の状態が変わった（取消・復活など）ため、このメールは再送できません。", cannotResend: "このメールは再送できません。" };
@@ -2710,7 +2710,7 @@
         if (!response.ok) throw new Error('load');
         const tks = (await response.json()).tickets;
         if (!Array.isArray(tks)) throw new Error('load');
-        ownedTickets = tks; ticketsLoaded = true;
+        ownedTickets = tks; ticketsLoaded = true; ticketsFailed = false;
         if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; refreshTicketFilters(); return; }
         box.innerHTML =
           '<table class="pm-tk-table pm-tk-owned-table"><thead><tr><th>お客様</th><th>回数券</th><th>残り</th><th>有効期限</th><th>操作</th></tr></thead><tbody>' +
@@ -2742,7 +2742,7 @@
           }).join("") +
           "</tbody></table>";
         refreshTicketFilters();
-      } catch { ticketsLoaded = false; box.textContent = "読み込みに失敗しました。画面を開き直してください。"; refreshTicketFilters(); wrap.querySelector('.pm-tk-count').textContent = '確認できません'; }
+      } catch { ticketsLoaded = false; ticketsFailed = true; box.textContent = "読み込みに失敗しました。画面を開き直してください。"; refreshTicketFilters(); }
     }
     loadPlans();
     loadTickets();
