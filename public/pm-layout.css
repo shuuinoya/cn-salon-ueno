@@ -2277,6 +2277,14 @@ main.ledger-app .pm-lockbtn:hover { background-color:#efe7da; }
 .pm-tk-filter-context {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;background:#f7f3eb;margin-bottom:12px;}
 .pm-tk-filter-context span {overflow-wrap:anywhere;min-width:0;}.pm-tk-filter-context button {flex-shrink:0;}
 .pm-tk-plan-scope {font-size:12px;color:#655d54;overflow-wrap:anywhere;margin:6px 0;}
+#pm-ticket-modal .pm-tk-title-edit {display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin:10px 0;}
+#pm-ticket-modal .pm-tk-title-edit label {display:grid;gap:5px;flex:1 1 240px;min-width:0;font-size:13px;font-weight:600;color:#6b5b4b;}
+#pm-ticket-modal .pm-tk-title-edit input {width:100%;min-width:0;box-sizing:border-box;font-size:16px;min-height:40px;}
+#pm-ticket-modal .pm-tk-title-edit button {min-height:40px;white-space:nowrap;}
+#pm-ticket-modal .tk-name-status {font-size:12px;color:#22612a;align-self:center;}
+#pm-ticket-modal .pm-tk-new select {width:100%;min-width:0;box-sizing:border-box;min-height:40px;font:inherit;font-size:14px;}
+#pm-ticket-modal .pm-tk-new>button {align-self:end;min-height:40px;}
+#pm-ticket-modal .pm-tk-new-note {grid-column:1/-1;font-size:12px;line-height:1.6;color:#6b6257;margin:0;}
 #pm-ticket-modal .tk-holders {min-height:40px;margin-top:4px;}
 .pm-tk-preview .pv-scope {display:block;overflow-wrap:anywhere;}
 .pm-mn-ticket-section {margin:12px 0 20px;padding:12px;border:1px solid #e5d9cd;border-radius:8px;}

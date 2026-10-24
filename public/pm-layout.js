@@ -2465,12 +2465,13 @@
       '<div class="pm-tk-tabs" role="tablist" aria-label="回数券の操作"><button type="button" role="tab" id="pm-tk-owned-tab" aria-controls="pm-tk-owned-panel" aria-selected="true" data-ticket-tab="owned">お客様の回数券</button><button type="button" role="tab" id="pm-tk-settings-tab" aria-controls="pm-tk-settings-panel" aria-selected="false" tabindex="-1" data-ticket-tab="settings">販売・設定</button></div>' +
       '<div id="pm-tk-settings-panel" role="tabpanel" aria-labelledby="pm-tk-settings-tab" hidden>' +
       "<h3 class=\"pm-tk-h\">回数券プラン</h3>" +
-      '<details class="pm-tk-section"><summary>新しい回数券を追加</summary><div class="pm-menu-new">' +
-      '<input type="text" id="pm-tk-name" placeholder="回数券の名称（例：回数券 5回券）" maxlength="120">' +
-      '<input type="number" id="pm-tk-price" placeholder="価格(円)" min="0" step="100">' +
-      '<input type="number" id="pm-tk-uses" placeholder="回数" min="1" max="200">' +
-      '<span class="pm-tk-fixed">追加したあと、下で有効期限・説明文・対象メニューなどを細かく設定できます</span>' +
-      '<button type="button" class="pm-red" id="pm-tk-add">追加</button>' +
+      '<details class="pm-tk-section"><summary>メニュー別の回数券を追加</summary><div class="pm-tk-new pm-tk-grid">' +
+      '<label class="w3">対象メニュー<select id="pm-tk-new-menu"><option value="">メニューを選択</option></select></label>' +
+      '<label class="w3">回数券のタイトル<input type="text" id="pm-tk-name" placeholder="例：全身整体60分 5回券・小顔矯正 5回券" maxlength="120"></label>' +
+      '<label>販売価格（円）<input type="number" id="pm-tk-price" min="0" step="100"></label>' +
+      '<label>利用回数<input type="number" id="pm-tk-uses" min="1" max="200"></label>' +
+      '<button type="button" class="pm-red" id="pm-tk-add">回数券を追加</button>' +
+      '<p class="pm-tk-new-note">有効期限は購入日から12か月。追加後の「詳細設定」で期限や複数の対象メニューを変更できます。</p>' +
       "</div></details>" +
       '<div class="pm-tk-plans">読み込み中…</div>' +
       '<details class="pm-tk-section"><summary>期限切れ分の復活について</summary><p class="pm-tk-note">【期限切れ分の復活】会員が回数券を購入すると、その会員の期限切れの回数券のうち<b>「復活の組」と「対象メニュー」が同じもの</b>の未使用回数を、' +
@@ -2575,6 +2576,9 @@
         const courseResponse = await fetch("/api/demo/courses", { cache: "no-store" });
         if (!courseResponse.ok) throw new Error('load'); courses = (await courseResponse.json()).courses || [];
         plans = j.plans || []; plansLoaded = true; plansFailed = false;
+        const newMenu = wrap.querySelector('#pm-tk-new-menu'), chosenMenu = newMenu.value;
+        newMenu.innerHTML = '<option value="">メニューを選択</option><option value="all">すべてのメニュー共通</option>' + courses.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
+        newMenu.value = chosenMenu;
         box.innerHTML = plans.length ? plans.map((p2, idx) => {
           const some = Array.isArray(p2.menu_scope);
           const months = p2.valid_months || 12;
@@ -2583,10 +2587,10 @@
           '<span class="pm-tk-tags">' + (p2.active ? '<span class="on">販売中</span>' : '<span class="off">非公開</span>') +
           (p2.active && p2.show_banner !== false ? '<span class="on">予約・メニューの最上部に表示</span>' : "") + "</span>" +
           '<span class="pm-tk-order"><button type="button" class="tk-up" title="上へ"' + (idx === 0 ? " disabled" : "") + '>↑</button><button type="button" class="tk-down" title="下へ"' + (idx === plans.length - 1 ? " disabled" : "") + '>↓</button></span><button type="button" class="tk-detail-toggle" aria-expanded="false">詳細設定</button></div>' +
+          '<div class="pm-tk-title-edit"><label>回数券のタイトル<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120" placeholder="例：全身整体60分 5回券"></label><button type="button" class="tk-name-save">タイトルを保存</button><span class="tk-name-status" role="status"></span></div>' +
           '<div class="pm-tk-plan-summary">' + p2.uses + '回 ／ ' + Number(p2.price).toLocaleString("ja-JP") + '円 ／ ' + months + 'か月有効</div>' +
           '<p class="pm-tk-plan-scope">対象メニュー：' + esc(ticketPlanScopeLabel(p2, courses)) + '</p><button type="button" class="tk-holders" data-plan-id="' + esc(p2.id) + '" disabled>保有者を確認中</button>' +
           '<div class="pm-tk-details" hidden><div class="pm-tk-grid">' +
-          '<label class="w2">名称<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120"></label>' +
           '<label>価格（円）<input type="number" class="tk-price" value="' + p2.price + '" min="0" step="100"></label>' +
           '<label>通常価格（円・任意）<input type="number" class="tk-regular" value="' + (p2.regular_price || "") + '" min="0" step="100" placeholder="割引表示用"></label>' +
           '<label>回数<input type="number" class="tk-uses" value="' + p2.uses + '" min="1" max="200"></label>' +
@@ -2747,20 +2751,32 @@
     loadPlans();
     loadTickets();
 
+    let suggestedTitle = '';
+    function suggestNewTitle() {
+      const field = wrap.querySelector('#pm-tk-name'), menu = wrap.querySelector('#pm-tk-new-menu').value;
+      if (field.value.trim() && field.value !== suggestedTitle) return;
+      const name = menu === 'all' ? '全メニュー共通' : courses.find(c => c.id === menu)?.name;
+      const uses = Number(wrap.querySelector('#pm-tk-uses').value);
+      suggestedTitle = name ? (name + (Number.isInteger(uses) && uses > 0 ? ' ' + uses + '回券' : ' 回数券')).slice(0, 120) : '';
+      field.value = suggestedTitle;
+    }
     wrap.addEventListener("input", (e) => {
       const row = e.target.closest("[data-plan]");
       if (row) preview(row);
+      if (row && e.target.classList.contains('tk-name')) row.querySelector('.tk-name-status').textContent = '';
+      if (e.target.id === 'pm-tk-uses') suggestNewTitle();
     });
     wrap.addEventListener("change", (e) => {
       const row = e.target.closest("[data-plan]");
       if (row) preview(row);
+      if (e.target.id === 'pm-tk-new-menu') suggestNewTitle();
       if (!e.target.classList.contains("tk-scope")) return;
       const box = e.target.closest("[data-plan]").querySelector(".pm-tk-menus");
       if (box) box.hidden = e.target.value !== "some";
     });
     wrap.addEventListener("click", async (e) => {
       if (wrap.getAttribute("aria-busy") === "true") return;
-      const mutating = e.target.matches(".tk-save,.tk-del,.tk-up,.tk-down,.tk-adj,.tk-revive-run,#pm-tk-add,#pm-tk-ssave,#pm-tk-offer-save,#pm-tk-rsave");
+      const mutating = e.target.matches(".tk-name-save,.tk-save,.tk-del,.tk-up,.tk-down,.tk-adj,.tk-revive-run,#pm-tk-add,#pm-tk-ssave,#pm-tk-offer-save,#pm-tk-rsave");
       if (mutating) {
         wrap.setAttribute("aria-busy", "true");
         wrap.querySelectorAll("button,input,textarea,select").forEach(el => { el.dataset.tkWasDisabled = el.disabled ? "1" : "0"; el.disabled = true; });
@@ -2783,16 +2799,34 @@
         const details = planRow.querySelector(".pm-tk-details"); details.hidden = !details.hidden; e.target.setAttribute("aria-expanded", String(!details.hidden)); e.target.textContent = details.hidden ? "詳細設定" : "詳細を閉じる"; return;
       }
       if (e.target.id === "pm-tk-add") {
+        const menu = wrap.querySelector('#pm-tk-new-menu').value;
+        if (!menu || !wrap.querySelector('#pm-tk-price').value.trim()) { window.alert('対象メニューと販売価格を入力してください。'); return; }
         const body = {
           action: "add",
           name: wrap.querySelector("#pm-tk-name").value.trim(),
           price: Number(wrap.querySelector("#pm-tk-price").value),
           uses: Number(wrap.querySelector("#pm-tk-uses").value),
+          menu_scope: menu === 'all' ? 'all' : [menu],
         };
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { window.alert("名称・価格・回数（1〜200）を確認してください。"); return; }
         ['#pm-tk-name', '#pm-tk-price', '#pm-tk-uses'].forEach(selector => { const field = wrap.querySelector(selector); field.value = ''; field.defaultValue = ''; });
-        loadPlans();
+        wrap.querySelector('#pm-tk-new-menu').value = ''; suggestedTitle = '';
+        await loadPlans();
+        return;
+      }
+      if (planRow && e.target.classList.contains('tk-name-save')) {
+        const field = planRow.querySelector('.tk-name'), name = field.value.trim();
+        if (!name) { window.alert('回数券のタイトルを入力してください。'); return; }
+        const r = await fetch('/api/demo/ticket-plans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id: planRow.dataset.plan, name }) });
+        const j = await r.json().catch(() => ({}));
+        const saved = j.plans?.find(p => p.id === planRow.dataset.plan);
+        if (!r.ok || !saved) { window.alert('タイトルを保存できませんでした。入力内容とログイン状態を確認してください。'); return; }
+        // タイトルだけを確定する。他の欄に入力中の内容や購入済みの券は変更しない。
+        field.value = saved.name; field.defaultValue = saved.name;
+        planRow.querySelector('.pm-tk-phead b').textContent = saved.name;
+        plans = j.plans; preview(planRow); refreshTicketFilters();
+        planRow.querySelector('.tk-name-status').textContent = '保存しました';
         return;
       }
       if (planRow && e.target.classList.contains("tk-save")) {

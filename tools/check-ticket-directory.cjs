@@ -89,6 +89,32 @@ check(() => assert.equal(holderButton.disabled, true));
     if (plan) { const courses = (await api('/api/demo/courses')).body.courses; check(() => assert.equal(scope(plan, courses), plan.menu_scope === 'all' ? 'すべてのメニュー' : plan.menu_names.join('・'))); }
   }
   await compare();
+  // タイトルだけの保存で価格・回数・期限・適用メニュー・販売設定が変わらない。
+  const beforeTitle = create.body.plans.find(p => p.id === id);
+  const titleOnly = await api('/api/demo/ticket-plans', { action: 'update', id, name: 'テスト 全身整体60分 5回券' });
+  check(() => assert.equal(titleOnly.status, 200));
+  const afterTitle = titleOnly.body.plans.find(p => p.id === id);
+  check(() => assert.equal(afterTitle.name, 'テスト 全身整体60分 5回券'));
+  for (const key of Object.keys(beforeTitle).filter(key => key !== 'name')) check(() => assert.deepEqual(afterTitle[key], beforeTitle[key]));
+  check(() => assert.equal(JSON.stringify([...state.tickets]), originalTickets));
+  await compare();
+  const emptyTitle = await api('/api/demo/ticket-plans', { action: 'update', id, name: '   ' });
+  check(() => assert.equal(emptyTitle.status, 400));
+  check(() => assert.equal(state.ticketPlans.get(id).name, afterTitle.name));
+  // 各施術の券は作成時から選んだメニューだけに限定される。
+  const availableCourses = (await api('/api/demo/courses')).body.courses;
+  for (const pattern of [/全身整体/, /小顔/, /オイル/]) {
+    const course = availableCourses.find(c => pattern.test(c.name));
+    check(() => assert(course));
+    const name = 'テスト ' + course.name.slice(0, 80) + ' 5回券';
+    const added = await api('/api/demo/ticket-plans', { action: 'add', name, price: 20000, uses: 5, menu_scope: [course.id] });
+    check(() => assert.equal(added.status, 200));
+    const plan = added.body.plans.find(p => p.name === name);
+    const publicPlan = (await api('/api/tickets/plans', null, false)).body.plans.find(p => p.id === plan.id);
+    check(() => assert.equal(publicPlan.name, name));
+    check(() => assert.deepEqual(publicPlan.menu_scope, [course.id]));
+    check(() => assert.deepEqual(publicPlan.menu_names, [course.name]));
+  }
   const edited = await api('/api/demo/ticket-plans', { action: 'update', id, name: 'テスト 改名済み券', price: 32000, uses: 6, valid_months: 9, menu_scope: 'all', show_banner: false });
   check(() => assert.equal(edited.status, 200)); await compare();
   check(() => assert.equal((edited.body.plans.find(p => p.id === id)).show_banner, false));
