@@ -41,6 +41,7 @@ function get(state, query, actor, c) {
   if (query.id && !bk) throw c.err(404, "notFound");
   return { date, revision: state.days.get(date)?.version || 0, bookingFingerprint: bk ? fingerprint(state, date, bk) : null,
     feeNightStart: 1320, feeNightPerPerson: 2000,
+    ...(!bk ? c.ticketOptions(query) : {}),
     booking: bk ? { id: bk.id, reference: bk.reference, status: bk.status, source: bk.source,
       name: bk.name, email: bk.email || "", phone: bk.phone || "", start: c.msToMin(date, bk.start_at), people: bk.people || 1,
       staffIds: staffIds(state, date, bk.id), nominatedStaffId: bk.nominated_staff_id || "", nominationFee: bk.nomination_fee || 0,
@@ -60,6 +61,7 @@ function get(state, query, actor, c) {
 function post(state, body, actor, c) {
   if (!actor || !roles.includes(actor.role)) throw c.err(403, "forbidden");
   const date = body.date, isNew = body.action === "create";
+  if (body.ticketId !== undefined && typeof body.ticketId !== "string") throw c.err(400, "invalid");
   if (!["create", "update"].includes(body.action) || !c.validDay(date) || typeof body.requestKey !== "string" || !body.requestKey || body.requestKey.length > 150) throw c.err(400, "invalid");
   const requestFingerprint = hash({ ...body, revision: undefined, requestKey: undefined, actor: actor.user });
   const previous = state.bookingDetailsKeys.get(body.requestKey);
@@ -128,20 +130,28 @@ function post(state, body, actor, c) {
   if (moving && (old.nominated_staff_id || nominated) && body.confirmNominationMove !== true) throw c.err(409, "nominatedConfirmationRequired");
   const bulkType = body.bulkDiscountType || "none", bulkValue = body.bulkDiscount ?? 0;
   const serviceTotal = discount(services.reduce((n, s) => n + discount(s.price, s.discountType, s.discount, c.err) * people, 0), bulkType, bulkValue, c.err);
+  const now = Date.now();
+  if (!isNew && body.ticketId && body.ticketId !== old.ticket_id) throw c.err(409, "hasTicket");
+  let useTicket = null;
+  if (isNew && body.ticketId) {
+    if (typeof body.ticketId !== "string" || people !== 1 || services.length !== 1 || bulkType !== "none" ||
+        services.some(s => s.discountType !== "none" || s.minutesBefore + s.minutesBody + s.minutesAfter !== c.getCourse(s.courseId).minutes)) throw c.err(409, "ticketBookingConditions");
+    useTicket = c.ticketForAdmin(body.ticketId, text(body.email, 254), services[0].courseId, now);
+  }
   if (old?.ticket_id && (people !== (old.people || 1) || services.length !== oldServices.length ||
       services.some((s, i) => s.courseId !== oldServices[i].courseId || s.discountType !== oldServices[i].discountType || s.discount !== oldServices[i].discount) ||
       bulkType !== (old.bulk_discount_type || "none") || bulkValue !== (old.bulk_discount || 0))) throw c.err(409, "hasTicket");
-  const amount = (old?.ticket_id ? 0 : serviceTotal) + (old?.source !== "hotpepper" && start >= 1320 ? 2000 * people : 0) + fee;
+  const amount = (old?.ticket_id || useTicket ? 0 : serviceTotal) + (old?.source !== "hotpepper" && start >= 1320 ? 2000 * people : 0) + fee;
   if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1000000000) throw c.err(400, "invalid");
   if (old && (old.paid_at || old.paid_amount > 0) && amount !== old.total) throw c.err(409, "alreadyPaid");
   const combined = combinedCourse(services, c); if (!combined) throw c.err(409, "boothPolicyMissing");
   const rooms = c.planBooths(date, start, end, combined, people, { ignoreId: old?.id, existing: old, boothIds: body.boothIds });
   if (!rooms.ok) throw c.err(409, rooms.code);
-  const now = Date.now(), bk = old ? copy(old) : { id: "bk-new-" + (state.bookingSerial + 1), reference: "DM" + String(state.bookingSerial + 1).padStart(6, "0"),
+  const bk = old ? copy(old) : { id: "bk-new-" + (state.bookingSerial + 1), reference: "DM" + String(state.bookingSerial + 1).padStart(6, "0"),
     service_date: date, status: "confirmed", created_at: now, source: "admin", staff: "none", customer_token: null, customer_gender: "" };
   Object.assign(bk, { start_at: c.minToMs(date, start), end_at: c.minToMs(date, end), people,
     services, course: services[0].courseId, course_name: services.map(s => s.name).join("＋"),
-    bulk_discount_type: bulkType, bulk_discount: bulkValue, total: amount, base_price: old?.ticket_id ? 0 : serviceTotal / people,
+    bulk_discount_type: bulkType, bulk_discount: bulkValue, total: amount, base_price: old?.ticket_id || useTicket ? 0 : serviceTotal / people,
     name: text(body.name, 120), email: text(body.email, 254), phone: text(body.phone, 40), comment: text(body.comment), preferences: text(body.preferences), tags: text(body.tags, 500),
     nominated_staff_id: nominated || null, nominated_staff_name: nominee ? c.profileOf(nominee).nickname || nominee.name : null, nomination_fee: fee });
   if (Object.hasOwn(bk, "course_label")) bk.course_label = bk.course_name;
@@ -155,6 +165,7 @@ function post(state, body, actor, c) {
     start_at: old.start_at, end_at: old.end_at, staffIds: oldIds, nominatedStaffId: old.nominated_staff_id }, after: { ...historyFields(bk), services: copy(services), people, total: amount, start_at: bk.start_at, end_at: bk.end_at, staffIds: [...ids], nominatedStaffId: nominated || null }, nomination_confirmed: !!body.confirmNominationMove }];
   if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; }
   // ここまで状態の変更なし。検証済みの予約と全担当を一度に差し替える。
+  if (useTicket) c.applyTicket(useTicket, bk, now);
   if (old) ev.bookings[ev.bookings.findIndex(x => x.id === old.id)] = bk;
   else { state.bookingSerial++; ev.bookings.push(bk); }
   ev.assignments = ev.assignments.filter(x => x.booking_id !== bk.id).concat(ids.map(id => ({ booking_id: bk.id, staff_id: id })));

@@ -52,6 +52,76 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const update = (id, extra = {}) => details.post(state, updateBody(id, extra), manager, dc);
   const check = async (name, fn) => { reset(); try { await fn(); assert(state.mails.every(m => !m.real)); results.push({ name, ok: true }); } catch (e) { results.push({ name, ok: false, error: e.message.split('\n').slice(0, 3).join(' ') }); } };
 
+  const ticketEmail = 'admin-ticket@example.test';
+  function issueTicket(extra = {}) {
+    const t = { id: 'TEST-ADMIN-TICKET', token: 'private-test-token', plan_id: 'tp-5', plan_name: 'テスト整体60分 5回券',
+      buyer_name: 'テスト回数券受付', buyer_email: ticketEmail, buyer_phone: '0000000000', member_email: ticketEmail,
+      uses_total: 5, uses_left: 3, expires_at: Date.now() + 86400000 * 30, purchased_at: new Date().toISOString(),
+      menu_scope: [course], valid_months: 12, history: [], ...extra };
+    state.tickets.set(t.id, t); state.members.set(ticketEmail, { email: ticketEmail, name: 'テスト回数券受付', phone: '0000000000', bookings: [], tickets: [t.id] }); return t;
+  }
+  await check('回数券プランは表示設定・対象メニュー・販売状態を同時保存', () => {
+    const id = [...state.ticketPlans.keys()][0], plan = state.ticketPlans.get(id), saved = structuredClone(plan);
+    const response = api('POST', '/api/demo/ticket-plans', { action: 'update', id, name: 'テスト整体券', menu_scope: [course], active: false });
+    assert.equal(response.status, 200); assert.equal(plan.active, 0); assert.deepEqual(plan.menu_scope, [course]);
+    const before = encode(plan); const invalid = api('POST', '/api/demo/ticket-plans', { action: 'update', id, name: '変更禁止', active: 'yes' }); assert.equal(invalid.status, 400); assert.equal(encode(plan), before);
+    state.ticketPlans.set(id, saved);
+  });
+  await check('管理画面で所有者の保有券だけを取得し秘密のキーを返さない', () => {
+    const t = issueTicket(); issueTicket({ id: 'OTHER', buyer_email: 'other@example.test', member_email: 'other@example.test' });
+    const d = details.get(state, { date, ticketId: t.id }, staff, dc);
+    assert.equal(d.customerTickets.length, 1); assert.equal(d.ticketCustomer.email, ticketEmail);
+    assert(!JSON.stringify(d).includes('private-test-token'));
+    assert.equal(details.get(state, { date, ticketEmail: 'nobody@example.test' }, staff, dc).customerTickets.length, 0);
+  });
+  await check('管理予約で1回消費しマイページへ紐付け、同じ送信では重複しない', () => {
+    const t = issueTicket(), b = payload({ ticketId: t.id, email: ticketEmail });
+    const result = details.post(state, b, staff, dc), booked = booking(result.id);
+    assert.equal(t.uses_left, 2); assert.equal(booked.ticket_id, t.id); assert.equal(booked.ticket_name, t.plan_name);
+    assert.equal(booked.ticket_left_after, 2); assert.equal(booked.total, 0); assert.equal(booked.base_price, 0);
+    assert(booked.customer_token); assert(state.members.get(ticketEmail).bookings.includes(result.id));
+    assert.deepEqual(details.post(state, b, staff, dc), result); assert.equal(t.uses_left, 2); assert.equal(t.history.length, 1);
+    assert(!state.mails.some(m => m.type === 'remind' || m.tpl?.name === 'ticketLeft'));
+    unchanged(() => details.post(state, { ...b, ticketId: 'OTHER' }, staff, dc), 'requestChanged');
+  });
+  await check('非会員の購入券も所有者を確認して利用できる', () => {
+    const t = issueTicket({ member_email: null }); state.members.delete(ticketEmail);
+    const result = post({ ticketId: t.id, email: ticketEmail.toUpperCase() }); assert.equal(t.uses_left, 2); assert(booking(result.id).customer_token);
+  });
+  for (const [name, extra, body, code] of [
+    ['別のお客様', {}, { email: 'other@example.test' }, 'ticketOwner'],
+    ['メール未入力', {}, { email: '' }, 'ticketOwner'],
+    ['期限切れ', { expires_at: Date.now() - 1 }, {}, 'ticketExpired'],
+    ['使い切り', { uses_left: 0 }, {}, 'ticketEmpty'],
+    ['対象外メニュー', { menu_scope: ['364323-4822664'] }, {}, 'ticketMenu'],
+    ['2名', {}, { people: 2, staffIds: ['A','B'] }, 'ticketBookingConditions'],
+    ['連続コース', {}, { services: [service(), service()] }, 'ticketBookingConditions'],
+    ['時間延長', {}, { services: [service(course, { minutesBody: 90 })] }, 'ticketBookingConditions'],
+    ['一括割引', {}, { bulkDiscountType: 'amount', bulkDiscount: 1 }, 'ticketBookingConditions'],
+    ['個別割引', {}, { services: [service(course, { discountType: 'amount', discount: 1 })] }, 'ticketBookingConditions']
+  ]) await check('回数券受付で' + name + 'は予約も残数も変更しない', () => { const t = issueTicket(extra); unchanged(() => post({ ticketId: t.id, email: ticketEmail, ...body }), code); });
+  await check('同時利用で残り1回の券を2回使用できない', () => {
+    const t = issueTicket({ uses_left: 1 }); post({ ticketId: t.id, email: ticketEmail });
+    unchanged(() => post({ ticketId: t.id, email: ticketEmail, start: 900 }), 'ticketEmpty'); assert.equal(t.uses_left, 0);
+  });
+  await check('スキル・勤務・受付停止・重複の拒否で回数券を消費しない', () => {
+    const t = issueTicket(); state.staff[0].courses = '["other"]'; unchanged(() => post({ ticketId: t.id, email: ticketEmail }), 'staffCannotDoCourse');
+    state.staff[0].courses = '[]'; unchanged(() => post({ ticketId: t.id, email: ticketEmail, start: 500 }), 'outsideShift');
+    state.days.get(date).locked = ['A']; unchanged(() => post({ ticketId: t.id, email: ticketEmail }), 'staffLocked');
+    state.days.get(date).locked = []; post(); unchanged(() => post({ ticketId: t.id, email: ticketEmail }), 'soldOut'); assert.equal(t.uses_left, 3);
+  });
+  await check('回数券利用でも深夜料・指名料を保持し日時担当変更で追加消費しない', () => {
+    const t = issueTicket(), result = post({ ticketId: t.id, email: ticketEmail, start: 1320, nominatedStaffId: 'A', expectedNominationFee: 500 });
+    assert.equal(booking(result.id).total, 2500); assert.equal(t.uses_left, 2);
+    update(result.id, { start: 1380, staffIds: ['B'], nominatedStaffId: 'B', confirmNominationMove: true });
+    assert.equal(t.uses_left, 2); assert.equal(booking(result.id).total, 2500);
+  });
+  await check('管理回数券予約の開始前取消は1回だけ返却', () => {
+    const t = issueTicket(), result = post({ ticketId: t.id, email: ticketEmail });
+    schedule({ action: 'cancel', id: result.id }); assert.equal(t.uses_left, 3);
+    unchanged(() => schedule({ action: 'cancel', id: result.id }), 'notFound'); assert.equal(t.uses_left, 3);
+  });
+
   await check('詳細APIは未ログイン拒否・スタッフ権限の受付を許可', () => {
     assert.equal(api('GET', '/api/demo/booking-details?date=' + date, null, 'none').status, 401);
     const d = api('GET', '/api/demo/booking-details?date=' + date, null, 'staff'); assert.equal(d.status, 200); assert.equal(d.data.staff.length, 5);

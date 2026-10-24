@@ -36,5 +36,32 @@
       esc(tr("毎月{start}〜{end}日は、回数券をお持ちの方限定料金でご案内します。", { start: o.startDay, end: o.endDay })) +
       "</strong>" + (detail ? "<p>" + esc(detail) + "</p>" : "") + "</aside>";
   }
-  window.CNTickets = { date, scope, summary, offer };
+  // URLに載せるのは券の番号だけ。本人確認用のトークンは載せない。
+  const bookingHref = ticket => "/book?ticket=" + encodeURIComponent(ticket.id);
+  const usable = (ticket, now = Date.now()) => !!ticket && ticket.status === "有効" && ticket.uses_left > 0 && Number(ticket.expires_at) >= now;
+  const allows = (ticket, course) => !!ticket && (ticket.menu_scope === "all" ||
+    (Array.isArray(ticket.menu_scope) && !!course && course.split(",").every(id => ticket.menu_scope.includes(id))));
+  function bookingIssue(ticket, course, people = 1) {
+    if (!usable(ticket)) return "選択した回数券は現在使用できません。回数券を選び直してください。";
+    if (Number(people) !== 1) return "回数券は1名の予約で使用できます。人数を1名に戻してください。";
+    if (course && !allows(ticket, course)) return "この回数券は、選択したメニューではご利用いただけません。";
+    return "";
+  }
+  const choiceKey = "cn-booking-ticket";
+  let memoryChoice;
+  function choice() {
+    if (memoryChoice !== undefined) return memoryChoice;
+    try { const saved = JSON.parse(sessionStorage.getItem(choiceKey) || "null"); memoryChoice = typeof saved?.id === "string" ? saved.id : ""; }
+    catch { memoryChoice = ""; }
+    return memoryChoice;
+  }
+  function choose(id) {
+    memoryChoice = String(id || "");
+    try { if (memoryChoice) sessionStorage.setItem(choiceKey, JSON.stringify({ id: memoryChoice, at: Date.now() })); else sessionStorage.removeItem(choiceKey); } catch {}
+  }
+  function useLink(ticket) {
+    return usable(ticket) ? '<a class="cn-ticket-use" href="' + esc(bookingHref(ticket)) + '">' + esc(tr("使用する")) + '</a>' : "";
+  }
+  if (typeof location !== "undefined" && location.pathname && !location.pathname.startsWith("/book")) choose("");
+  window.CNTickets = { date, scope, summary, offer, bookingHref, usable, allows, bookingIssue, choice, choose, useLink };
 })();

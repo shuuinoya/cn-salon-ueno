@@ -438,6 +438,7 @@
           : tr("（利用済み {n}回）", { n: tk.used })) + "</span></div>" +
         (tk.revival ? '<div class="rowline"><span class="k">' + esc(tr("復活")) + "</span><span>" + esc(tr("このご購入で、期限切れの未使用{n}回を復活しました（「復活分」の回数券）", { n: tk.revival.total })) + "</span></div>" : "") +
         '<div class="rowline"><span class="k">' + esc(tr("有効期限")) + "</span><span>" + esc(window.CNTickets.date(tk.expires_at)) + "</span></div>" +
+        (window.CNTickets.usable(tk) ? '<div class="btnrow">' + window.CNTickets.useLink(tk) + '</div>' : '') +
         "</div>";
     }).join("");
     const plans = ticketPlans.map((pl) =>

@@ -2256,3 +2256,6 @@ main.ledger-app .pm-lockbtn:focus-visible { outline:2px solid #906427; outline-o
 main.ledger-app .pm-lockbtn[data-busy] { opacity:.5; cursor:wait; }
 main.ledger-app .pm-lockbtn:hover { background-color:#efe7da; }
 @media (pointer:coarse) { main.ledger-app .pm-lockbtn { flex-basis:32px; width:32px; height:36px; } }
+.pm-tk-plan-summary{font-size:13px;color:#655d54;margin:5px 0 2px}.pm-tk-phead .tk-detail-toggle{margin-left:auto;white-space:nowrap;min-height:40px}.pm-tk-details[hidden]{display:none!important}.pm-tk-details{margin-top:12px}
+
+.pm-tk-section{margin:10px 0;border:1px solid #ddd4c8;border-radius:5px;padding:10px 12px}.pm-tk-section>summary{cursor:pointer;font-size:14px;font-weight:600;min-height:26px}.pm-tk-section[open]>summary{margin-bottom:10px}

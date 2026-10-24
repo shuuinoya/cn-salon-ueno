@@ -112,9 +112,22 @@
     // （残数の判定・減算はすべてサーバー側。ここは選択内容を渡すだけ）
     try {
       const u0 = typeof input === "string" ? input : input?.url || "";
-      if (u0.includes("/api/bookings") && !u0.includes("cancel") && init?.method === "POST") {
+      const bookingUrl = new URL(u0, location.origin);
+      if (bookingUrl.origin === location.origin && bookingUrl.pathname === "/api/bookings" && String(init?.method).toUpperCase() === "POST") {
         const b0 = JSON.parse(init.body || "{}");
         let changed = false;
+        // 券を指定して来たお客様を、読込待ち・対象外のまま通常払いに切り替えない。
+        const requestedTicket = window.CNTickets.choice();
+        if (requestedTicket) {
+          await loadMyTickets();
+          const selected = myTickets.find(t => t.id === requestedTicket);
+          const issue = window.CNTickets.bookingIssue(selected, b0.course || b0.courses, b0.people || 1);
+          if (issue) {
+            window.alert(T(issue));
+            return new Response(JSON.stringify({ error: "ticketSelection" }), { status: 409, headers: { "Content-Type": "application/json" } });
+          }
+          window.__fmTicketSel = { id: selected.id, token: selected.token || tkItems().find(t => t.id === selected.id)?.token || "", name: selected.plan_name };
+        }
         if (window.__fmTicketSel) {
           b0.ticketId = window.__fmTicketSel.id;
           b0.ticketToken = window.__fmTicketSel.token;
@@ -128,7 +141,13 @@
         if (ps && ps.checked && ps.closest("#fm-prof-row")?.style.display !== "none") { b0.saveProfile = true; changed = true; }
         if (changed) init = { ...init, body: JSON.stringify(b0) };
       }
-    } catch {}
+    } catch {
+      // 選んだ券の確認に失敗した場合は、券なしの予約として送らない。
+      if (window.CNTickets.choice()) {
+        window.alert(T("選択した回数券は現在使用できません。回数券を選び直してください。"));
+        return new Response(JSON.stringify({ error: "ticketSelection" }), { status: 409, headers: { "Content-Type": "application/json" } });
+      }
+    }
     const res = await origFetch(input, init);
     try {
       const u = typeof input === "string" ? input : input?.url || "";
@@ -148,6 +167,7 @@
       if (u.includes("/api/bookings") && !u.includes("cancel") && init?.method === "POST" && res.ok) {
         const j = await res.clone().json();
         const body = JSON.parse(init.body || "{}");
+        window.CNTickets.choose("");
         // 完了画面の案内は今回の予約だけ。前回の回数券・日時変更の案内を残さない
         try { sessionStorage.removeItem("fm-rescheduled"); sessionStorage.removeItem("fm-ticket-used"); } catch {}
         if (j.rescheduledFrom) {
@@ -213,6 +233,15 @@
   }
   const usableTickets = () => (myTickets || []).filter((t) => t.status === "有効" && t.uses_left > 0);
 
+  const ticketEntry = new URLSearchParams(location.search).get("ticket");
+  if (location.pathname === "/book" && ticketEntry !== null) window.CNTickets.choose(ticketEntry);
+  if (location.pathname.startsWith("/book/complete")) window.CNTickets.choose("");
+  function clearTicketChoice() {
+    window.CNTickets.choose(""); window.__fmTicketSel = null;
+    const url = new URL(location.href); url.searchParams.delete("ticket");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }
+
   // メニュー選択ページ：会員にはメニュー一覧の一番上に回数券の案内を出す（非会員には出さない）
   // 見た目は他のメニューセクションとまったく同じ（list-card＋menu-row構造をそのまま使う）
   async function decorateTicketBanner() {
@@ -251,60 +280,57 @@
       (pl.description ? "　" + esc2(T(pl.description)) : "") + "</small></span>" +
       '<i aria-hidden="true">›</i></a>').join("");
     box.innerHTML = "<h2>" + esc2(T(title)) + "</h2>" + window.CNTickets.offer(ticketSettings) + '<div class="list-body">' + rows + "</div>";
+    if (!firstCard.isConnected || document.getElementById("fm-tkbanner") || !["/book", "/menus"].includes(location.pathname)) return;
     firstCard.parentElement.insertBefore(box, firstCard);
-    if (!document.getElementById("fm-tk-style")) {
-      const st = document.createElement("style");
-      st.id = "fm-tk-style";
-      st.textContent =
-        "#fm-ticket-pick{margin:18px 0 6px}" +
-        "#fm-ticket-pick .fm-h{font-size:15px;font-weight:700;margin:0 0 12px}" +
-        "#fm-ticket-pick .fm-box{background:#f6ecd9;border-radius:8px;padding:14px 18px;font-size:14px;line-height:1.9}" +
-        "#fm-ticket-pick label{display:block;font-weight:400;margin:2px 0}" +
-        "#fm-ticket-pick .fm-tk-note{font-size:12px;color:#8a6a33;margin:6px 0 0}";
-      document.head.appendChild(st);
-    }
+
   }
   const esc2 = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\'/g, "&#39;");
 
   // 予約フォーム：使用する回数券を選べるようにする（選択内容と残数を明示）
+  let ticketPickBusy = false;
   async function decorateTicketPick() {
     const form = document.querySelector("form.booking-form");
-    if (!form || document.getElementById("fm-ticket-pick")) return;
-    if (!isMember()) return;
+    if (!form) { window.__fmTicketSel = null; return; }
+    const signature = location.pathname + location.search + curLang();
+    const existing = document.getElementById("fm-ticket-pick");
+    if (existing?.dataset.context === signature || ticketPickBusy) return;
+    existing?.remove(); window.__fmTicketSel = null;
+    if (!isMember() && !window.CNTickets.choice()) return;
     const anchor = document.getElementById("fm-notice") || form.querySelector('button[type="submit"]');
     if (!anchor) return;
-    await loadMyTickets();
-    // 対象メニューが決まっている券は、そのメニューの予約にだけ出す（使えるかの最終判定はサーバー側）
-    const qs = new URLSearchParams(location.search);
-    const course = qs.get("courses") || qs.get("course") || "";
-    const use = usableTickets().filter((t) => !Array.isArray(t.menu_scope) || !course || t.menu_scope.includes(course.split(",")[0]));
-    if (!use.length) return;
-    const sec = document.createElement("section");
-    sec.id = "fm-ticket-pick";
-    const jd2 = (ms2) => (I18N ? I18N.date(ms2) : new Date(ms2 + 9 * 3600e3).toISOString().slice(0, 10));
-    sec.innerHTML =
-      '<h2 class="fm-h">' + esc2(T("回数券")) + "</h2>" +
-      '<div class="fm-box">' +
-      '<label><input type="radio" name="fm-tk" value="" checked> ' + esc2(T("使用しない")) + "</label>" +
-      use.map((t, i) => '<label><input type="radio" name="fm-tk" value="' + i + '"> ' +
-        esc2((I18N ? I18N.plan(t.plan_name) : t.plan_name) + T("（残り {n}回・有効期限 {date}）", { n: t.uses_left, date: jd2(t.expires_at) })) +
-        '<small class="fm-ticket-purchased">' + esc2(T(t.kind === "revival" ? "復活した日" : "購入日") + ": " + window.CNTickets.date(t.purchased_at)) + "</small></label>").join("") +
-      '<p class="fm-tk-note" id="fm-tk-note"></p>' +
-      "</div>";
-    anchor.before(sec);
-    sec.addEventListener("change", () => {
-      const v = sec.querySelector('input[name="fm-tk"]:checked')?.value;
-      const note = document.getElementById("fm-tk-note");
-      if (v === "" || v === undefined) {
-        window.__fmTicketSel = null;
-        note.textContent = "";
-        return;
+    ticketPickBusy = true;
+    try {
+      await loadMyTickets();
+      if (!form.isConnected || signature !== location.pathname + location.search + curLang() || document.getElementById("fm-ticket-pick")) return;
+      const qs = new URLSearchParams(location.search), course = qs.get("courses") || qs.get("course") || "";
+      const people = Number(qs.get("people") || 1);
+      const use = usableTickets().filter(t => window.CNTickets.allows(t, course) && people === 1);
+      if (!use.length && !window.CNTickets.choice()) return;
+      const selectedId = window.CNTickets.choice();
+      const sec = document.createElement("section"); sec.id = "fm-ticket-pick"; sec.dataset.context = signature;
+      const selectedUnavailable = selectedId && !use.some(t => t.id === selectedId);
+      const selectedTicket = myTickets.find(t => t.id === selectedId);
+      sec.innerHTML = '<label class="fm-h" for="fm-ticket-select">' + esc2(T("回数券")) + '</label>' +
+        '<select id="fm-ticket-select" name="fm-tk">' +
+        '<option value=""' + (!selectedId ? ' selected' : '') + '>' + esc2(T("使用しない")) + '</option>' +
+        (selectedUnavailable ? '<option disabled selected value="' + esc2(selectedId) + '">' + esc2(selectedTicket ? (I18N ? I18N.plan(selectedTicket.plan_name) : selectedTicket.plan_name) : T("回数券")) + '</option>' : '') +
+        use.map(t => '<option value="' + esc2(t.id) + '"' + (selectedId === t.id ? ' selected' : '') + '>' +
+          esc2((I18N ? I18N.plan(t.plan_name) : t.plan_name) + ' / ' + T("残り {n}回", { n:t.uses_left }) + ' / ' +
+            T(t.kind === "revival" ? "復活した日" : "購入日") + ' ' + window.CNTickets.date(t.purchased_at)) + '</option>').join('') +
+        '</select><p class="fm-tk-note" id="fm-tk-note" aria-live="polite"></p>';
+      anchor.before(sec);
+      function selectTicket(userChanged) {
+        const id = sec.querySelector("#fm-ticket-select").value;
+        const note = sec.querySelector("#fm-tk-note");
+        if (id === "") { window.__fmTicketSel = null; if (userChanged) clearTicketChoice(); note.textContent = ""; return; }
+        const t = use.find(t => t.id === id);
+        if (!t) { note.textContent = T(window.CNTickets.bookingIssue(myTickets.find(t => t.id === selectedId), course, people)); return; }
+        window.CNTickets.choose(t.id);
+        window.__fmTicketSel = { id:t.id, token:t.token || tkItems().find(x => x.id === t.id)?.token || "", name:t.plan_name };
+        note.textContent = T("この予約で1回分を使用します（ご予約後の残り {n}回）。コース料金は回数券でのお支払いになります。", { n:t.uses_left - 1 });
       }
-      const t = use[Number(v)];
-      const item = tkItems().find((x) => x.id === t.id);
-      window.__fmTicketSel = { id: t.id, token: item?.token || t.token || "", name: t.plan_name };
-      note.textContent = T("この予約で1回分を使用します（ご予約後の残り {n}回）。コース料金は回数券でのお支払いになります。", { n: t.uses_left - 1 });
-    });
+      sec.addEventListener("change", () => selectTicket(true)); selectTicket(false);
+    } finally { ticketPickBusy = false; }
   }
 
   // ---- 同意部分：本物と同じ「ご来店に際しての注意事項＋確認しました＋同意して予約する」に ----

@@ -3,7 +3,7 @@
   'use strict';
   if (window.CNPopup) return;
   const overlays = [
-    ['.bd-overlay', '[data-bd="close"]'], ['#pm-ledger-operations', '[data-lo="close"]'],
+    ['#pm-ticket-modal', '#pm-tk-close-top'], ['.bd-overlay', '[data-bd="close"]'], ['#pm-ledger-operations', '[data-lo="close"]'],
     ['#pm-customer-records', '[data-close]'], ['#cn-login-ov', '.cn-cancel'],
     ['#fm-doc-modal', '.fm-doc-close'], ['#pm-shiftadd', '[data-sa="close"]'],
     ['.ledger-modal-backdrop', null]

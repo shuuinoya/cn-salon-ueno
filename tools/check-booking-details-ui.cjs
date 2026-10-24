@@ -24,13 +24,16 @@ function setup(booking = null) {
   const form = formFor(body()); nodes['.bd-form'] = form;
   let n = 0;
   const context = vm.createContext({ window: { __pmKickSync() {} }, document: { body: { classList: { remove() {} } } }, AbortController, URLSearchParams, setTimeout, clearTimeout, crypto: { randomUUID: () => 'k' + ++n }, fetch() { throw Error('Unexpected fetch'); } });
-  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.test={integer,minute,discount,totals,eligible,values,review,save,load,render,serviceRow,invalidate,unknownControls,close,action,setCurrent:a=>current=a};})();'), context);
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'globalThis.test={ticketIssue,ticketSelect,integer,minute,discount,totals,eligible,values,review,save,load,render,serviceRow,invalidate,unknownControls,close,action,setCurrent:a=>current=a};})();'), context);
   context.test.setCurrent(app);
   return { context, api: context.test, app, nodes, form, controls };
 }
 let passed = 0; const failures = [];
 async function test(name, fn) { try { await fn(); passed++; } catch (e) { failures.push({ name, error: e.message }); } }
 (async () => {
+  await test('新規受付の回数券は施術0円・指名料と深夜料だけ表示', () => { const x = setup(), b = body(); b.ticketId = 't'; b.start = 1320; b.nominatedStaffId = 's1'; assert.equal(x.api.totals(x.app.data, b).total, 2500); });
+  await test('選択した券が不明でも通常払いへ自動変更しない', () => { const x = setup(), b = body(); b.ticketId = 'gone'; assert.match(x.api.ticketIssue(x.app, b), /使用できません/); assert.match(x.api.ticketSelect(x.app, 'gone'), /value="gone" selected disabled/); });
+  await test('メール・対象メニュー・残数・期限の変更で受付を止める', () => { const x = setup(), b = body(); b.ticketId = 't'; b.email = 'owner@example.test'; const t = { id: 't', owner_email: b.email, menu_scope: ['c1'], status: '有効', uses_left: 1, expires_at: Date.now() + 60000 }; x.app.data.customerTickets = [t]; assert.equal(x.api.ticketIssue(x.app, b), ''); b.email = 'other@example.test'; assert.match(x.api.ticketIssue(x.app, b), /所有者/); b.email = t.owner_email; t.menu_scope = ['other']; assert.match(x.api.ticketIssue(x.app, b), /対象外/); t.menu_scope = 'all'; t.uses_left = 0; assert.match(x.api.ticketIssue(x.app, b), /残り回数/); t.uses_left = 1; t.expires_at = Date.now() - 1; assert.match(x.api.ticketIssue(x.app, b), /期限切れ/); });
   await test('準備と片付けを内包し 60 分を 70 分にしない', () => { const x = setup(), result = x.api.totals(x.app.data, body()); assert.equal(result.duration, 60); assert.equal(result.end, 660); });
   await test('個別割引→人数倍→一括割引→指名料の順で端数切捨て', () => { const x = setup(), b = body(); b.people = 5; b.services[0].expectedPrice = 6001; b.services[0].discountType = 'percent'; b.services[0].discount = 17; b.bulkDiscountType = 'percent'; b.bulkDiscount = 13; b.nominatedStaffId = 's1'; const result = x.api.totals(x.app.data, b); assert.equal(result.total, Math.floor(Math.floor(6001 * .83) * 5 * .87) + 500); });
   await test('深夜料金は人数分、指名料は 1 回', () => { const x = setup(), b = body(); b.people = 5; b.start = 1320; b.nominatedStaffId = 's1'; assert.equal(x.api.totals(x.app.data, b).total, 30000 + 10000 + 500); });

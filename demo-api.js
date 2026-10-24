@@ -3599,6 +3599,26 @@ function ledgerContext() {
 }
 function bookingDetailsContext() {
   return { err, validDay, validSpan, minToMs, msToMin, getCourse, courses: () => [...courseStore.values()],
+    ticketOptions: query => {
+      const selected = query.ticketId ? state.tickets.get(String(query.ticketId)) : null;
+      if (query.ticketId && !selected) throw err(409, "ticketInvalid");
+      const email = String(query.ticketEmail ?? selected?.member_email ?? selected?.buyer_email ?? "").trim().toLowerCase();
+      if (email.length > 254) throw err(400, "invalid");
+      const tickets = email ? [...state.tickets.values()].filter(t => (t.member_email || t.buyer_email || "").toLowerCase() === email) : [];
+      const customer = selected && tickets.includes(selected) ? { name: selected.buyer_name || "", email, phone: selected.buyer_phone || "" } : null;
+      return { customerTickets: tickets.map(t => ({ ...ticketPublicJson(t), owner_email: email })), ticketCustomer: customer };
+    },
+    ticketForAdmin: (id, email, course, now) => {
+      const t = state.tickets.get(id), owner = String(t?.member_email || t?.buyer_email || "").toLowerCase();
+      if (!t || !owner || owner !== email.toLowerCase()) throw err(409, "ticketOwner");
+      return ticketForUse(id, t.token, t.buyer_email, state.members.get(owner), course, now);
+    },
+    applyTicket: (t, bk, now) => {
+      const left = consumeTicket(t, bk.id, bk.reference, now, { notify: false });
+      Object.assign(bk, { ticket_id: t.id, ticket_name: t.plan_name, ticket_left_after: left, customer_token: crypto.randomBytes(24).toString("hex") });
+      const member = state.members.get(String(t.member_email || t.buyer_email || "").toLowerCase());
+      if (member) memberAttachBooking(member, bk);
+    },
     sourceTiming: boothPolicy.sourceCourseTiming, courseBoothIds: boothPolicy.resolveCourseBoothIds,
     courseGender, profileOf, staffInfoMissing: staffBookingMissing, staffMismatch, overlaps, rejectTestData,
     booths: () => boothPolicy.resolveBooths(state), planBooths, setBookingBooths, queueChangeMails, queueBookingMails,
@@ -4911,7 +4931,8 @@ function handleDemoApi(req, res, url) {
             // 通常価格（任意）：価格より高いときだけ割引として表示
             const regular = Math.round(Number(b.regular_price ?? p2?.regular_price ?? 0)) || 0;
             if (regular < 0) throw err(400, "invalid");
-            return { name, price, uses, description: String(b.description ?? p2?.description ?? "").slice(0, 300),
+            if (b.active !== undefined && typeof b.active !== "boolean") throw err(400, "invalid");
+            return { active: b.active === undefined ? (p2 ? p2.active : 1) : (b.active ? 1 : 0), name, price, uses, description: String(b.description ?? p2?.description ?? "").slice(0, 300),
               menu_scope: scope, revive_group: group, revive, valid_months: months, regular_price: regular,
               show_banner: b.show_banner === undefined ? (p2 ? p2.show_banner !== false : true) : !!b.show_banner };
           };

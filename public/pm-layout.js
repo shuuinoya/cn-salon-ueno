@@ -2453,19 +2453,31 @@
       '<button type="button" class="pm-red" id="pm-tk-add">追加</button>' +
       "</div>" +
       '<div class="pm-tk-plans">読み込み中…</div>' +
-      '<p class="pm-tk-note">【期限切れ分の復活】会員が回数券を購入すると、その会員の期限切れの回数券のうち<b>「復活の組」と「対象メニュー」が同じもの</b>の未使用回数を、' +
-      "「復活分」の回数券として、新しく購入した回数券と同じ有効期限で使えるようにします（元の購入・利用の記録はそのまま残ります）。復活の組が空欄のプランは、同じプランどうしだけが対象です。</p>" +
-      "<h3 class=\"pm-tk-h\">予約サイトでの案内</h3>" +
-      '<div class="pm-tk-site">読み込み中…</div>' +
-      "<h3 class=\"pm-tk-h\">有効期限前のリマインドメール</h3>" +
-      '<div class="pm-tk-remind">読み込み中…</div>' +
+      '<details class="pm-tk-section"><summary>期限切れ分の復活について</summary><p class="pm-tk-note">【期限切れ分の復活】会員が回数券を購入すると、その会員の期限切れの回数券のうち<b>「復活の組」と「対象メニュー」が同じもの</b>の未使用回数を、' +
+      "「復活分」の回数券として、新しく購入した回数券と同じ有効期限で使えるようにします（元の購入・利用の記録はそのまま残ります）。復活の組が空欄のプランは、同じプランどうしだけが対象です。</p></details>" +
+      '<details class="pm-tk-section"><summary>予約サイトでの案内</summary>' +
+      '<div class="pm-tk-site">読み込み中…</div></details>' +
+      '<details class="pm-tk-section"><summary>有効期限前のリマインドメール</summary>' +
+      '<div class="pm-tk-remind">読み込み中…</div></details>' +
       "<h3 class=\"pm-tk-h\">お客様の保有回数券</h3>" +
       '<div class="pm-tk-list">読み込み中…</div>' +
       '<div class="pm-shop-actions"><button type="button" id="pm-tk-close">閉じる</button></div>' +
       "</section>";
     document.body.appendChild(wrap);
+    function acceptSaved(container) {
+      container.querySelectorAll("input,textarea,select").forEach(el => {
+        if (el.type === "checkbox") el.defaultChecked = el.checked;
+        else if (el.tagName === "SELECT") [...el.options].forEach(o => { o.defaultSelected = o.selected; });
+        else el.defaultValue = el.value;
+      });
+    }
     const previousFocus = document.activeElement;
-    const close = () => { wrap.remove(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); };
+    const close = () => {
+      if (wrap.getAttribute("aria-busy") === "true") return;
+      const dirty = [...wrap.querySelectorAll("input,textarea,select")].some(el => el.type === "checkbox" ? el.checked !== el.defaultChecked : el.tagName === "SELECT" ? el.value !== ([...el.options].find(o => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue);
+      if (dirty && !window.confirm("保存していない変更を破棄して閉じますか？")) return;
+      wrap.remove(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
     wrap.querySelector("#pm-tk-close").addEventListener("click", close);
     wrap.querySelector("#pm-tk-close-top").addEventListener("click", close);
     wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
@@ -2493,8 +2505,9 @@
           '<div class="pm-tk-phead"><b>' + esc(p2.name) + "</b>" +
           '<span class="pm-tk-tags">' + (p2.active ? '<span class="on">販売中</span>' : '<span class="off">非公開</span>') +
           (p2.active && p2.show_banner !== false ? '<span class="on">予約・メニューの最上部に表示</span>' : "") + "</span>" +
-          '<span class="pm-tk-order"><button type="button" class="tk-up" title="上へ"' + (idx === 0 ? " disabled" : "") + '>↑</button><button type="button" class="tk-down" title="下へ"' + (idx === plans.length - 1 ? " disabled" : "") + ">↓</button></span></div>" +
-          '<div class="pm-tk-grid">' +
+          '<span class="pm-tk-order"><button type="button" class="tk-up" title="上へ"' + (idx === 0 ? " disabled" : "") + '>↑</button><button type="button" class="tk-down" title="下へ"' + (idx === plans.length - 1 ? " disabled" : "") + '>↓</button></span><button type="button" class="tk-detail-toggle" aria-expanded="false">詳細設定</button></div>' +
+          '<div class="pm-tk-plan-summary">' + p2.uses + '回 ／ ' + Number(p2.price).toLocaleString("ja-JP") + '円 ／ ' + months + 'か月有効</div>' +
+          '<div class="pm-tk-details" hidden><div class="pm-tk-grid">' +
           '<label class="w2">名称<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120"></label>' +
           '<label>価格（円）<input type="number" class="tk-price" value="' + p2.price + '" min="0" step="100"></label>' +
           '<label>通常価格（円・任意）<input type="number" class="tk-regular" value="' + (p2.regular_price || "") + '" min="0" step="100" placeholder="割引表示用"></label>' +
@@ -2517,7 +2530,7 @@
           '<label class="pm-tk-pub"><input type="checkbox" class="tk-banner"' + (p2.show_banner !== false ? " checked" : "") + "> 予約・メニューページの最上部に表示</label>" +
           '<span class="pm-tk-btns"><button type="button" class="pm-red tk-save">変更を保存</button><button type="button" class="tk-del">削除</button></span></div>' +
           '<div class="pm-tk-preview"><span>予約サイトでの表示：</span><b class="pv-name"></b><small class="pv-price"></small></div>' +
-          "</div>";
+          "</div></div>";
         }).join("") : '<p class="pm-tk-empty">プランがありません。上の欄から追加してください。</p>';
         box.querySelectorAll("[data-plan]").forEach(preview);
         renderSite(j);
@@ -2624,10 +2637,10 @@
             const rp = (t.remind_plan || []).map((r) => (r.days === 1 ? "前日" : r.days + "日前") + "：" +
               (r.merged ? "同じ期限の券とまとめて" : "") + ({ waiting: dt16(r.dueAt).slice(5) + "予定", sent: "送信済み", failed: "送信失敗", skipped: "送信中止", pending: "送信予定", sending: "送信中", superseded: "省略", legacy: "送信済み", queued: "送信予定" }[r.state] || r.state)).join("<br>");
             return '<tr data-tk="' + esc(t.id) + '"><td>' + esc(t.buyer_name) + "<br><small>" + esc(t.buyer_email) + "</small></td>" +
-            "<td>" + (t.kind === "revival" ? '<span class="pm-tk-badge">復活分</span> ' : "") + esc(t.plan_name) + "<br><small>" + esc(t.id) + "</small>" + rvInfo + "</td><td>" + jd(t.purchased_at) + "</td>" +
+            "<td>" + (t.kind === "revival" ? '<span class="pm-tk-badge">復活分</span> ' : "") + esc(t.plan_name) + "<br><small>" + esc(t.id) + "</small><br><small>対象：" + esc(t.menu_scope === 'all' ? 'すべてのメニュー' : (t.menu_names || []).filter(Boolean).join('・') || '対象メニューを確認してください') + "</small>" + rvInfo + "</td><td>" + jd(t.purchased_at) + "</td>" +
             "<td>" + t.uses_total + "回</td><td>" + t.used + "回</td><td><b>" + t.uses_left + "回</b></td>" +
             "<td>" + jd(t.expires_at) + "</td><td><small>" + (rp || (t.remind_sent ? "送信済み" : "対象外")) + "</small></td><td>" + esc(t.status) + "</td>" +
-            '<td><button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-mail">メール</button> <button type="button" class="tk-adj">調整</button>' +
+            '<td>' + (t.status === '有効' && t.uses_left > 0 && t.expires_at >= Date.now() ? '<button type="button" class="tk-book pm-red">予約する</button> ' : '') + '<button type="button" class="tk-hist">履歴</button> <button type="button" class="tk-mail">メール</button> <button type="button" class="tk-adj">調整</button>' +
             (t.kind !== "revival" && !(t.revival && t.revival.total) ? ' <button type="button" class="tk-revive-run" title="この購入に対して、期限切れの未使用分を復活できるか確認します（同じ購入で二重に復活はしません）">復活確認</button>' : "") + "</td></tr>" +
             '<tr class="pm-tk-histrow" hidden><td colspan="10">' +
             (Array.isArray(t.history) ? t.history : []).map((h) =>
@@ -2660,7 +2673,17 @@
       if (box) box.hidden = e.target.value !== "some";
     });
     wrap.addEventListener("click", async (e) => {
+      if (wrap.getAttribute("aria-busy") === "true") return;
+      const mutating = e.target.matches(".tk-save,.tk-del,.tk-up,.tk-down,.tk-adj,.tk-revive-run,#pm-tk-add,#pm-tk-ssave,#pm-tk-offer-save,#pm-tk-rsave");
+      if (mutating) {
+        wrap.setAttribute("aria-busy", "true");
+        wrap.querySelectorAll("button,input,textarea,select").forEach(el => { el.dataset.tkWasDisabled = el.disabled ? "1" : "0"; el.disabled = true; });
+      }
+      try {
       const planRow = e.target.closest("[data-plan]");
+      if (planRow && e.target.classList.contains("tk-detail-toggle")) {
+        const details = planRow.querySelector(".pm-tk-details"); details.hidden = !details.hidden; e.target.setAttribute("aria-expanded", String(!details.hidden)); e.target.textContent = details.hidden ? "詳細設定" : "詳細を閉じる"; return;
+      }
       if (e.target.id === "pm-tk-add") {
         const body = {
           action: "add",
@@ -2677,7 +2700,7 @@
       if (planRow && e.target.classList.contains("tk-save")) {
         const some = planRow.querySelector(".tk-scope").value === "some";
         const body = {
-          action: "update", id: planRow.dataset.plan,
+          action: "update", id: planRow.dataset.plan, active: planRow.querySelector(".tk-active").checked,
           name: planRow.querySelector(".tk-name").value.trim(),
           price: Number(planRow.querySelector(".tk-price").value),
           uses: Number(planRow.querySelector(".tk-uses").value),
@@ -2696,9 +2719,6 @@
             "名称・価格（0円以上）・回数（1〜200）を確認してください。");
           return;
         }
-        // 公開の切り替えも同時に保存
-        await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "toggle", id: planRow.dataset.plan, active: planRow.querySelector(".tk-active").checked }) });
         window.alert("保存しました。予約サイト・マイページに反映されます（有効期限の変更は、これから購入される回数券に適用されます）。");
         loadPlans();
         return;
@@ -2712,12 +2732,12 @@
       if (e.target.id === "pm-tk-ssave") {
         const r = await fetch("/api/demo/ticket-plans", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "settings", bannerTitle: wrap.querySelector("#pm-tk-title").value, purchaseNote: wrap.querySelector("#pm-tk-pnote").value }) });
+        if (r.ok) { for (const id of ["pm-tk-title", "pm-tk-pnote"]) { const el = wrap.querySelector("#" + id); el.defaultValue = el.value; } }
         window.alert(r.ok ? "予約サイトの案内を保存しました。" : "保存できませんでした。");
         return;
       }
       if (e.target.id === "pm-tk-offer-save") {
         const button = e.target;
-        if (button.disabled) return;
         const monthlyOffer = {
           enabled: wrap.querySelector("#pm-tk-offer-enabled").checked,
           startDay: Number(wrap.querySelector("#pm-tk-offer-start").value),
@@ -2735,6 +2755,7 @@
             invalidMonthlyOfferDays: "開始日・終了日を1〜31日で確認してください。",
             monthlyOfferTranslationsRequired: "追加の説明文は8か国語すべてに入力してください。",
           }[j.error] || "保存できませんでした。入力内容とログイン状態を確認してください。");
+          acceptSaved(wrap.querySelector(".pm-tk-offer"));
           window.alert("限定料金の案内を保存しました。予約サイトを開き直すと反映されます。");
         } catch (error) {
           window.alert(error.name === "TimeoutError" ? "保存結果を確認できませんでした。画面を開き直して設定をご確認ください。" : error.message || "通信できませんでした。もう一度ご確認ください。");
@@ -2768,6 +2789,10 @@
         return;
       }
       const tkRow = e.target.closest("[data-tk]");
+      if (tkRow && e.target.classList.contains("tk-book")) {
+        if (!window.__pmOpenBookingEditor) { window.alert("予約画面を読み込めませんでした。画面を開き直してください。"); return; }
+        window.__pmOpenBookingEditor({ ticketId: tkRow.dataset.tk, onSaved: loadTickets }); return;
+      }
       if (tkRow && e.target.classList.contains("tk-hist")) {
         const hist = tkRow.nextElementSibling;
         if (hist) hist.hidden = !hist.hidden;
@@ -2804,6 +2829,11 @@
         loadTickets();
         return;
       }
+      } catch (_) { window.alert("保存結果を確認できませんでした。入力を残しています。最新の情報を確認してください。"); }
+      finally { if (mutating) {
+        wrap.removeAttribute("aria-busy");
+        wrap.querySelectorAll("[data-tk-was-disabled]").forEach(el => { el.disabled = el.dataset.tkWasDisabled === "1"; delete el.dataset.tkWasDisabled; });
+      } }
     });
   }
 

@@ -36,11 +36,12 @@ function bookingContext() {
     sessionStorage: { setItem: (k, v) => storage.set(k, String(v)), getItem: k => storage.get(k) || null, removeItem: k => storage.delete(k) },
     localStorage: { setItem() {} }, document: { getElementById: () => null },
     rescheduleId: () => '', clearReschedule() {}, store: () => [], saveStore() {}, T: s => s,
-    URLSearchParams, I18N: null, location: { pathname: '/book/complete', search: '?id=test-current' },
+    URL, Headers, Response, URLSearchParams, I18N: null, location: { origin:'http://localhost', pathname: '/book/complete', search: '?id=test-current' },
   });
   ctx.response = { id: 'test-current', token: 'test-token' };
   ctx.resOk = true;
   ctx.origFetch = async () => ({ ok: ctx.resOk, clone: () => ({ json: async () => ctx.response }) });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/ticket-display.js'), 'utf8'), ctx);
   vm.runInContext(slice('  window.fetch = async', '  // ---- 回数券（会員向け）'), ctx);
   vm.runInContext(slice('  function decorateTicketComplete()', '  // ---- 予約の日時変更'), ctx);
   vm.runInContext(slice('  function decorateRescheduleComplete()', '  // ---- 予約フォーム（お客様情報）'), ctx);
