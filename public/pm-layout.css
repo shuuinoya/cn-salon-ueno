@@ -2270,6 +2270,28 @@ main.ledger-app .pm-lockbtn:hover { background-color:#efe7da; }
 .pm-tk-toolbar label { display:grid; gap:6px; flex:1; max-width:440px; font-weight:600; }
 #pm-ticket-modal .pm-tk-search { width:100%; min-height:44px; box-sizing:border-box; background:#faf9f7; }
 .pm-tk-count { color:#6b6257; padding-bottom:12px; }
+.pm-tk-filters {display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-bottom:12px;}
+.pm-tk-filters label {display:grid;gap:5px;flex:1 1 180px;min-width:0;font-size:12px;}
+#pm-ticket-modal .pm-tk-filters select {width:100%;min-width:0;min-height:40px;box-sizing:border-box;}
+#pm-ticket-modal .pm-tk-filters button {min-height:40px;}
+.pm-tk-filter-context {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;background:#f7f3eb;margin-bottom:12px;}
+.pm-tk-filter-context span {overflow-wrap:anywhere;min-width:0;}.pm-tk-filter-context button {flex-shrink:0;}
+.pm-tk-plan-scope {font-size:12px;color:#655d54;overflow-wrap:anywhere;margin:6px 0;}
+#pm-ticket-modal .tk-holders {min-height:40px;margin-top:4px;}
+.pm-tk-preview .pv-scope {display:block;overflow-wrap:anywhere;}
+.pm-mn-ticket-section {margin:12px 0 20px;padding:12px;border:1px solid #e5d9cd;border-radius:8px;}
+.pm-mn-ticket-section>summary {font-size:15px;font-weight:700;cursor:pointer;}
+.pm-mn-ticket-section>p {font-size:12px;color:#655d54;}
+.pm-mn-ticket {display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #e5d9cd;padding:12px 0;}
+.pm-mn-ticket>div:first-child {min-width:0;overflow-wrap:anywhere;}
+.pm-mn-ticket small {display:block;font-size:12px;color:#655d54;margin-top:5px;}
+.pm-mn-ticket-actions {display:flex;gap:6px;flex-shrink:0;}
+#pm-menu-modal .pm-mn-tickets button {min-height:40px;white-space:nowrap;}
+@media(max-width:640px) {
+  .pm-tk-toolbar{flex-wrap:wrap;gap:8px;}.pm-tk-toolbar label{flex-basis:100%;}.pm-tk-count{padding-bottom:0;}
+  .pm-tk-filters label{flex-basis:calc(50% - 5px);}.pm-tk-filters label:first-child{flex-basis:100%;}
+  .pm-tk-filter-context{flex-wrap:wrap;}.pm-mn-ticket{align-items:flex-start;flex-direction:column;}
+}
 #pm-ticket-modal .pm-tk-owned-table th { background:#f7f5f1; border-width:0 0 1px; font-size:12px; }
 #pm-ticket-modal .pm-tk-list .pm-tk-owned-table { min-width:0; }
 #pm-ticket-modal .pm-tk-owned-table td { border-width:0 0 1px; padding:14px 10px; vertical-align:middle; }

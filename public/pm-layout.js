@@ -2435,9 +2435,28 @@
     });
   }
 
-  // 店舗情報：回数券管理（プランの作成・編集・公開と、顧客保有券の残数・履歴・調整）
-  async function openTicketAdmin() {
-    document.getElementById("pm-ticket-modal")?.remove();
+  // 名前の変更・同名プラン・同姓同名で誤ってまとめず、登録IDと所有者で照合する。
+  function ticketOwnerKey(ticket) {
+    const email = String(ticket.member_email || ticket.buyer_email || '').trim().toLowerCase();
+    return email ? 'email:' + email : 'ticket:' + ticket.id;
+  }
+  function ticketMatchesFilter(ticket, filter = {}) {
+    const q = String(filter.query || '').trim().normalize('NFKC').toLocaleLowerCase();
+    const words = [ticket.buyer_name, ticket.buyer_email, ticket.member_email, ticket.buyer_phone, ticket.plan_name, ticket.id, ...(ticket.menu_names || [])].join(' ').normalize('NFKC').toLocaleLowerCase();
+    return (!q || words.includes(q)) && (!filter.plan || ticket.plan_id === filter.plan) &&
+      (!filter.menu || ticket.menu_scope === 'all' || Array.isArray(ticket.menu_scope) && ticket.menu_scope.includes(filter.menu)) &&
+      (!filter.status || ticket.status === filter.status);
+  }
+  function ticketPlanScopeLabel(plan, courses) {
+    if (plan.menu_scope === 'all') return 'すべてのメニュー';
+    if (!Array.isArray(plan.menu_scope) || !plan.menu_scope.length) return '対象メニューを確認してください';
+    return plan.menu_scope.map(id => courses.find(c => c.id === id)?.name || '未登録メニュー（' + id + '）').join('・');
+  }
+
+  // 店舗情報：回数券管理（販売設定・メニュー一覧・購入済みの券を同じIDで結ぶ）
+  async function openTicketAdmin(options = {}) {
+    const existing = document.getElementById("pm-ticket-modal");
+    if (existing) { existing.querySelector('#pm-tk-close-top')?.focus(); return; }
     const wrap = document.createElement("div");
     wrap.id = "pm-ticket-modal";
     wrap.innerHTML =
@@ -2461,7 +2480,9 @@
       '<details class="pm-tk-section"><summary>有効期限前のリマインドメール</summary>' +
       '<div class="pm-tk-remind">読み込み中…</div></details>' +
       '</div><div id="pm-tk-owned-panel" role="tabpanel" aria-labelledby="pm-tk-owned-tab">' +
-      '<div class="pm-tk-toolbar"><label>お客様・回数券を探す<input type="search" class="pm-tk-search" data-ui-only placeholder="お名前・メール・券名" aria-label="お客様・回数券を探す"></label><span class="pm-tk-count" aria-live="polite"></span></div>' +
+      '<div class="pm-tk-toolbar"><label>お客様・回数券を探す<input type="search" class="pm-tk-search" data-ui-only placeholder="お名前・メール・電話・券名" aria-label="お客様・回数券を探す"></label><span class="pm-tk-count" aria-live="polite"></span></div>' +
+      '<div class="pm-tk-filters"><label>回数券<select class="pm-tk-plan-filter" data-ui-only><option value="">すべての回数券</option></select></label><label>対象メニュー<select class="pm-tk-menu-filter" data-ui-only><option value="">すべてのメニュー</option></select></label><label>状態<select class="pm-tk-status-filter" data-ui-only><option value="">すべて</option><option>有効</option><option>使い切り</option><option>期限切れ</option></select></label><button type="button" class="pm-tk-filter-clear">絞り込みを解除</button></div>' +
+      '<div class="pm-tk-filter-context" hidden><span></span><button type="button" class="pm-tk-filter-settings">この回数券の設定</button></div>' +
       '<div class="pm-tk-list">読み込み中…</div><p class="pm-tk-no-match" hidden>該当する回数券がありません。</p></div>' +
       '<div class="pm-shop-actions"><button type="button" id="pm-tk-close">閉じる</button></div>' +
       "</section>";
@@ -2476,9 +2497,10 @@
     const previousFocus = document.activeElement;
     const close = () => {
       if (wrap.getAttribute("aria-busy") === "true") return;
-      const dirty = [...wrap.querySelectorAll("input:not([data-ui-only]),textarea,select")].some(el => el.type === "checkbox" ? el.checked !== el.defaultChecked : el.tagName === "SELECT" ? el.value !== ([...el.options].find(o => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue);
+      const dirty = [...wrap.querySelectorAll("input:not([data-ui-only]),textarea:not([data-ui-only]),select:not([data-ui-only])")].some(el => el.type === "checkbox" ? el.checked !== el.defaultChecked : el.tagName === "SELECT" ? el.value !== ([...el.options].find(o => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue);
       if (dirty && !window.confirm("保存していない変更を破棄して閉じますか？")) return;
       wrap.remove(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      if (typeof options.onClose === 'function') options.onClose();
     };
     wrap.querySelector("#pm-tk-close").addEventListener("click", close);
     wrap.querySelector("#pm-tk-close-top").addEventListener("click", close);
@@ -2492,17 +2514,46 @@
       return new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
     };
 
+    let plans = [], ownedTickets = [], ticketsLoaded = false;
+    let selectedPlan = String(options.planId || '');
     function filterTickets() {
-      const q = wrap.querySelector('.pm-tk-search').value.trim().toLocaleLowerCase(); let found = 0;
+      const filter = { query: wrap.querySelector('.pm-tk-search').value, plan: selectedPlan, menu: wrap.querySelector('.pm-tk-menu-filter').value, status: wrap.querySelector('.pm-tk-status-filter').value };
+      const matched = ownedTickets.filter(t => ticketMatchesFilter(t, filter)), ids = new Set(matched.map(t => t.id));
       wrap.querySelectorAll('.pm-tk-mainrow').forEach(row => {
-        const match = !q || row.dataset.search.includes(q); row.hidden = !match;
-        if (match) found++;
-        else { row.nextElementSibling.hidden = true; row.nextElementSibling.nextElementSibling.hidden = true; row.querySelector('.tk-hist')?.setAttribute('aria-expanded', 'false'); }
+        const match = ids.has(row.dataset.tk); row.hidden = !match;
+        if (!match) { row.nextElementSibling.hidden = true; row.nextElementSibling.nextElementSibling.hidden = true; row.querySelector('.tk-hist')?.setAttribute('aria-expanded', 'false'); }
       });
-      wrap.querySelector('.pm-tk-count').textContent = found + '件';
-      wrap.querySelector('.pm-tk-no-match').hidden = !q || found > 0;
+      wrap.querySelector('.pm-tk-count').textContent = ticketsLoaded ? new Set(matched.map(ticketOwnerKey)).size + '人 ／ ' + matched.length + '枚' : '確認中';
+      wrap.querySelector('.pm-tk-no-match').hidden = !ticketsLoaded || matched.length > 0 || !(filter.query.trim() || selectedPlan || filter.menu || filter.status);
+      const context = wrap.querySelector('.pm-tk-filter-context'), plan = plans.find(p => p.id === selectedPlan);
+      context.hidden = !selectedPlan;
+      context.querySelector('span').textContent = plan ? plan.name + ' のお客様' : '販売終了・削除済みの回数券の記録';
+      context.querySelector('button').hidden = !plan;
     }
     wrap.querySelector('.pm-tk-search').addEventListener('input', filterTickets);
+    wrap.querySelector('.pm-tk-plan-filter').addEventListener('change', e => { selectedPlan = e.target.value; filterTickets(); });
+    ['.pm-tk-menu-filter', '.pm-tk-status-filter'].forEach(s => wrap.querySelector(s).addEventListener('change', filterTickets));
+    function refreshTicketFilters() {
+      const choices = new Map(plans.map(p => [p.id, p.name]));
+      ownedTickets.forEach(t => { if (!choices.has(t.plan_id)) choices.set(t.plan_id, '販売終了：' + t.plan_name); });
+      const names = new Map(); choices.forEach(name => names.set(name, (names.get(name) || 0) + 1));
+      wrap.querySelector('.pm-tk-plan-filter').innerHTML = '<option value="">すべての回数券</option>' + [...choices].map(([id, name]) => '<option value="' + esc(id) + '">' + esc(name + (names.get(name) > 1 ? '（' + id + '）' : '')) + '</option>').join('');
+      wrap.querySelector('.pm-tk-plan-filter').value = selectedPlan;
+      const menu = wrap.querySelector('.pm-tk-menu-filter'), previous = menu.value, menus = new Map(courses.map(c => [c.id, c.name]));
+      ownedTickets.forEach(t => { if (Array.isArray(t.menu_scope)) t.menu_scope.forEach((id, i) => { if (!menus.has(id)) menus.set(id, t.menu_names?.[i] || '未登録メニュー（' + id + '）'); }); });
+      menu.innerHTML = '<option value="">すべてのメニュー</option>' + [...menus].map(([id, name]) => '<option value="' + esc(id) + '">' + esc(name) + '</option>').join(''); menu.value = previous;
+      wrap.querySelectorAll('.tk-holders').forEach(button => {
+        const count = new Set(ownedTickets.filter(t => t.plan_id === button.dataset.planId).map(ticketOwnerKey)).size;
+        button.textContent = ticketsLoaded ? '保有者を見る（' + count + '人）' : '保有者を確認中'; button.disabled = !ticketsLoaded;
+      });
+      filterTickets();
+    }
+    function openPlanSettings(id) {
+      const row = [...wrap.querySelectorAll('.pm-tk-plan')].find(r => r.dataset.plan === id);
+      if (!row) return;
+      showTicketTab('settings'); row.querySelector('.pm-tk-details').hidden = false;
+      const button = row.querySelector('.tk-detail-toggle'); button.setAttribute('aria-expanded', 'true'); button.textContent = '詳細を閉じる'; button.focus(); row.scrollIntoView({ block: 'nearest' });
+    }
     function showTicketTab(key) {
       wrap.querySelectorAll('[data-ticket-tab]').forEach(button => { const selected = button.dataset.ticketTab === key; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; });
       wrap.querySelector('#pm-tk-owned-panel').hidden = key !== 'owned';
@@ -2514,13 +2565,16 @@
       showTicketTab(key); wrap.querySelector('[data-ticket-tab="' + key + '"]').focus();
     });
     let courses = [];
+    showTicketTab(options.tab === 'settings' ? 'settings' : 'owned');
     const dt16 = (ms) => ms ? new Date(ms + 9 * 3600e3).toISOString().replace("T", " ").slice(0, 16) : "-";
     async function loadPlans() {
       const box = wrap.querySelector(".pm-tk-plans");
       try {
-        const j = await (await fetch("/api/demo/ticket-plans", { cache: "no-store" })).json();
-        if (!courses.length) { try { courses = (await (await fetch("/api/demo/courses", { cache: "no-store" })).json()).courses || []; } catch {} }
-        const plans = j.plans || [];
+        const response = await fetch("/api/demo/ticket-plans", { cache: "no-store" });
+        if (!response.ok) throw new Error('load'); const j = await response.json();
+        const courseResponse = await fetch("/api/demo/courses", { cache: "no-store" });
+        if (!courseResponse.ok) throw new Error('load'); courses = (await courseResponse.json()).courses || [];
+        plans = j.plans || [];
         box.innerHTML = plans.length ? plans.map((p2, idx) => {
           const some = Array.isArray(p2.menu_scope);
           const months = p2.valid_months || 12;
@@ -2530,6 +2584,7 @@
           (p2.active && p2.show_banner !== false ? '<span class="on">予約・メニューの最上部に表示</span>' : "") + "</span>" +
           '<span class="pm-tk-order"><button type="button" class="tk-up" title="上へ"' + (idx === 0 ? " disabled" : "") + '>↑</button><button type="button" class="tk-down" title="下へ"' + (idx === plans.length - 1 ? " disabled" : "") + '>↓</button></span><button type="button" class="tk-detail-toggle" aria-expanded="false">詳細設定</button></div>' +
           '<div class="pm-tk-plan-summary">' + p2.uses + '回 ／ ' + Number(p2.price).toLocaleString("ja-JP") + '円 ／ ' + months + 'か月有効</div>' +
+          '<p class="pm-tk-plan-scope">対象メニュー：' + esc(ticketPlanScopeLabel(p2, courses)) + '</p><button type="button" class="tk-holders" data-plan-id="' + esc(p2.id) + '" disabled>保有者を確認中</button>' +
           '<div class="pm-tk-details" hidden><div class="pm-tk-grid">' +
           '<label class="w2">名称<input type="text" class="tk-name" value="' + esc(p2.name) + '" maxlength="120"></label>' +
           '<label>価格（円）<input type="number" class="tk-price" value="' + p2.price + '" min="0" step="100"></label>' +
@@ -2552,12 +2607,15 @@
           '<label class="pm-tk-pub"><input type="checkbox" class="tk-active"' + (p2.active ? " checked" : "") + "> 販売する（マイページで購入できる）</label>" +
           '<label class="pm-tk-pub"><input type="checkbox" class="tk-banner"' + (p2.show_banner !== false ? " checked" : "") + "> 予約・メニューページの最上部に表示</label>" +
           '<span class="pm-tk-btns"><button type="button" class="pm-red tk-save">変更を保存</button><button type="button" class="tk-del">削除</button></span></div>' +
-          '<div class="pm-tk-preview"><span>予約サイトでの表示：</span><b class="pv-name"></b><small class="pv-price"></small></div>' +
+          '<div class="pm-tk-preview"><span>予約サイトでの表示：</span><b class="pv-name"></b><small class="pv-price"></small><small class="pv-scope"></small></div>' +
+          '<p class="pm-tk-note">保存すると販売メニュー・購入欄へ反映されます。購入済みの券は購入時の条件を保持します。</p>' +
           "</div></div>";
         }).join("") : '<p class="pm-tk-empty">プランがありません。上の欄から追加してください。</p>';
         box.querySelectorAll("[data-plan]").forEach(preview);
         renderSite(j);
         renderRemind(j);
+        refreshTicketFilters();
+        if (options.tab === 'settings' && options.planId) { openPlanSettings(options.planId); options = { ...options, planId: '' }; }
       } catch { box.textContent = "読み込みに失敗しました"; }
     }
     const RESEND_ERR = { alreadyResent: "このメールはすでに再送しています。", notFailed: "送信失敗のメールだけ再送できます。", hasSecret: "パスワードを含むメールは再送できません。",
@@ -2572,6 +2630,7 @@
       v(".pv-name").textContent = v(".tk-name").value + "（" + (Number(v(".tk-uses").value) || 0) + "回分・有効期限は購入日から" + validLabel(v(".tk-months").value) + "）";
       v(".pv-price").innerHTML = (reg > price ? "<s>" + yen(reg) + "</s> " : "") + yen(price) +
         (reg > price ? "（" + yen(reg - price) + "お得）" : "") + (v(".tk-active").checked ? "" : "　※非公開のため表示されません");
+      v('.pv-scope').textContent = '対象メニュー：' + ticketPlanScopeLabel({ menu_scope: v('.tk-scope').value === 'all' ? 'all' : [...row.querySelectorAll('.tk-menu:checked')].map(el => el.value) }, courses);
     }
     function renderSite(j) {
       const st = j.settings || {};
@@ -2647,8 +2706,12 @@
     async function loadTickets() {
       const box = wrap.querySelector(".pm-tk-list");
       try {
-        const tks = (await (await fetch("/api/demo/tickets", { cache: "no-store" })).json()).tickets || [];
-        if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; filterTickets(); return; }
+        const response = await fetch("/api/demo/tickets", { cache: "no-store" });
+        if (!response.ok) throw new Error('load');
+        const tks = (await response.json()).tickets;
+        if (!Array.isArray(tks)) throw new Error('load');
+        ownedTickets = tks; ticketsLoaded = true;
+        if (!tks.length) { box.innerHTML = '<p class="pm-tk-empty">購入された回数券はまだありません。</p>'; refreshTicketFilters(); return; }
         box.innerHTML =
           '<table class="pm-tk-table pm-tk-owned-table"><thead><tr><th>お客様</th><th>回数券</th><th>残り</th><th>有効期限</th><th>操作</th></tr></thead><tbody>' +
           tks.map((t) => {
@@ -2678,8 +2741,8 @@
             '<tr class="pm-tk-mailrow" hidden><td colspan="5">' + ticketMailsHtml(t) + "</td></tr>";
           }).join("") +
           "</tbody></table>";
-        filterTickets();
-      } catch { box.textContent = "読み込みに失敗しました"; }
+        refreshTicketFilters();
+      } catch { ticketsLoaded = false; box.textContent = "読み込みに失敗しました。画面を開き直してください。"; refreshTicketFilters(); wrap.querySelector('.pm-tk-count').textContent = '確認できません'; }
     }
     loadPlans();
     loadTickets();
@@ -2690,7 +2753,7 @@
     });
     wrap.addEventListener("change", (e) => {
       const row = e.target.closest("[data-plan]");
-      if (row && e.target.classList.contains("tk-active")) preview(row);
+      if (row) preview(row);
       if (!e.target.classList.contains("tk-scope")) return;
       const box = e.target.closest("[data-plan]").querySelector(".pm-tk-menus");
       if (box) box.hidden = e.target.value !== "some";
@@ -2704,6 +2767,17 @@
       }
       try {
       const tab = e.target.closest('[data-ticket-tab]'); if (tab) { showTicketTab(tab.dataset.ticketTab); return; }
+      if (e.target.classList.contains('tk-holders')) {
+        selectedPlan = e.target.dataset.planId;
+        wrap.querySelector('.pm-tk-search').value = '';
+        wrap.querySelector('.pm-tk-menu-filter').value = ''; wrap.querySelector('.pm-tk-status-filter').value = '';
+        wrap.querySelector('.pm-tk-plan-filter').value = selectedPlan;
+        showTicketTab('owned'); filterTickets(); wrap.querySelector('.pm-tk-search').focus(); return;
+      }
+      if (e.target.classList.contains('pm-tk-filter-settings')) { openPlanSettings(selectedPlan); return; }
+      if (e.target.classList.contains('pm-tk-filter-clear')) {
+        selectedPlan = ''; wrap.querySelectorAll('[data-ui-only]').forEach(el => { el.value = ''; }); filterTickets(); return;
+      }
       const planRow = e.target.closest("[data-plan]");
       if (planRow && e.target.classList.contains("tk-detail-toggle")) {
         const details = planRow.querySelector(".pm-tk-details"); details.hidden = !details.hidden; e.target.setAttribute("aria-expanded", String(!details.hidden)); e.target.textContent = details.hidden ? "詳細設定" : "詳細を閉じる"; return;
@@ -2873,6 +2947,7 @@
       "<h2>店舗マスタ｜メニュー一覧</h2>" +
       '<p class="pm-shop-sub">メニューの追加・変更・削除・写真の登録ができます。空き状況・予約金額に即時反映されます。' +
       "（保存版のため、お客様画面のメニュー紹介ページには追加メニューは表示されません。追加メニューの予約受付・変更後の料金はサーバー側で正しく扱われます）</p>" +
+      '<details class="pm-mn-ticket-section" open><summary>回数券メニュー</summary><p>回数券の販売設定と同じ内容です。設定や保有者はこちらから確認できます。</p><div class="pm-mn-tickets">読み込み中…</div></details>' +
       '<div class="pm-menu-new">' +
       '<input type="text" id="pm-mn-name" placeholder="新しいメニュー名" maxlength="120">' +
       '<input type="number" id="pm-mn-price" placeholder="料金(円)" min="0" step="100">' +
@@ -2888,6 +2963,35 @@
     const close = () => wrap.remove();
     wrap.querySelector("#pm-mn-close").addEventListener("click", close);
     wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+
+    async function loadTicketMenus(knownCourses) {
+      const box = wrap.querySelector('.pm-mn-tickets');
+      try {
+        const response = await fetch('/api/demo/ticket-plans', { cache: 'no-store' });
+        if (!response.ok) throw new Error('load');
+        const { plans } = await response.json();
+        let courses = knownCourses;
+        if (!courses) { const r = await fetch('/api/demo/courses', { cache: 'no-store' }); if (!r.ok) throw new Error('load'); courses = (await r.json()).courses; }
+        if (!wrap.isConnected) return;
+        box.replaceChildren();
+        if (!plans?.length) { box.textContent = '回数券はまだ登録されていません。'; }
+        for (const plan of plans || []) {
+          const row = document.createElement('div'); row.className = 'pm-mn-ticket';
+          const info = document.createElement('div'), name = document.createElement('b'), line = document.createElement('small'), scope = document.createElement('small');
+          name.textContent = plan.name;
+          line.textContent = plan.uses + '回 ／ ' + Number(plan.price).toLocaleString('ja-JP') + '円 ／ ' + (plan.valid_months || 12) + 'か月有効 ／ ' + (plan.active ? '販売中' : '非公開') + (plan.active && plan.show_banner !== false ? ' ／ メニュー掲載中' : '');
+          scope.textContent = '対象メニュー：' + ticketPlanScopeLabel(plan, courses || []); info.append(name, line, scope);
+          const actions = document.createElement('div'); actions.className = 'pm-mn-ticket-actions';
+          for (const [label, tab] of [['設定', 'settings'], ['保有者を見る', 'owned']]) {
+            const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+            button.addEventListener('click', () => openTicketAdmin({ tab, planId: plan.id, onClose: () => loadTicketMenus() })); actions.appendChild(button);
+          }
+          row.append(info, actions); box.appendChild(row);
+        }
+        const all = document.createElement('button'); all.type = 'button'; all.textContent = '回数券の設定一覧';
+        all.addEventListener('click', () => openTicketAdmin({ tab: 'settings', onClose: () => loadTicketMenus() })); box.appendChild(all);
+      } catch { if (wrap.isConnected) box.textContent = '回数券を読み込めませんでした。画面を開き直してください。'; }
+    }
 
     const listEl = wrap.querySelector(".pm-menu-list");
     const post = async (body) => {
@@ -3006,6 +3110,7 @@
       }
       table.appendChild(tb);
       listEl.appendChild(table);
+      loadTicketMenus(courses);
     };
     // 新規メニュー用の写真（追加を押すまで保留しておく）
     let newPhoto = "";
