@@ -1790,7 +1790,7 @@ main.ledger-app .ledger-row > .ledger-staff-cell { position: sticky; left: 0; }
   main.ledger-app .ledger-side .ledger-duration button { min-height: 40px; }
   main.ledger-app .ledger-side .ledger-form-actions { gap: 8px; }
   /* 固定表示のお知らせ（デモ注記・トースト・保存結果）は画面下に横いっぱいで重ねず並べる */
-  main.ledger-app .ledger-demo { left: 8px; right: 8px; bottom: 8px; max-width: none; }
+  main.ledger-app .ledger-demo { position: static; inset: auto; margin: 6px 8px; max-width: none; width: auto; box-shadow: none; }
   #pm-toast { left: 8px; right: 8px; bottom: 64px; }
   main.ledger-app .ledger-feedback { left: 8px; right: 8px; bottom: 64px; max-width: none; }
   /* 予約枠ホバーの詳細ツールチップは画面幅に収める */
@@ -2327,3 +2327,6 @@ main.ledger-app .pm-lockbtn:hover { background-color:#efe7da; }
   .pm-tk-histrow,.pm-tk-mailrow {display:block;} #pm-ticket-modal .pm-tk-histrow>td,#pm-ticket-modal .pm-tk-mailrow>td {display:block;overflow:auto;}
   #pm-ticket-modal .pm-menu-new {flex-wrap:wrap;} #pm-ticket-modal .pm-menu-new input[type=text] {flex-basis:100%;}
 }
+
+/* 案内文で台帳の操作ボタンを覆わない。スマホでは通常の配置に戻す。 */
+main.ledger-app .ledger-demo { pointer-events: none; }
