@@ -26,16 +26,26 @@ async function destinationTests(){
   await test("業務・休憩を別日移動の札へは入れない",()=>{const x=judgeSetup();assert.equal(x.context.judge(x.p,{kind:"park"}).level,"ng");});
 }
 async function durationTests(){
-  const posts=[],input={value:"75"};let dragging=false;
-  const context=vm.createContext({window:{fetch:async(_url,init)=>{posts.push(JSON.parse(init.body));return{ok:false};}},Response,
-    document:{body:{classList:{contains:()=>dragging}},querySelector:()=>input}});
-  vm.runInContext(part("  const origFetch =","  // 狭い画面"),context);
-  const send=body=>context.window.fetch("/api/demo/schedule",{method:"POST",body:JSON.stringify({action:"block",date:"2026-10-22",staffId:"b",start:600,end:630,kind:"work",...body})});
-  await test("フォームの自由入力75分を登録へ反映",async()=>{await send({});assert.equal(posts.at(-1).end,675);});
-  await test("フォームの75分が別枠の30分ドラッグを上書きしない",async()=>{dragging=true;await send({id:"test-block"});assert.equal(posts.at(-1).end,630);dragging=false;});
-  await test("削除時に自由入力を適用しない",async()=>{await send({id:"test-block",remove:true});assert.equal(posts.at(-1).end,630);});
-  await test("空欄なら選択済みの終了時刻を維持",async()=>{input.value="";await send({});assert.equal(posts.at(-1).end,630);});
-  for(const value of ["4","1021","75.5","-1"])await test("不正な自由入力"+value+"を丸めて登録しない",async()=>{input.value=value;const count=posts.length,r=await send({});assert.equal(r.status,400);assert.equal(posts.length,count);assert.equal((await r.json()).error,"invalid");});
+  for(const name of ["AdminSchedule-pm2.js","AdminSchedule-7iLokhEf.js"]){
+    const code=fs.readFileSync(path.join(__dirname,"../public/_next/static/chunks/",name),"utf8"),ctx=vm.createContext({});
+    const start=code.indexOf("function updateBlockEdit("),end=code.indexOf("function S(",start);
+    assert(start>=0&&end>start);vm.runInContext(code.slice(start,end),ctx);
+    const initial={type:"block",start:720,end:840,kind:"work",note:"テスト"};
+    await test(name+"自由入力75分が表示終了時刻と送信値を同時に13:15にする",()=>{const e=ctx.updateBlockEdit(initial,{duration:"75"});assert.equal(e.end,795);assert(ctx.validBlockEdit(e));});
+    await test(name+"開始時刻を変えたら75分の長さを保つ",()=>{let e=ctx.updateBlockEdit(initial,{duration:"75"});e=ctx.updateBlockEdit(e,{start:900});assert.equal(e.end,975);assert(ctx.validBlockEdit(e));});
+    await test(name+"終了時間・定型ボタンの変更は古い自由入力を残さない",()=>{let e=ctx.updateBlockEdit(initial,{duration:"75"});e=ctx.updateBlockEdit(e,{end:750});assert.equal(e.duration,undefined);assert.equal(e.end-e.start,30);assert(ctx.validBlockEdit(e));});
+    await test(name+"1分単位の76分を丸めない",()=>{const e=ctx.updateBlockEdit(initial,{duration:"76"});assert.equal(e.end,796);assert(ctx.validBlockEdit(e));});
+    await test(name+"勤務範囲外・空欄・小数・負数のまま保存しない",()=>{for(const v of ["","4","1021","75.5","-1","1000"]){const e=ctx.updateBlockEdit(initial,{duration:v});assert.equal(ctx.validBlockEdit(e),false,v);}});
+    await test(name+"別の枠を開くと前の自由入力を引き継がない",()=>{ctx.updateBlockEdit(initial,{duration:"75"});const e=ctx.updateBlockEdit({...initial,id:"another",end:780},{note:"テスト別枠"});assert.equal(e.end-e.start,60);assert.equal(e.duration,undefined);});
+    await test(name+"翌3時をまたぐ時刻変更では保存を止める",()=>{const e=ctx.updateBlockEdit(initial,{start:1560});assert.equal(ctx.validBlockEdit(e),false);});
+    await test(name+"開始・終了の5分未満の差は保存を止める",()=>{assert.equal(ctx.validBlockEdit({...initial,end:724}),false);});
+  }
+  await test("送信時に他の入力欄から終了時刻を上書きしない",async()=>{
+    const posts=[],context=vm.createContext({window:{fetch:async(_url,init)=>{posts.push(JSON.parse(init.body));return{ok:false};}},Response,
+      document:{querySelector:()=>assert.fail("送信値を別のDOMから補正しない")}});
+    vm.runInContext(part("  const origFetch =","  // 狭い画面"),context);
+    await context.window.fetch("/api/demo/schedule",{method:"POST",body:JSON.stringify({action:"block",start:720,end:796})});assert.equal(posts[0].end,796);
+  });
 }
 async function saveTests(){
   for(const kind of ["break","work"])await test(kind+"のドラッグは長さ・種別・メモを保ち1回だけ保存",async()=>{

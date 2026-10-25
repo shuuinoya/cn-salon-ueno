@@ -28,5 +28,17 @@ function cache(){const calls=[],timers=new Map();let n=0;class ES{addEventListen
  await check('シフト保存は編集開始時の版を送り、勝手に最新に置き換えない',async()=>{const x=shift();await x.post({action:'shift'});assert.equal(x.posts.length,1);assert.equal(JSON.parse(x.posts[0].body).revision,7);assert(x.posts[0].signal);await x.post({action:'attendance'});assert.equal(JSON.parse(x.posts[1].body).revision,8)});
  await check('拒否されたシフト保存は版を進めない',async()=>{const x=shift();x.reply={ok:false,json:async()=>({error:'scheduleConflict'})};await x.post({action:'shift'});await x.post({action:'shift'});assert.deepEqual(x.posts.map(i=>JSON.parse(i.body).revision),[7,7]);});
  await check('シフト削除の通信失敗を自動再送しない',async()=>{const x=shift();x.error=Error('timeout');await assert.rejects(x.post({action:'shift',remove:true}));assert.equal(x.posts.length,1)});
+ function shiftSave(){
+  const x={posts:[],messages:[],closed:0,button:{disabled:false},values:{start:660,end:1260,in:665,out:1270,transport:500,addProposals:2,addApproved:1,nextProposals:0,nextApproved:0,note:'テスト'},reply:{ok:true,j:{ok:true}}};
+  const context=vm.createContext({sid:'test-staff',actions:{querySelector:()=>({addEventListener:(_k,fn)=>{x.save=()=>fn({currentTarget:x.button});}})},
+   box:{querySelector:s=>{const k=s.match(/name="([^"]+)"/)[1];return{value:x.values[k],checked:false};}},readTime:(_b,k)=>x.values[k],
+   busy:v=>{x.button.disabled=v;},showMsg:s=>x.messages.push(s),uncertain:'通信結果不明',close:()=>x.closed++,
+   post:async b=>{x.posts.push(b);if(x.error)throw x.error;return x.reply;}});
+  vm.runInContext(slice(layout,'    actions.querySelector(".pm-si-save").addEventListener','    actions.querySelector(".pm-si-del")'),context);return x;
+ }
+ await check('実際のシフト画面は予定と勤怠を1回の専用要求で送る',async()=>{const x=shiftSave();await x.save();assert.equal(x.posts.length,1);assert.equal(x.posts[0].action,'shiftWithAttendance');assert.equal(x.posts[0].start,660);assert.equal(x.posts[0].attendance.clockIn,665);assert.equal(x.posts[0].attendance.transport,500);assert.equal(x.closed,1);assert(!x.button.disabled);});
+ await check('勤怠の上限超過はシフト送信前に止めて入力を残す',async()=>{for(const [k,value] of [['transport',1000001],['addProposals',10000],['addApproved',-1],['nextApproved',1.5]]){const x=shiftSave();x.values[k]=value;await x.save();assert.equal(x.posts.length,0);assert.equal(x.closed,0);assert(x.messages.length);}});
+ await check('一括保存拒否は閉じず、再操作できる状態に戻す',async()=>{const x=shiftSave();x.reply={ok:false,j:{error:'scheduleConflict'}};await x.save();assert.equal(x.posts.length,1);assert.equal(x.closed,0);assert(!x.button.disabled);assert(x.messages.some(s=>s.includes('最新の台帳')));});
+ await check('一括保存の切断で2番目の保存や自動再送を行わない',async()=>{const x=shiftSave();x.error=Error('offline');await x.save();assert.equal(x.posts.length,1);assert.equal(x.closed,0);assert(!x.button.disabled);assert(x.messages.includes('通信結果不明'));});
  console.log(JSON.stringify({checks:results.length,passed:results.filter(x=>x.ok).length,failures:results.filter(x=>!x.ok)},null,2));if(results.some(x=>!x.ok))process.exitCode=1;
 })();

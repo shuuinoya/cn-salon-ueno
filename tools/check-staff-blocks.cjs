@@ -195,6 +195,26 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     a.postSchedule({action:'attendance',date,staffId:A,revision:version(date),clockIn:600,clockOut:1200},actor);
     assert.equal(state.attendance.get(date+'|'+A).clock_out,1200);
   });
+  const combined = extra => a.postSchedule({action:'shiftWithAttendance',date,staffId:A,revision:version(date),start:660,end:1260,
+    attendance:{clockIn:665,clockOut:1270,transport:500,addProposals:2,addApproved:1},...extra},actor);
+  await check('シフトと勤怠を1回の保存・1つの版で同時に更新',()=>{
+    const v=version(date);combined();assert.equal(version(date),v+1);
+    assert.equal(state.shifts.get(date).find(s=>s.staff_id===A).start_at,a.minToMs(date,660));
+    assert.equal(state.attendance.get(date+'|'+A).clock_in,665);assert.equal(state.attendance.get(date+'|'+A).transport,500);
+  });
+  for(const attendance of [null,[],{transport:1000001},{addProposals:10000},{nextApproved:-1},{clockIn:900,clockOut:850}]) {
+    await check('不正な勤怠'+JSON.stringify(attendance)+'ではシフトも変更しない',()=>rejectUnchanged(()=>combined({attendance}),'invalid'));
+  }
+  await check('一括保存に勤怠がない・削除を混ぜた要求は何も変更しない',()=>{rejectUnchanged(()=>combined({attendance:undefined}),'invalid');rejectUnchanged(()=>combined({remove:true}),'invalid');});
+  await check('シフトに重なる既存予定があると勤怠も変更しない',()=>{
+    block({start:600,end:660});rejectUnchanged(()=>combined(),'scheduleConflict');
+  });
+  await check('古い画面の一括保存を拒否して予定も勤怠も保持',()=>{
+    block();rejectUnchanged(()=>combined({revision:0}),'scheduleConflict');
+  });
+  await check('同じ保存の応答が途切れても再送で二重更新しない',()=>{
+    const v=version(date);combined({revision:v});rejectUnchanged(()=>combined({revision:v}),'scheduleConflict');
+  });
   const report = { ok: results.every(x => x.ok), checks: results.length, passed: results.filter(x => x.ok).length,
     failures: results.filter(x => !x.ok), results, externalMail: false, persistentWrites: false };
   if (process.argv[3]) fs.writeFileSync(process.argv[3], JSON.stringify(report, null, 2), { mode: 0o600 });

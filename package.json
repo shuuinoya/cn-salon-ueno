@@ -2,6 +2,7 @@
   "name": "cn-salon-ueno-original",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check:admin": "node tools/check-admin-regression.cjs"
   }
 }

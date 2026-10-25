@@ -173,23 +173,11 @@
   // （例：対応可能メニューから外したメニューの予約が残っている場合）
   const origFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
-    // 休憩・業務の登録：時間（分）の自由入力欄に値があれば、その分数を優先する
+    // 指名予約の移動確認を、同じ移動の1回だけに結び付ける
     try {
       const u0 = typeof input === "string" ? input : input?.url || "";
       if (u0.includes("/api/demo/schedule") && init && init.method === "POST" && typeof init.body === "string") {
         const b = JSON.parse(init.body);
-        if (b && b.action === "block" && !b.remove && typeof b.start === "number" &&
-            !document.body.classList.contains("pm-ledger-dragging")) {
-          const inp = document.querySelector(".ledger-side-form .pm-durfree input");
-          if (inp && inp.value !== "") {
-            const v = Number(inp.value);
-            if (!Number.isInteger(v) || v < 5 || v > 1020) {
-              return new Response(JSON.stringify({ error: "invalid" }), { status: 400, headers: { "Content-Type": "application/json" } });
-            }
-            b.end = b.start + v;
-            init = { ...init, body: JSON.stringify(b) };
-          }
-        }
         if (b && b.action === "moveBooking") {
           delete b.allowCourseMismatch;
           const k = window.__pmMoveKey(b), at = window.__pmNominationMoveApprovals.get(k);
@@ -499,18 +487,16 @@
           if (!cur || b.dataset.busy) return;
           const lockDate = ledgerDate();
           b.dataset.busy = "1";
-          // 押した瞬間に行を青く（解除なら元に）してから、サーバーに保存する（楽観更新）
           const next = cur.locked ? 0 : 1;
-          cur.locked = next;
-          row.classList.toggle("pm-blue", !!next);
-          row.classList.toggle("pm-locked", !!next);
+          // 保存結果が分かるまでは、未確認の状態を受付可・停止中として表示しない。
           try {
-            const latestResponse = await fetch("/api/demo/schedule?date=" + lockDate, { cache: "no-store" });
+            const latestResponse = await fetch("/api/demo/schedule?date=" + lockDate, { cache: "no-store", signal: AbortSignal.timeout(10000) });
             const latest = await latestResponse.json();
             const revision = latest.days?.find(d => d.date === lockDate)?.version;
             const latestStaff = latest.staff?.find(st => st.id === cur.id);
             if (!latestResponse.ok || !Number.isInteger(revision) || !latestStaff || !!latestStaff.locked === !!next) throw new Error("lockStaff changed");
             const r = await fetch("/api/demo/schedule", {
+              signal: AbortSignal.timeout(15000),
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -522,12 +508,14 @@
               }),
             });
             if (!r.ok) throw new Error("lockStaff failed");
+            if (ledgerDate() === lockDate) {
+              cur.locked = next;
+              row.classList.toggle("pm-blue", !!next);
+              row.classList.toggle("pm-locked", !!next);
+            }
             await refreshLocks(true);
           } catch {
-            // 保存に失敗したら見た目を元に戻す
-            cur.locked = next ? 0 : 1;
-            row.classList.toggle("pm-blue", !!cur.locked);
-            row.classList.toggle("pm-locked", !!cur.locked);
+            // 応答だけが失われた可能性もあるため、逆の状態を保存し直さない。
             await refreshLocks(true);
             window.alert("受付停止の変更結果を確認できませんでした。最新の鍵の状態を確認してから操作してください。");
           } finally { delete b.dataset.busy; }
@@ -664,29 +652,6 @@
       });
     }
     applyTapMark();
-
-    // 3c6b) 「時間（分）」の下に、任意の分数を自由入力できる欄を追加
-    //       （入力があればボタン選択より優先。ボタンを押すと入力はクリア）
-    document.querySelectorAll(".ledger-side-form .ledger-duration").forEach((grid) => {
-      if (grid.nextElementSibling?.classList?.contains("pm-durfree")) return;
-      const box = document.createElement("div");
-      box.className = "pm-durfree";
-      box.innerHTML =
-        '<label>その他の時間（分）を自由入力</label>' +
-        '<input type="number" min="5" max="1020" step="1" placeholder="例: 75" inputmode="numeric">' +
-        "<small>5〜1020分まで1分単位で入力できます。入力中はボタンより優先されます。</small>";
-      grid.insertAdjacentElement("afterend", box);
-      const inp = box.querySelector("input");
-      inp.addEventListener("input", () => {
-        grid.classList.toggle("pm-durfree-on", inp.value !== "");
-      });
-      grid.addEventListener("click", (e) => {
-        if (e.target.closest("button")) {
-          inp.value = "";
-          grid.classList.remove("pm-durfree-on");
-        }
-      });
-    });
 
     // 3c6b2) 操作中は表示しない、小さな予約プレビュー。
     if (!window.__pmEvTip) {
@@ -3294,17 +3259,23 @@
   async function refreshLocks(force) {
     const now = Date.now(), d0 = ledgerDate();
     if (!force && window.__pmLocksAt && now - window.__pmLocksAt < 60000 && window.__pmLocksFor === d0) return;
+    const request = {};
+    window.__pmLocksRequest = request;
     window.__pmLocksAt = now;
     if (window.__pmLocksFor !== d0) window.__pmLocks = {}; // 別の日の鍵の状態を表示しない
     window.__pmLocksFor = d0;
     try {
-      const r = await fetch("/api/demo/locks?date=" + d0, { cache: "no-store" });
+      const r = await fetch("/api/demo/locks?date=" + d0, { cache: "no-store", signal: AbortSignal.timeout(10000) });
       const d = await r.json();
-      if (window.__pmLocksFor !== d0) return; // 取得中に表示する日が変わった
+      if (!r.ok || !Array.isArray(d.locks)) throw new Error("locks unavailable");
+      if (window.__pmLocksRequest !== request || ledgerDate() !== d0) return;
       const map = {};
       for (const l of d.locks) map[l.id] = l;
       window.__pmLocks = map;
-    } catch {}
+    } catch {
+      // 長く停止した通信を60秒キャッシュにせず、短い間隔で再取得できるようにする。
+      if (window.__pmLocksRequest === request) window.__pmLocksAt = Date.now() - 55000;
+    }
   }
 
   // 下部の集計バー（赤・黒・青の3段）
@@ -3604,21 +3575,21 @@
       if (cout2 <= cin2) return showMsg("退勤時間は、出勤時間より後にしてください。");
       const n = (k) => Number(box.querySelector('[name="' + k + '"]').value || 0);
       for (const k of ["addProposals", "addApproved", "nextProposals", "nextApproved", "transport"]) {
-        if (!(Number.isInteger(n(k)) && n(k) >= 0)) return showMsg("数は0以上の整数で入力してください。");
+        const max = k === "transport" ? 1000000 : 9999;
+        if (!(Number.isInteger(n(k)) && n(k) >= 0 && n(k) <= max)) return showMsg(k === "transport" ? "交通費は0〜1,000,000円の整数で入力してください。" : "提案数・承認数は0〜9,999の整数で入力してください。");
       }
       if (btn.disabled) return;
       busy(true); showMsg("");
       try {
-        const r1 = await post({ action: "shift", staffId: sid, start, end, note: box.querySelector('[name="note"]').value });
+        const attendance = { clockIn: cin2, clockOut: cout2, absent: box.querySelector('[name="absent"]').checked,
+          addProposals: n("addProposals"), addApproved: n("addApproved"), nextProposals: n("nextProposals"), nextApproved: n("nextApproved"), transport: n("transport") };
+        const r1 = await post({ action: "shiftWithAttendance", staffId: sid, start, end, note: box.querySelector('[name="note"]').value, attendance });
         if (!r1.ok) {
           showMsg(r1.j.error === "scheduleConflict" ? "別の画面で更新されたか、予約・休憩・業務がシフト時間の外に出ます。「戻る」で最新の台帳を確認してください。"
             : r1.j.error === "staffInfoMissing" ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
             : "シフトを保存できませんでした。");
           return;
         }
-        const r2 = await post({ action: "attendance", staffId: sid, clockIn: cin2, clockOut: cout2, absent: box.querySelector('[name="absent"]').checked,
-          addProposals: n("addProposals"), addApproved: n("addApproved"), nextProposals: n("nextProposals"), nextApproved: n("nextApproved"), transport: n("transport") });
-        if (!r2.ok) { showMsg("シフトは保存済みですが、勤怠は保存できませんでした。「戻る」で最新の内容を確認してください。"); return; }
         close();
       } catch { showMsg(uncertain); } finally { busy(false); }
     });

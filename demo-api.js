@@ -997,6 +997,22 @@ function postSchedule(body, actor) {
   const checkRevision = () => { if (body.revision !== day.version) throw err(409, "scheduleConflict"); };
   const bump = (d = date) => { ensureDay(d).version++; sseTouch(); };
 
+  // 予定と勤怠の一括保存でも、全項目を検査してから記録を変更する。
+  const attendanceRecord = input => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw err(400, "invalid");
+    const minOrNull = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+    const cin = minOrNull(input.clockIn), cout = minOrNull(input.clockOut);
+    for (const v of [cin, cout]) if (v !== null && !(Number.isInteger(v) && v >= 0 && v <= 30 * 60)) throw err(400, "invalid");
+    if (cin !== null && cout !== null && cout <= cin) throw err(400, "invalid");
+    const cnt = (v, max) => { const n = Number(v ?? 0); if (!(Number.isInteger(n) && n >= 0 && n <= max)) throw err(400, "invalid"); return n; };
+    return {
+      clock_in: cin, clock_out: cout, absent: input.absent === true,
+      add_proposals: cnt(input.addProposals, 9999), add_approved: cnt(input.addApproved, 9999),
+      next_proposals: cnt(input.nextProposals, 9999), next_approved: cnt(input.nextApproved, 9999),
+      transport: cnt(input.transport, 1000000), updated_at: Date.now(),
+    };
+  };
+
   switch (action) {
     case "moveBooth": {
       checkRevision();
@@ -1010,8 +1026,10 @@ function postSchedule(body, actor) {
       if (!plan.ok) throw err(409, plan.code);
       setBookingBooths(bk, plan, actor); bump(); return { ok: true };
     }
+    case "shiftWithAttendance":
     case "shift": {
       checkRevision();
+      if (action === "shiftWithAttendance" && (body.remove || !Object.hasOwn(body, "attendance"))) throw err(400, "invalid");
       const { staffId, start, end, remove } = body;
       const shiftStaff = state.staff.find((s) => s.id === staffId);
       if (!shiftStaff) throw err(400, "invalid");
@@ -1037,6 +1055,7 @@ function postSchedule(body, actor) {
         return { ok: true };
       }
       if (!validSpan(start, end)) throw err(400, "invalid");
+      const attendance = Object.hasOwn(body, "attendance") ? attendanceRecord(body.attendance) : null;
       // 予約・休憩・業務が新しいシフトの外に残る短縮は保存しない
       const ev = ensureEvents(date);
       const mine = [
@@ -1047,6 +1066,7 @@ function postSchedule(body, actor) {
       if (state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId) && (b.start < start || b.end > end))) throw err(409, "scheduleConflict");
       const rec = { staff_id: staffId, date, start_at: minToMs(date, start), end_at: minToMs(date, end), note: String(body.note ?? "") };
       if (idx >= 0) list[idx] = rec; else list.push(rec);
+      if (attendance) state.attendance.set(date + "|" + staffId, attendance);
       bump();
       return { ok: true };
     }
@@ -1438,17 +1458,7 @@ function postSchedule(body, actor) {
       // 勤怠（シフト情報の画面）：出勤・退勤時刻、欠勤、提案・承認数、交通費。シフト（予定）とは別に記録する
       const { staffId } = body;
       if (!state.staff.some((s2) => s2.id === staffId)) throw err(400, "invalid");
-      const minOrNull = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
-      const cin = minOrNull(body.clockIn), cout = minOrNull(body.clockOut);
-      for (const v of [cin, cout]) if (v !== null && !(Number.isInteger(v) && v >= 0 && v <= 30 * 60)) throw err(400, "invalid");
-      if (cin !== null && cout !== null && cout <= cin) throw err(400, "invalid");
-      const cnt = (v, max) => { const n = Number(v ?? 0); if (!(Number.isInteger(n) && n >= 0 && n <= max)) throw err(400, "invalid"); return n; };
-      const rec = {
-        clock_in: cin, clock_out: cout, absent: body.absent === true,
-        add_proposals: cnt(body.addProposals, 9999), add_approved: cnt(body.addApproved, 9999),
-        next_proposals: cnt(body.nextProposals, 9999), next_approved: cnt(body.nextApproved, 9999),
-        transport: cnt(body.transport, 1000000), updated_at: Date.now(),
-      };
+      const rec = attendanceRecord(body);
       state.attendance.set(date + "|" + staffId, rec);
       bump();
       return { ok: true, attendance: rec };

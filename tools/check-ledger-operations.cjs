@@ -268,7 +268,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await check('通常シフトの短縮/削除もオンライン停止枠を勤務外に残さない', () => {
     post({action:'onlineBlockSave',date:next,staffIds:['A'],start:1200,end:1260});
     unchanged(()=>postSchedule({action:'shift',date:next,staffId:'A',start:600,end:1140,revision:1},staff),'scheduleConflict');
-    unchanged(()=>postSchedule({action:'shift',date:next,staffId:'A',remove:true,revision:1},staff),'scheduleConflict');
+    unchanged(()=>postSchedule({action:'shift',date:next,staffId:'A',remove:true,revision:1},staff),'shiftRelatedConfirmationRequired');
     unchanged(()=>postSchedule({action:'bulkShift',date:next,start:600,end:1140,cells:[{date:next,staffId:'A',revision:1},{date:after,staffId:'B',revision:0}]},staff),'scheduleConflict');
   });
   await check('一括勤務削除は対象のオンライン停止だけ除き他担当分を保持', () => {
