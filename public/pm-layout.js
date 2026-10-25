@@ -4,6 +4,37 @@
   "use strict";
   const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
 
+  // ブラウザ側で確認ダイアログが抑制されても、削除の確認を確実に表示する。
+  window.__pmConfirmScheduleDelete = async (message) => {
+    if (document.getElementById("pm-schedule-delete-confirm")) return false;
+    return new Promise(resolve => {
+      const previous = document.activeElement;
+      const dialog = document.createElement("dialog");
+      dialog.id = "pm-schedule-delete-confirm"; dialog.className = "pm-move-confirm";
+      dialog.setAttribute("aria-labelledby", "pm-schedule-delete-title");
+      dialog.innerHTML = '<h2 id="pm-schedule-delete-title">削除の確認</h2><div class="pm-move-confirm-body"><p class="pm-delete-message" style="white-space:pre-line"></p><div class="pm-move-confirm-actions"><button type="button" class="pm-delete-ok pm-move-confirm-ok">確認して削除</button><button type="button" class="pm-delete-cancel" autofocus>キャンセル</button></div></div>';
+      dialog.querySelector(".pm-delete-message").textContent = message;
+      let settled = false;
+      const finish = ok => {
+        if (settled) return; settled = true;
+        if (dialog.open) dialog.close(); dialog.remove();
+        if (previous?.isConnected) previous.focus({ preventScroll: true });
+        resolve(ok);
+      };
+      dialog.querySelector(".pm-delete-ok").addEventListener("click", () => finish(true));
+      dialog.querySelector(".pm-delete-cancel").addEventListener("click", () => finish(false));
+      dialog.addEventListener("cancel", e => { e.preventDefault(); finish(false); });
+      dialog.addEventListener("close", () => finish(false));
+      dialog.addEventListener("click", e => {
+        if (e.target !== dialog) return;
+        const r = dialog.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) finish(false);
+      });
+      document.body.appendChild(dialog);
+      try { dialog.showModal(); } catch { finish(false); }
+    });
+  };
+
   // お客様の予約を動かす前に、画像の見本と同じ確認画面で承認を受ける。
   // OK まで保存しない。キャンセル・Esc・画面を閉じた場合は変更しない。
   // 変更前→変更後の日時・担当、メニュー、施術時間を並べる。移動先のスタッフの対応メニュー（スタッフ情報の「コース」）に
@@ -2131,7 +2162,7 @@
         del.title = "選択した枠のシフトを削除します（休憩・業務・オンライン停止も対象スタッフ分を削除。予約が残る日は削除できません）";
         del.addEventListener("click", async () => {
           if (del.disabled) return;
-          if (!window.confirm("選択した枠のシフトを削除しますか？\n休憩・業務・オンライン停止も対象スタッフ分を削除します。\n予約が残る日は削除できません。")) return;
+          if (!await window.__pmConfirmScheduleDelete("選択した枠のシフトを削除しますか？\n休憩・業務・オンライン停止も対象スタッフ分を削除します。\n予約が残る日は削除できません。")) return;
           const cells = [...document.querySelectorAll('.ledger-month tbody input[type="checkbox"]:checked')]
             .map((cb) => ({ date: cb.dataset.date, staffId: cb.dataset.staffId, revision: Number(cb.dataset.revision) }))
             .filter((cell) => cell.date && cell.staffId);
@@ -2145,7 +2176,7 @@
             };
             const r = await fetch("/api/demo/schedule", {
               method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
+              body: JSON.stringify(payload), signal: AbortSignal.timeout(15000),
             });
             const j = await r.json();
             if (!r.ok) throw new Error(j.error);
@@ -2156,7 +2187,7 @@
           } catch (e) {
             alert(e.message === "scheduleConflict"
               ? "予約が残っているか、別の画面でシフトが更新されています。再読込して確認してください。"
-              : "削除できませんでした。");
+              : "通信が途切れ、削除結果を確認できませんでした。閉じて最新の台帳を確認してください。");
           } finally {
             del.disabled = false;
           }
@@ -3386,7 +3417,7 @@
 // ・左：ID・日付・スタッフ・出勤／退勤時間（勤怠）・シフト開始／終了時間・欠勤・勤務状況・提案／承認数・交通費
 // ・右：スケジュールID・勤務／残業／深夜勤務時間・施術／休憩／業務時間・新規／リピート・一般／指名施術・物販・回数券販売・プリペイド販売
 // ・勤怠はシフト（予定）とは別にサーバーへ保存する（/api/demo/schedule action:"attendance"）
-// ・シフトを削除すると、その日のタイムスケジュールからその人の行が消える（予約・休憩・業務がある日は削除できない）
+// ・シフト削除は確認後に同日の休憩・業務・受付停止・勤怠も除く。お客様の予約がある日は削除しない。
 (function () {
   "use strict";
   const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -3458,8 +3489,8 @@
   let current = null; // { key, sec, date, staff, sched, att }
   async function load(staffId, date) {
     const [sched, att] = await Promise.all([
-      fetch("/api/demo/schedule?date=" + date, { cache: "no-store" }).then((r) => r.json()),
-      fetch("/api/demo/attendance?date=" + date, { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/demo/schedule?date=" + date, { cache: "no-store", signal: AbortSignal.timeout(10000) }).then((r) => { if (!r.ok) throw Error("loadFailed"); return r.json(); }),
+      fetch("/api/demo/attendance?date=" + date, { cache: "no-store", signal: AbortSignal.timeout(10000) }).then((r) => { if (!r.ok) throw Error("loadFailed"); return r.json(); }),
     ]);
     const staff = (sched.allStaff || sched.staff || []).find((s) => s.id === staffId);
     return { sched, att, staff };
@@ -3555,12 +3586,16 @@
       if (back) back.click();
       if (typeof window.__pmKickSync === "function") window.__pmKickSync();
     };
+    // 編集開始時の版を使う。他の端末の変更を、保存直前の取得で見逃さない。
+    let revision = (sched.days || []).find(x => x.date === date)?.version ?? 0;
     const post = async (body) => {
-      const sc = await (await fetch("/api/demo/schedule?date=" + date, { cache: "no-store" })).json();
-      const v = (sc.days || []).find((x) => x.date === date)?.version ?? 0;
-      const r = await fetch("/api/demo/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, revision: v, ...body }) });
-      return { ok: r.ok, j: await r.json().catch(() => ({})) };
+      const r = await fetch("/api/demo/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, revision, ...body }), signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      if (r.ok) revision++;
+      return { ok: r.ok, j };
     };
+    const busy = value => actions.querySelectorAll("button").forEach(button => { button.disabled = value; });
+    const uncertain = "通信が途切れ、保存結果を確認できませんでした。「戻る」で台帳を確認し、必要な場合だけもう一度操作してください。";
     actions.querySelector(".pm-si-back").addEventListener("click", close);
     actions.querySelector(".pm-si-save").addEventListener("click", async (e) => {
       const btn = e.currentTarget;
@@ -3571,30 +3606,33 @@
       for (const k of ["addProposals", "addApproved", "nextProposals", "nextApproved", "transport"]) {
         if (!(Number.isInteger(n(k)) && n(k) >= 0)) return showMsg("数は0以上の整数で入力してください。");
       }
-      btn.disabled = true; showMsg("");
+      if (btn.disabled) return;
+      busy(true); showMsg("");
       try {
         const r1 = await post({ action: "shift", staffId: sid, start, end, note: box.querySelector('[name="note"]').value });
         if (!r1.ok) {
-          showMsg(r1.j.error === "scheduleConflict" ? "予約・休憩・業務がシフトの時間の外に出るため、保存できません。"
+          showMsg(r1.j.error === "scheduleConflict" ? "別の画面で更新されたか、予約・休憩・業務がシフト時間の外に出ます。「戻る」で最新の台帳を確認してください。"
             : r1.j.error === "staffInfoMissing" ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
             : "シフトを保存できませんでした。");
-          btn.disabled = false; return;
+          return;
         }
         const r2 = await post({ action: "attendance", staffId: sid, clockIn: cin2, clockOut: cout2, absent: box.querySelector('[name="absent"]').checked,
           addProposals: n("addProposals"), addApproved: n("addApproved"), nextProposals: n("nextProposals"), nextApproved: n("nextApproved"), transport: n("transport") });
-        if (!r2.ok) { showMsg("勤怠を保存できませんでした。"); btn.disabled = false; return; }
+        if (!r2.ok) { showMsg("シフトは保存済みですが、勤怠は保存できませんでした。「戻る」で最新の内容を確認してください。"); return; }
         close();
-      } catch { showMsg("保存できませんでした。通信を確認してください。"); btn.disabled = false; }
+      } catch { showMsg(uncertain); } finally { busy(false); }
     });
     actions.querySelector(".pm-si-del")?.addEventListener("click", async (e) => {
-      if (!window.confirm(staff.name + " さんの " + date + " のシフトを削除しますか？\n削除すると、この日のタイムスケジュールから " + staff.name + " さんの行が消えます。\n（予約・休憩・業務・オンライン停止がある日は削除できません）")) return;
       const btn = e.currentTarget;
-      btn.disabled = true; showMsg("");
+      if (btn.disabled) return;
+      if (!await window.__pmConfirmScheduleDelete(staff.name + " さんの " + date + " のシフトを削除しますか？\nこの人の当日の休憩・業務・オンライン停止・勤怠も削除します。\nお客様の予約が残っている場合は削除しません。")) return;
+      busy(true); showMsg("");
       try {
-        const r = await post({ action: "shift", staffId: sid, remove: true });
-        if (!r.ok) { showMsg(r.j.error === "scheduleConflict" ? "この日は予約・休憩・業務・オンライン停止があるため、シフトを削除できません。対象の記録を確認してから変更してください。" : "シフトを削除できませんでした。"); btn.disabled = false; return; }
+        const r = await post({ action: "shift", staffId: sid, remove: true, removeRelated: true });
+        if (!r.ok) { showMsg(r.j.error === "shiftHasBookings" ? "このスタッフにお客様の予約が残っています。先に予約の担当を変更してください。シフトは削除していません。"
+          : r.j.error === "scheduleConflict" ? "別の画面で更新されています。「戻る」で最新の台帳を確認してから削除してください。" : "シフトを削除できませんでした。"); return; }
         close();
-      } catch { showMsg("削除できませんでした。通信を確認してください。"); btn.disabled = false; }
+      } catch { showMsg(uncertain); } finally { busy(false); }
     });
   }
 

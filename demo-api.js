@@ -1020,9 +1020,18 @@ function postSchedule(body, actor) {
       const idx = list.findIndex((s) => s.staff_id === staffId);
       if (remove) {
         const ev = ensureEvents(date);
-        if (state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId)) || ev.blocks.some((b) => b.staff_id === staffId) || ev.bookings.some((b) => b.status === "confirmed" &&
-          ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId))) throw err(409, "scheduleConflict");
+        if (ev.bookings.some((b) => b.status === "confirmed" &&
+          ev.assignments.some((a) => a.booking_id === b.id && a.staff_id === staffId))) throw err(409, "shiftHasBookings");
+        const related = (Array.isArray(day.locked) && day.locked.includes(staffId)) || ev.blocks.some(b => b.staff_id === staffId) || state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId));
+        if (related && body.removeRelated !== true) throw err(409, "shiftRelatedConfirmationRequired");
+        // 画面で確認された場合だけ、対象の日・担当の業務、休憩、受付停止も一緒に除く。
+        ev.blocks = ev.blocks.filter(b => b.staff_id !== staffId);
+        if (state.ledger.onlineBlocks.some(b => b.date === date && b.staffIds.includes(staffId))) {
+          state.ledger.onlineBlocks = state.ledger.onlineBlocks.map(b => b.date === date ? { ...b, staffIds: b.staffIds.filter(id => id !== staffId) } : b).filter(b => b.staffIds.length);
+          state.ledger.version++;
+        }
         if (idx >= 0) list.splice(idx, 1);
+        day.locked = (Array.isArray(day.locked) ? day.locked : []).filter(id => id !== staffId);
         state.attendance.delete(date + "|" + staffId); // シフトを消したら、その日の勤怠の記録も消す
         bump();
         return { ok: true };
@@ -1078,6 +1087,9 @@ function postSchedule(body, actor) {
             state.ledger.version++;
           }
           if (idx >= 0) list.splice(idx, 1);
+          const removedDay = ensureDay(c.date);
+          removedDay.locked = (Array.isArray(removedDay.locked) ? removedDay.locked : []).filter(id => id !== c.staffId);
+          state.attendance.delete(c.date + "|" + c.staffId);
           bump(c.date);
           continue;
         }
@@ -1422,6 +1434,7 @@ function postSchedule(body, actor) {
       return { ok: true };
     }
     case "attendance": {
+      checkRevision();
       // 勤怠（シフト情報の画面）：出勤・退勤時刻、欠勤、提案・承認数、交通費。シフト（予定）とは別に記録する
       const { staffId } = body;
       if (!state.staff.some((s2) => s2.id === staffId)) throw err(400, "invalid");

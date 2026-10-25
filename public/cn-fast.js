@@ -60,11 +60,13 @@
     if (!signal) return p;
     if (signal.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
     return new Promise(function (res, rej) {
-      signal.addEventListener("abort", function () { rej(new DOMException("aborted", "AbortError")); });
-      p.then(res, rej);
+      var abort = function () { rej(new DOMException("aborted", "AbortError")); };
+      signal.addEventListener("abort", abort, { once: true });
+      p.then(function (v) { signal.removeEventListener("abort", abort); res(v); }, function (e) { signal.removeEventListener("abort", abort); rej(e); });
     });
   }
   function keptFetch(u, init) {
+    if (init && init.signal && init.signal.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
     var key = u.pathname + u.search;
     var c = kept[key];
     if (c && curSeq !== null && c.seq === curSeq && Date.now() - c.at < KEEP_MS) {
@@ -75,15 +77,24 @@
     if (!p) {
       var seqAtStart = curSeq;
       var epochAtStart = keptEpoch;
-      p = keptFlight[key] = F(key, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      // 共用の取得も上限を設ける。切断中の1件を全画面が永遠に待ち続けない。
+      var controller = new AbortController(), timer;
+      var timeout = new Promise(function (_, reject) {
+        timer = setTimeout(function () { controller.abort(); reject(new DOMException("timeout", "TimeoutError")); }, 10000);
+      });
+      var request = F(key, { credentials: "same-origin", cache: "no-store", signal: controller.signal }).then(function (r) {
         return r.text().then(function (text) {
           var e = { text: text, status: r.status, type: r.headers.get("Content-Type") || "application/json", seq: seqAtStart, epoch: epochAtStart, at: Date.now() };
           // 取っている間に「変わった」合図が来たら、そのデータは覚えない（変更の前か後か分からないため）
-          if (r.ok && epochAtStart === keptEpoch && seqAtStart !== null && seqAtStart === curSeq) kept[key] = e;
-          if (keptFlight[key] === p) delete keptFlight[key];
+          if (r.ok && !controller.signal.aborted && epochAtStart === keptEpoch && seqAtStart !== null && seqAtStart === curSeq) kept[key] = e;
           return e;
         });
-      }, function (err) { if (keptFlight[key] === p) delete keptFlight[key]; throw err; });
+      });
+      p = keptFlight[key] = Promise.race([request, timeout]).then(function (e) {
+        clearTimeout(timer); if (keptFlight[key] === p) delete keptFlight[key]; return e;
+      }, function (err) {
+        clearTimeout(timer); if (keptFlight[key] === p) delete keptFlight[key]; throw err;
+      });
     }
     return withSignal(p.then(function (e) { if (e.status === 200 && e.epoch === keptEpoch) tell(u.pathname, u.search, e.text); return keptResponse(e); }), init && init.signal);
   }

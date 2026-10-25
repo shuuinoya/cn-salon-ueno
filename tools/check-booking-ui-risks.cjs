@@ -50,7 +50,7 @@ async function cacheRisk() {
     const pending=[],events=[];class ES{constructor(){this.listeners={}}addEventListener(k,f){this.listeners[k]=f}emit(v){this.listeners.message({data:v})}}
     const response=v=>new Response(JSON.stringify({version:v}),{headers:{"Content-Type":"application/json"}});
     const window={fetch:(_url,init)=>{if(init?.method==="POST")return Promise.resolve(response(2));const d=deferred();pending.push(d);return d.promise;},EventSource:ES,dispatchEvent:e=>events.push(e),addEventListener(){}};
-    const context=vm.createContext({window,location:{href:"https://test.invalid/admin",origin:"https://test.invalid"},document:{readyState:"loading"},URL,Request,Response,DOMException,CustomEvent:class{constructor(type,init){this.type=type;this.detail=init.detail}},setTimeout:()=>0,Date});
+    const context=vm.createContext({window,location:{href:"https://test.invalid/admin",origin:"https://test.invalid"},document:{readyState:"loading"},URL,Request,Response,DOMException,CustomEvent:class{constructor(type,init){this.type=type;this.detail=init.detail}},setTimeout:()=>0,clearTimeout(){},AbortController,Date});
     vm.runInContext(read("public/cn-fast.js"),context);new window.EventSource("/api/demo/events").emit("1");
     const url="/api/demo/schedule?date=2026-10-22",old=window.fetch(url);await window.fetch("/api/demo/schedule",{method:"POST",body:"{}"});
     const fresh=window.fetch(url);pending[1].resolve(response(2));await fresh;pending[0].resolve(response(1));await old;
@@ -143,12 +143,12 @@ async function staffDecorationRisks() {
     for(const name of names){let star;const dataset={};Object.defineProperty(dataset,"pmstar",{get:()=>star,set:v=>{star=v;writes++;}});
       const cell={dataset,children:[{tagName:"B",textContent:name},{tagName:"SMALL",textContent:"10:00〜18:00"}],appendChild:n=>cell.children.push(n),
         querySelector:s=>s==="b"?cell.children[0]:s===".pm-lockbtn"?cell.children.find(n=>n.className==="pm-lockbtn"):null};
-      rows.push({cell,querySelector:()=>cell,classList:{toggle(){}}});
+      rows.push({dataset:{staffId:"test-"+rows.length},cell,querySelector:()=>cell,classList:{toggle(){}}});
     }
-    const context=vm.createContext({window:{__pmLocks:Object.fromEntries(names.map((name,i)=>[name,{id:"test-"+i,gender:i%2?"female":"male",locked:0}]))},refreshLocks(){},ledgerDate:()=>"2026-10-22",
+    const context=vm.createContext({window:{__pmLocks:Object.fromEntries(names.map((name,i)=>["test-"+i,{id:"test-"+i,gender:i%2?"female":"male",locked:0}]))},refreshLocks(){},ledgerDate:()=>"2026-10-22",
       document:{querySelectorAll:()=>rows,createElement:()=>({dataset:{},setAttribute(){},addEventListener(){listeners++;}})}});
     const source=part(layout,"    const DECOR =", "    // 3c2)");for(let i=0;i<100;i++)vm.runInContext("(()=>{"+source+"})()",context);
-    assert.equal(writes,names.length,"同じ星の値は繰り返し書き換えない");assert.equal(listeners,names.length,"鍵ボタンの操作登録は一人1回");
+    assert.equal(writes,names.length,"同じ星の値は繰り返し書き換えない");assert.equal(listeners,names.length*2,"鍵ボタンのクリック・キーボード登録は一人各1回");
     for(const row of rows){assert.equal(row.cell.children.length,3,"スタッフ名・勤務表示・鍵1個のみ");assert.equal(row.cell.children.filter(n=>String(n.textContent||"").includes("★")).length,0,"星の素の文字ノードは追加しない");assert.equal(row.cell.dataset.pmstar,"★0");}
     const css=read("public/pm-layout.css");assert.equal((css.match(/content:\s*attr\(data-pmstar\)/g)||[]).length,1,"星表示はCSS疑似要素1箇所のみ");
   });

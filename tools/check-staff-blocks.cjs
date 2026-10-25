@@ -36,6 +36,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
         message: i === 1 ? '' : 'テスト紹介文', personalNomination: true, nominationFee: 500 }) }));
     state.photos = new Map(originalPhotos); state.mailRelay = { url: '', secret: '' }; state.mails = [];
     state.events = new Map(); state.days = new Map(); state.shifts = new Map();
+    state.attendance = new Map(); state.ledger.onlineBlocks = []; state.ledger.version = 0;
     state.bookingIndex = new Map(); state.requestKeys = new Map();
     state.settings.freeMessage = { visible: true, required: false, maxLength: 2000 };
     state.settings.shopMaster.resStart = 600; state.settings.shopMaster.resEnd = 1560;
@@ -47,7 +48,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     }
   }
   const protectedState = () => encode({ staff: state.staff, photos: state.photos, shifts: state.shifts,
-    events: state.events, days: state.days, mails: state.mails, tickets: state.tickets, members: state.members, bookingIndex: state.bookingIndex });
+    events: state.events, days: state.days, attendance: state.attendance, ledger: state.ledger, mails: state.mails, tickets: state.tickets, members: state.members, bookingIndex: state.bookingIndex });
   const version = d => state.days.get(d)?.version || 0;
   const block = (extra = {}) => {
     const d = extra.date || date;
@@ -151,6 +152,48 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     rejectUnchanged(() => reserve(B), 'soldOut');
     assert(reserve(B,900).id);
     rejectUnchanged(() => a.postSchedule({ action: 'shift', date: next, revision: version(next), staffId: B, start: 600, end: 1200 }, actor), 'staffInfoMissing');
+  });
+  const removeShift = (extra = {}) => a.postSchedule({ action: 'shift', date, revision: version(date), staffId: A, remove: true, removeRelated: true, ...extra }, actor);
+  await check('休憩・業務・オンライン停止・勤怠を含むシフトを確認後に削除し、他担当と翌日を保持', () => {
+    block(); block({ staffId: C }); block({ date: next });
+    state.attendance.set(date+'|'+A, {clock_in:600}); state.attendance.set(date+'|'+C, {clock_in:600});
+    state.ledger.onlineBlocks = [{date, staffIds:[A,C],start:600,end:660}, {date:next,staffIds:[A],start:600,end:660}];
+    state.days.get(date).locked=[A,C];
+    const tomorrow = encode(state.events.get(next));
+    removeShift();
+    assert(!state.shifts.get(date).some(s=>s.staff_id===A)); assert.equal(list().length,1); assert.equal(list()[0].staff_id,C);
+    assert(!state.attendance.has(date+'|'+A)); assert(state.attendance.has(date+'|'+C));
+    assert.deepEqual(state.days.get(date).locked,[C]);
+    assert.deepEqual(state.ledger.onlineBlocks[0].staffIds,[C]); assert.deepEqual(state.ledger.onlineBlocks[1].staffIds,[A]);
+    assert.equal(encode(state.events.get(next)),tomorrow);
+  });
+  await check('関連記録を削除する確認がなければシフトも変更しない', () => {
+    block(); rejectUnchanged(()=>removeShift({removeRelated:false}),'shiftRelatedConfirmationRequired');
+  });
+  await check('予約が残るスタッフは確認済みでもシフトを削除しない', () => {
+    reserve(); block({start:900,end:960});
+    rejectUnchanged(()=>removeShift(),'shiftHasBookings');
+  });
+  await check('古い画面からの削除は休憩・業務を含め全て保持', () => {
+    block(); rejectUnchanged(()=>removeShift({revision:0}),'scheduleConflict');
+  });
+  await check('月間シフト削除でも対象担当の勤怠だけを削除', () => {
+    block(); state.attendance.set(date+'|'+A,{clock_in:600});state.attendance.set(date+'|'+C,{clock_in:600});
+    a.postSchedule({action:'bulkShift',date,revision:version(date),remove:true,cells:[{date,staffId:A,revision:version(date)}]},actor);
+    assert(!state.attendance.has(date+'|'+A));assert(state.attendance.has(date+'|'+C));assert.equal(list().length,0);
+  });
+  await check('月間削除の一人に予約が残ると他の人も一切変更しない', () => {
+    reserve(); block({staffId:C});
+    rejectUnchanged(()=>a.postSchedule({action:'bulkShift',date,remove:true,cells:[{date,staffId:C,revision:version(date)},{date,staffId:A,revision:version(date)}]},actor),'scheduleConflict');
+  });
+  await check('シフト削除の直後に古い画面から勤怠を復活させない', () => {
+    const oldVersion=version(date);removeShift();
+    rejectUnchanged(()=>a.postSchedule({action:'attendance',date,staffId:A,revision:oldVersion,clockIn:600,clockOut:1200},actor),'scheduleConflict');
+  });
+  await check('シフト保存直後の正しい版で勤怠も保存できる', () => {
+    a.postSchedule({action:'shift',date,staffId:A,revision:version(date),start:600,end:1200},actor);
+    a.postSchedule({action:'attendance',date,staffId:A,revision:version(date),clockIn:600,clockOut:1200},actor);
+    assert.equal(state.attendance.get(date+'|'+A).clock_out,1200);
   });
   const report = { ok: results.every(x => x.ok), checks: results.length, passed: results.filter(x => x.ok).length,
     failures: results.filter(x => !x.ok), results, externalMail: false, persistentWrites: false };
