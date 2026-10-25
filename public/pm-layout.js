@@ -1335,67 +1335,95 @@
 
   // 「シフト新規登録」モーダル（本物と同じ：スタッフ選択＋開始/終了時間＋OK）
   async function openShiftAdd() {
-    document.getElementById("pm-shiftadd")?.remove();
-    await refreshSched(true);
-    // スタッフ情報が未入力の人はシフトを入れられないので、選択肢に出さない
-    const staff = (window.__pmSchedData?.staff || []).filter((st) => !(st.info_missing || []).length);
+    if (document.getElementById("pm-shiftadd")) return;
     const date = document.querySelector(".ledger-date-trigger time")?.getAttribute("datetime")
       || new Date(Date.now() + 32400000 - 10800000).toISOString().slice(0, 10);
-    const hourOpts = Array.from({ length: 18 }, (_, i) => 10 + i)  // 10〜27時（27=翌3時）
-      .map((h) => `<option value="${h}">${h}</option>`).join("");
+    const hourOpts = Array.from({ length: 28 }, (_, h) => `<option value="${h}">${h}</option>`).join("");
     const minOpts = Array.from({ length: 12 }, (_, i) => i * 5)
       .map((m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
     const wrap = document.createElement("div");
     wrap.id = "pm-shiftadd";
     wrap.innerHTML =
-      '<div class="pm-sa-modal" role="dialog" aria-modal="true">' +
-      '<div class="pm-sa-head"><b>シフト新規登録</b><button type="button" class="pm-sa-x" data-sa="close">✕</button></div>' +
-      '<div class="pm-sa-body">' +
-      '<div class="pm-sa-staffrow"><select id="pm-sa-staff">' +
-      '<option value="">スタッフを選択してください</option>' +
-      staff.map((st) => `<option value="${st.id}">${st.name}</option>`).join("") +
-      "</select></div>" +
+      '<div class="pm-sa-modal" role="dialog" aria-modal="true" aria-labelledby="pm-sa-title">' +
+      '<div class="pm-sa-head"><b id="pm-sa-title">シフト新規登録</b><button type="button" aria-label="閉じる" class="pm-sa-x" data-sa="close">✕</button></div>' +
+      '<div class="pm-sa-body"><p data-sa="date"></p><p data-sa="status" role="status" aria-live="polite"></p>' +
+      '<div class="pm-sa-staffrow"><select id="pm-sa-staff" aria-label="スタッフ"><option value="">スタッフを選択してください</option></select></div>' +
       '<div class="pm-sa-timerow"><span class="pm-sa-cap">開始時間</span>' +
-      '<select id="pm-sa-sh">' + hourOpts + '</select><b>:</b><select id="pm-sa-sm">' + minOpts + "</select></div>" +
+      '<select id="pm-sa-sh" aria-label="開始時">' + hourOpts + '</select><b>:</b><select id="pm-sa-sm" aria-label="開始分">' + minOpts + '</select></div>' +
       '<div class="pm-sa-timerow"><span class="pm-sa-cap">終了時間</span>' +
-      '<select id="pm-sa-eh">' + hourOpts + '</select><b>:</b><select id="pm-sa-em">' + minOpts + "</select></div>" +
-      '<div class="pm-sa-actions"><button type="button" class="pm-sa-ok" data-sa="ok">OK</button></div>' +
-      "</div></div>";
+      '<select id="pm-sa-eh" aria-label="終了時">' + hourOpts + '</select><b>:</b><select id="pm-sa-em" aria-label="終了分">' + minOpts + '</select></div>' +
+      '<div data-sa="discard" hidden><p>入力した変更を破棄して閉じますか？</p><button type="button" data-sa="keep">編集を続ける</button> <button type="button" data-sa="discard-close">変更を破棄して閉じる</button></div>' +
+      '<div class="pm-sa-actions"><button type="button" class="pm-sa-ok" data-sa="ok">登録</button></div></div></div>';
     document.body.appendChild(wrap);
-    wrap.querySelector("#pm-sa-eh").value = "27"; // 既定 10:00〜27:00（本物と同じ）
-    const close = () => wrap.remove();
-    wrap.addEventListener("click", async (e) => {
-      if (e.target === wrap || e.target.closest('[data-sa="close"]')) { close(); return; }
-      if (!e.target.closest('[data-sa="ok"]')) return;
-      const staffId = wrap.querySelector("#pm-sa-staff").value;
-      if (!staffId) { window.alert("スタッフを選択してください。"); return; }
-      const start = Number(wrap.querySelector("#pm-sa-sh").value) * 60 + Number(wrap.querySelector("#pm-sa-sm").value);
-      const end = Number(wrap.querySelector("#pm-sa-eh").value) * 60 + Number(wrap.querySelector("#pm-sa-em").value);
-      if (!(start < end)) { window.alert("終了時間は開始時間より後にしてください。"); return; }
+    const q = s => wrap.querySelector(s), status = q('[data-sa="status"]'), ok = q('[data-sa="ok"]');
+    q('[data-sa="date"]').textContent = date + ' のシフト';
+    q('#pm-sa-sh').value = '10'; q('#pm-sa-eh').value = '27';
+    const values = () => ['staff','sh','sm','eh','em'].map(k => q('#pm-sa-'+k).value).join('|');
+    const initial = values();
+    let busy = false, loaded = false, sched;
+    const controls = () => {
+      wrap.querySelectorAll('select').forEach(el => { el.disabled = busy || !loaded; });
+      ok.disabled = busy || !loaded; ok.textContent = busy ? '登録中…' : '登録';
+      wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+    };
+    const close = () => {
+      if (busy) return;
+      if (values() !== initial) { q('[data-sa="discard"]').hidden = false; q('[data-sa="keep"]').focus(); }
+      else wrap.remove();
+    };
+    wrap.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    wrap.addEventListener('click', async e => {
+      // 外側タップは共通の小窓処理が close ボタンへ委譲する。内側からのドラッグでは閉じない。
+      if (e.target.closest('[data-sa="close"]')) { close(); return; }
+      if (e.target.closest('[data-sa="keep"]')) { q('[data-sa="discard"]').hidden = true; return; }
+      if (e.target.closest('[data-sa="discard-close"]')) { if (!busy) wrap.remove(); return; }
+      if (!e.target.closest('[data-sa="ok"]') || busy || !loaded) return;
+      const staffId = q('#pm-sa-staff').value;
+      if (!staffId) { status.textContent = 'スタッフを選択してください。'; return; }
+      const start = Number(q('#pm-sa-sh').value) * 60 + Number(q('#pm-sa-sm').value);
+      const end = Number(q('#pm-sa-eh').value) * 60 + Number(q('#pm-sa-em').value);
+      if (!(start < end) || end > 1620) { status.textContent = '終了時間は開始時間より後、翌3:00までにしてください。'; return; }
+      busy = true; controls(); q('[data-sa="discard"]').hidden = true; status.textContent = '';
       try {
-        const version = (window.__pmSchedData?.days || []).find((d) => d.date === date)?.version || 0;
-        const r = await fetch("/api/demo/schedule", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "bulkShift", date, cells: [{ date, staffId, revision: version }], start, end }),
+        const r = await fetch('/api/demo/schedule', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({ action: 'shift', date, staffId, start, end, note: '', addOnly: true,
+            revision: sched.days.find(d => d.date === date)?.version || 0, editToken: sched.editTokens?.shift?.[staffId] }),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          window.alert(j.error === "scheduleConflict"
-            ? "その時間帯の外に予約・予定が残っているため登録できません。\n（画面を再読込して最新の状態をご確認ください）"
-            : j.error === "staffInfoMissing"
-              ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のスタッフには、シフトを入れられません。先に「スタッフ情報」で入力してください。"
-              : "登録できませんでした。時間をご確認ください。");
+        if (!r.ok || j.ok !== true) {
+          status.textContent = ({ shiftAlreadyExists: 'このスタッフのシフトは登録済みです。閉じて台帳のスタッフ名から変更してください。',
+            scheduleItemChanged: 'このスタッフのシフトが別の画面で変更されました。閉じて最新の台帳を確認してください。',
+            scheduleConflict: '台帳が更新されたか、勤務時間の外に予約・予定があります。最新の台帳を確認してください。',
+            unauthorized: 'ログインの有効期限が切れました。再ログインしてください。', forbidden: 'この操作の権限がありません。'
+          })[j.error] || '登録できませんでした。入力した内容は残しています。';
           return;
         }
-        close();
-        window.__pmSchedAt = 0;
-        await refreshSched(true);
-        decorateEvents();
+        wrap.remove(); window.__pmSchedAt = 0; window.__pmKickSync?.();
+        await refreshSched(true); decorateEvents();
       } catch {
-        window.alert("通信エラーが発生しました。");
-      }
+        status.textContent = '通信の結果を確認できません。入力は残しています。台帳で登録の有無を確認してから操作してください。';
+      } finally { busy = false; controls(); }
     });
+    controls(); status.textContent = 'スタッフとシフトを読み込み中…';
+    try {
+      const r = await fetch('/api/demo/schedule?date=' + encodeURIComponent(date), { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      const j = await r.json();
+      if (!r.ok || !Array.isArray(j.staff) || !Array.isArray(j.shifts) || !j.days?.some(d => d.date === date)) throw new Error('load');
+      if (!wrap.isConnected) return;
+      sched = j;
+      const registered = new Set(j.shifts.filter(s => s.date === date).map(s => s.staff_id));
+      const displayNames = new Map(j.staff.map(st => [st.id, st.name]));
+      // 写真・紹介文は掲載用。登録済みの全スタッフを勤務管理の対象にする。
+      for (const st of (j.allStaff || j.staff)) {
+        const option = document.createElement('option'); option.value = st.id;
+        option.textContent = (displayNames.get(st.id) || st.name) + (registered.has(st.id) ? '（登録済み）' : '');
+        option.disabled = registered.has(st.id); q('#pm-sa-staff').appendChild(option);
+      }
+      loaded = true; status.textContent = ''; controls();
+    } catch {
+      if (wrap.isConnected) status.textContent = '最新のシフトを読み込めませんでした。一度閉じて開き直してください。';
+    }
   }
 
   // タップした空き枠の赤いランプ。Reactの再描画で消えても ensure() が点け直し、
@@ -3560,6 +3588,8 @@
     // 編集開始時の版を使う。他の端末の変更を、保存直前の取得で見逃さない。
     let revision = (sched.days || []).find(x => x.date === date)?.version ?? 0;
     const post = async (body) => {
+      const editToken = sched.editTokens?.[body.remove ? "shiftDelete" : "shift"]?.[body.staffId];
+      if (editToken) body = { ...body, editToken };
       const r = await fetch("/api/demo/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, revision, ...body }), signal: AbortSignal.timeout(15000) });
       const j = await r.json();
       if (r.ok) revision++;
@@ -3586,7 +3616,7 @@
         const r1 = await post({ action: "shiftWithAttendance", staffId: sid, start, end, note: box.querySelector('[name="note"]').value, attendance });
         if (!r1.ok) {
           showMsg(r1.j.error === "scheduleConflict" ? "別の画面で更新されたか、予約・休憩・業務がシフト時間の外に出ます。「戻る」で最新の台帳を確認してください。"
-            : r1.j.error === "staffInfoMissing" ? "スタッフ情報（画像・フリーメッセージ・コース）が未入力のため、シフトを保存できません。先に「スタッフ情報」で入力してください。"
+            : r1.j.error === "scheduleItemChanged" ? "このスタッフのシフトまたは勤怠が別の画面で変更されています。入力は残しています。「戻る」で最新の内容を確認してください。"
             : "シフトを保存できませんでした。");
           return;
         }
@@ -3601,7 +3631,7 @@
       try {
         const r = await post({ action: "shift", staffId: sid, remove: true, removeRelated: true });
         if (!r.ok) { showMsg(r.j.error === "shiftHasBookings" ? "このスタッフにお客様の予約が残っています。先に予約の担当を変更してください。シフトは削除していません。"
-          : r.j.error === "scheduleConflict" ? "別の画面で更新されています。「戻る」で最新の台帳を確認してから削除してください。" : "シフトを削除できませんでした。"); return; }
+          : ["scheduleConflict", "scheduleItemChanged"].includes(r.j.error) ? "別の画面で更新されています。「戻る」で最新の台帳を確認してから削除してください。" : "シフトを削除できませんでした。"); return; }
         close();
       } catch { showMsg(uncertain); } finally { busy(false); }
     });
@@ -3807,6 +3837,7 @@
   const ERR = {
     soldOut: "その時間は、移動先のスタッフにほかの予約・休憩・業務があります（複数名の予約は、残りの担当の空きも必要です）。",
     outsideShift: "移動先のスタッフのシフトの時間外です。",
+    scheduleItemChanged: "この枠は別の画面で変更されました。最新の位置と内容を確認してください。",
     scheduleConflict: "ほかの画面で台帳が変更されていました。最新の状態にしたので、もう一度動かしてください。",
     bookingChanged: "この予約は、ほかの画面で先に変更されていました。最新の状態にしました。",
     staffUnavailable: "そのスタッフには移動できません。",
@@ -4140,7 +4171,7 @@
     try {
       const body = it.type === "booking"
         ? { action: "moveBooking", ...move, revision: await versionOf(p, p.date), expect: { staffId: it.staffId, start: it.start } }
-        : { action: "block", date: p.date, revision: await versionOf(p, p.date), id: it.id, staffId: t.staffId, start: t.start, end: t.end, kind: it.kind, note: it.note ?? "" };
+        : { action: "block", date: p.date, revision: await versionOf(p, p.date), id: it.id, staffId: t.staffId, start: t.start, end: t.end, kind: it.kind, note: it.note ?? "", editToken: it.editToken };
       if (cross) body.toRevision = await versionOf(p, t.date);
       const r = await fetch("/api/demo/schedule", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000),

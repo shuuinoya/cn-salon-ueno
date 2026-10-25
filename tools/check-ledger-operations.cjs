@@ -132,11 +132,12 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const id = pattern(); state.days.get(after).version = 1;
     unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'A', revision: 0 }, { date: after, staffId: 'B', revision: 0 }] }), 'scheduleConflict');
   });
-  await check('不足プロフィール・未登録担当・重複セルの適用禁止', () => {
+  await check('写真紹介不足も勤務パターンを使え、未登録担当・重複セルは禁止', () => {
     const id = pattern(); state.photos.delete('B');
-    unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'A', revision: 0 }, { date: after, staffId: 'B', revision: 0 }] }), 'staffInfoMissing');
-    unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'missing', revision: 0 }] }), 'invalid');
-    unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'A', revision: 0 }, { date: next, staffId: 'A', revision: 0 }] }), 'invalid');
+    post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'A', revision: 0 }, { date: after, staffId: 'B', revision: 0 }] });
+    assert.equal(ev(next).blocks.length,1);assert.equal(ev(after).blocks.length,1);
+    unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'missing', revision: state.days.get(next).version }] }), 'invalid');
+    unchanged(() => post({ action: 'patternApply', id, cells: [{ date: next, staffId: 'A', revision: state.days.get(next).version }, { date: next, staffId: 'A', revision: state.days.get(next).version }] }), 'invalid');
   });
   await check('置換で予約を勤務外に出さない・既存予約を変更しない', () => {
     const id = pattern({ start: 840, end: 1320 }); unchanged(() => post({ action: 'patternApply', id, mode: 'replace', cells: [{ date, staffId: 'A', revision: 0 }] }), 'outsideShift');

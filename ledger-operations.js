@@ -227,7 +227,6 @@ function prepareApply(state, cells, mode, c) {
     if (revision !== (state.days.get(date)?.version || 0)) throw c.err(409, "scheduleConflict");
     const st = state.staff.find(s => s.id === staffId);
     if (!st) throw c.err(400, "invalid");
-    if (!c.staffReady(st)) throw c.err(409, "staffInfoMissing");
     if (!drafts.has(date)) drafts.set(date, { shifts: clone(state.shifts.get(date) || []), events: clone(state.events.get(date) || emptyEvents()) });
     const draft = drafts.get(date), idx = draft.shifts.findIndex(s => s.staff_id === staffId);
     const sh = { staff_id: staffId, date, start_at: c.minToMs(date, start), end_at: c.minToMs(date, end), note: "" };

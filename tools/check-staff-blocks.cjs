@@ -151,7 +151,8 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     assert(a.freeStaffIds(date, 900, 960, course, 'none').includes(B));
     rejectUnchanged(() => reserve(B), 'soldOut');
     assert(reserve(B,900).id);
-    rejectUnchanged(() => a.postSchedule({ action: 'shift', date: next, revision: version(next), staffId: B, start: 600, end: 1200 }, actor), 'staffInfoMissing');
+    a.postSchedule({ action: 'shift', date: next, revision: version(next), staffId: B, start: 600, end: 1200 }, actor);
+    assert.equal(state.shifts.get(next).find(s=>s.staff_id===B).end_at,a.minToMs(next,1200));
   });
   const removeShift = (extra = {}) => a.postSchedule({ action: 'shift', date, revision: version(date), staffId: A, remove: true, removeRelated: true, ...extra }, actor);
   await check('休憩・業務・オンライン停止・勤怠を含むシフトを確認後に削除し、他担当と翌日を保持', () => {
@@ -214,6 +215,86 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('同じ保存の応答が途切れても再送で二重更新しない',()=>{
     const v=version(date);combined({revision:v});rejectUnchanged(()=>combined({revision:v}),'scheduleConflict');
+  });
+  const tokens = () => a.getSchedule(date);
+  const shift = extra => a.postSchedule({action:'shift',date,staffId:A,revision:version(date),start:600,end:1260,...extra},actor);
+  const token = (kind,sid=A) => tokens().editTokens[kind][sid];
+  const blockToken = id => tokens().blocks.find(b=>b.id===id).editToken;
+  await check('登録済みなら写真紹介がなくてもシフトを追加・変更・勤怠と保存・削除できる',()=>{
+    removeShift({staffId:B});const et=token('shift',B);
+    shift({staffId:B,addOnly:true,editToken:et});
+    combined({staffId:B,editToken:token('shift',B)});
+    assert.equal(state.attendance.get(date+'|'+B).clock_in,665);
+    removeShift({staffId:B,editToken:token('shiftDelete',B)});assert(!state.shifts.get(date).some(s=>s.staff_id===B));
+  });
+  await check('写真紹介不足でも月間シフトの複数日を保存できる',()=>{
+    a.postSchedule({action:'bulkShift',date,start:660,end:1260,cells:[{date,staffId:B,revision:version(date)},{date:next,staffId:B,revision:version(next)}]},actor);
+    for(const d of [date,next])assert.equal(state.shifts.get(d).find(s=>s.staff_id===B).start_at,a.minToMs(d,660));
+  });
+  await check('未登録スタッフのシフトは作らない',()=>rejectUnchanged(()=>shift({staffId:'test-missing'}),'invalid'));
+  await check('新規登録で既存シフトの時間や連絡事項を上書きしない',()=>{
+    shift({note:'テスト連絡'});const et=token('shift');rejectUnchanged(()=>shift({addOnly:true,start:660,editToken:et}),'shiftAlreadyExists');
+  });
+  await check('別担当の変更が入っても、新規シフトは元の入力で登録できる',()=>{
+    removeShift({staffId:B});const et=token('shift',B),rev=version(date);block({staffId:C});
+    shift({staffId:B,addOnly:true,editToken:et,revision:rev});assert(state.shifts.get(date).some(s=>s.staff_id===B));
+  });
+  await check('別担当の更新でシフト変更と勤怠保存をやり直させない',()=>{
+    const et=token('shift'),rev=version(date);block({staffId:C});combined({editToken:et,revision:rev});
+    assert.equal(state.attendance.get(date+'|'+A).clock_in,665);
+  });
+  for(const changed of ['shift','attendance'])await check('同じ担当の'+changed+'変更は最新の日番号を送っても上書きしない',()=>{
+    const et=token('shift');
+    if(changed==='shift')shift({note:'テスト別端末'});
+    else a.postSchedule({action:'attendance',date,staffId:A,revision:version(date),clockIn:600,clockOut:1200},actor);
+    rejectUnchanged(()=>combined({editToken:et}),'scheduleItemChanged');
+  });
+  await check('元の編集対象が変わらなければ別の業務更新中でも休憩を保存できる',()=>{
+    block();const id=list()[0].id,et=blockToken(id),rev=version(date);block({staffId:C});
+    block({id,editToken:et,revision:rev,start:810,end:870,kind:'break'});
+    assert.equal(list().find(b=>b.id===id).kind,'break');assert.equal(list().length,2);
+  });
+  for(const changed of ['move','note','delete'])await check('同じ業務の'+changed+'後は古い入力で上書き・復活させない',()=>{
+    block();const id=list()[0].id,et=blockToken(id);
+    block({id,...(changed==='delete'?{remove:true}:changed==='move'?{staffId:C,start:900,end:960}:{note:'テスト他端末'})});
+    rejectUnchanged(()=>block({id,editToken:et,start:810,end:870}),'scheduleItemChanged');
+  });
+  await check('新規業務は無関係な更新後も作れ、同じ場所への再送は重複させない',()=>{
+    const et=token('blockCreate'),rev=version(date);block({staffId:C});block({editToken:et,revision:rev});
+    rejectUnchanged(()=>block({editToken:et,revision:rev}),'scheduleConflict');assert.equal(list().length,2);
+  });
+  await check('新規業務の編集中に勤務が短くなったら古い画面から登録しない',()=>{
+    const et=token('blockCreate');shift({end:750});rejectUnchanged(()=>block({editToken:et}),'scheduleItemChanged');
+  });
+  await check('業務移動の間に新規予約が入ったら対象照合が合っていても重ねない',()=>{
+    block({start:900,end:960});const id=list()[0].id,et=blockToken(id);reserve();
+    rejectUnchanged(()=>block({id,editToken:et}),'scheduleConflict');
+  });
+  await check('シフト変更の間に予約が入ったら予約を勤務外に追い出さない',()=>{
+    const et=token('shift');reserve();rejectUnchanged(()=>shift({end:750,editToken:et}),'scheduleConflict');
+  });
+  await check('シフト削除の確認後に予約が入ったら削除しない',()=>{
+    const et=token('shiftDelete');reserve();rejectUnchanged(()=>removeShift({editToken:et}),'shiftHasBookings');
+  });
+  for(const related of ['block','online','lock','attendance'])await check('削除確認の後に'+related+'が追加されたら記録を巻き込まない',()=>{
+    const et=token('shiftDelete');
+    if(related==='block')block();
+    if(related==='online')state.ledger.onlineBlocks.push({id:'test-online',date,staffIds:[A],start:600,end:660});
+    if(related==='lock')state.days.get(date).locked=[A];
+    if(related==='attendance')state.attendance.set(date+'|'+A,{clock_in:600});
+    rejectUnchanged(()=>removeShift({editToken:et}),'scheduleItemChanged');
+  });
+  await check('他担当の更新でシフト削除を止めず、相手の予定と翌日を残す',()=>{
+    block();const et=token('shiftDelete'),rev=version(date);block({staffId:C});
+    const before=encode(state.shifts.get(next));removeShift({editToken:et,revision:rev});
+    assert(!state.shifts.get(date).some(s=>s.staff_id===A));assert.equal(list().length,1);assert.equal(list()[0].staff_id,C);assert.equal(encode(state.shifts.get(next)),before);
+  });
+  await check('不正・別用途・別担当の照合情報を受け付けない',()=>{
+    for(const et of ['',null,123,token('blockCreate'),token('shift',C)])rejectUnchanged(()=>shift({editToken:et}),'scheduleItemChanged');
+  });
+  await check('対象照合情報を予約や保存データに書き込まない',()=>{
+    block({editToken:token('blockCreate')});assert(!Object.hasOwn(list()[0],'editToken'));
+    shift({editToken:token('shift')});assert(!Object.hasOwn(state.shifts.get(date)[0],'editToken'));
   });
   const report = { ok: results.every(x => x.ok), checks: results.length, passed: results.filter(x => x.ok).length,
     failures: results.filter(x => !x.ok), results, externalMail: false, persistentWrites: false };

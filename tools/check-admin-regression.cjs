@@ -15,7 +15,7 @@ for (const file of ['demo-api.js', 'persist.js', 'staff-skills.js', 'staff-order
 }
 const suites = [
   ['check-staff-blocks.cjs', copy], ['check-ledger-operations.cjs', copy],
-  ['check-schedule-recovery.cjs'], ['check-block-ui.cjs'], ['check-lock-control.cjs'],
+  ['check-schedule-recovery.cjs'], ['check-shift-add-ui.cjs'], ['check-block-ui.cjs'], ['check-lock-control.cjs'],
   ['check-admin-interactions.cjs'], ['check-booking-ui-risks.cjs'], ['check-ledger-operations-ui.cjs'],
   ['check-booking-details-ui.cjs'], ['check-popup-behavior.cjs'], ['check-booking-form.cjs'],
   ['check-staff-picker-selection.cjs'], ['check-staff-skills-ui.cjs'],

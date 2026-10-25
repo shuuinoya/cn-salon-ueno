@@ -894,6 +894,24 @@ function getStaffOrdering(date, actor) {
 
 // ---- リクエスト処理 ----------------------------------------------------
 
+// 日全体の更新と、編集中の対象の変更を区別する。対象が同じなら別担当の更新だけで止めない。
+// 削除は一緒に消す休憩・業務・受付停止も含め、確認後に追加された記録を巻き込まない。
+function scheduleEditToken(date, kind, staffId, id) {
+  const ev = state.events.get(date), shift = (state.shifts.get(date) || []).find(s => s.staff_id === staffId) || null;
+  let value;
+  if (kind === "block") value = ev?.blocks.find(b => b.id === id) || null;
+  else if (kind === "blockCreate") value = shift;
+  else {
+    value = [shift, state.attendance.get(date + "|" + staffId) || null];
+    if (kind === "shiftDelete") value.push(
+      (ev?.blocks || []).filter(b => b.staff_id === staffId).sort((a,b) => a.id.localeCompare(b.id)),
+      !!state.days.get(date)?.locked?.includes(staffId),
+      state.ledger.onlineBlocks.filter(b => b.date === date && b.staffIds.includes(staffId)).map(b => [b.id,b.start,b.end,b.note]).sort((a,b) => String(a[0]).localeCompare(String(b[0])))
+    );
+  }
+  return crypto.createHash("sha256").update(JSON.stringify([date,kind,kind === "block" ? id : staffId,value])).digest("hex");
+}
+
 function getSchedule(date) {
   const shown = ledgerStaffIds();
   const days = [], shifts = [];
@@ -914,10 +932,12 @@ function getSchedule(date) {
     allStaff: sorted.map(staffRow),
     staffSkillCatalog: state.staffSkillCatalog,
     shifts,
+    editTokens: Object.fromEntries(["shift", "shiftDelete", "blockCreate"].map(kind => [kind,
+      Object.fromEntries(sorted.map(st => [st.id, scheduleEditToken(date, kind, st.id)]))])),
     bookings: ev.bookings.map(b => ({ ...b, boothId: boothPolicy.bookingBoothIds(b)[0] || null,
       booth_allowed_ids: boothPolicy.resolveCourseBoothIds(boothCourseForBooking(b)), ...bookingTiming(b, date) })),
     booths: boothPolicy.resolveBooths(state),
-    blocks: ev.blocks.filter((b) => shown.has(b.staff_id)),
+    blocks: ev.blocks.filter((b) => shown.has(b.staff_id)).map(b => ({ ...b, editToken: scheduleEditToken(date, "block", b.staff_id, b.id) })),
     assignments: ev.assignments,
     days,
     // 今の設定（スタッフ情報の対応メニューのチェック・性別）では担当できない担当がついている予約。
@@ -994,7 +1014,11 @@ function postSchedule(body, actor) {
     return result;
   }
   const day = ensureDay(date);
-  const checkRevision = () => { if (body.revision !== day.version) throw err(409, "scheduleConflict"); };
+  const checkRevision = (kind) => {
+    if (kind && body.editToken !== undefined) {
+      if (typeof body.editToken !== "string" || body.editToken !== scheduleEditToken(date, kind, body.staffId, body.id)) throw err(409, "scheduleItemChanged");
+    } else if (body.revision !== day.version) throw err(409, "scheduleConflict");
+  };
   const bump = (d = date) => { ensureDay(d).version++; sseTouch(); };
 
   // 予定と勤怠の一括保存でも、全項目を検査してから記録を変更する。
@@ -1028,14 +1052,14 @@ function postSchedule(body, actor) {
     }
     case "shiftWithAttendance":
     case "shift": {
-      checkRevision();
+      checkRevision(body.remove ? "shiftDelete" : "shift");
       if (action === "shiftWithAttendance" && (body.remove || !Object.hasOwn(body, "attendance"))) throw err(400, "invalid");
       const { staffId, start, end, remove } = body;
       const shiftStaff = state.staff.find((s) => s.id === staffId);
       if (!shiftStaff) throw err(400, "invalid");
-      if (!remove && !staffReady(shiftStaff)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろうまでシフトは入れられない
       const list = ensureShifts(date);
       const idx = list.findIndex((s) => s.staff_id === staffId);
+      if (!remove && body.addOnly === true && idx >= 0) throw err(409, "shiftAlreadyExists");
       if (remove) {
         const ev = ensureEvents(date);
         if (ev.bookings.some((b) => b.status === "confirmed" &&
@@ -1078,7 +1102,6 @@ function postSchedule(body, actor) {
         // 実在するスタッフ・日付だけ（以前はここを確かめておらず、どんなスタッフIDでもシフトが入った）
         const cellStaff = state.staff.find((s) => s.id === c.staffId);
         if (!cellStaff || !validDay(c.date)) throw err(400, "invalid");
-        if (!remove && !staffReady(cellStaff)) throw err(409, "staffInfoMissing"); // スタッフ情報がそろうまでシフトは入れられない
         if (c.revision !== ensureDay(c.date).version) throw err(409, "scheduleConflict");
       }
       // 先に全部のマスを確認してから、まとめて保存する（途中のマスがぶつかったら、どのマスも変えない）
@@ -1120,7 +1143,7 @@ function postSchedule(body, actor) {
       return { ok: true };
     }
     case "block": {
-      checkRevision();
+      checkRevision(body.id ? "block" : "blockCreate");
       const { staffId, start, end, kind, remove, id } = body;
       const ev = ensureEvents(date);
       if (remove) {
