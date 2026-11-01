@@ -4,12 +4,17 @@ const fs = require('node:fs'), path = require('node:path'), Module = require('no
 assert(process.argv[2]); const root = path.resolve(process.argv[2]); assert(!fs.existsSync(path.join(root, 'mail-config.json')));
 process.env.DEMO_EPHEMERAL = '1'; process.env.HP_MAIL = '0'; process.env.CLOUD = '0';
 for (const k of Object.keys(process.env)) if (/^(MAIL_|GH_|ADMIN_PASS)/.test(k)) delete process.env[k];
+// 文面の検査から送信処理へ進んでしまった場合も、外部通信を止める。
+const noNetwork = () => { throw new Error('検証中の外部通信は禁止'); };
+global.fetch = noNetwork;
+for (const name of ['node:net', 'node:tls']) require(name).connect = noNetwork;
+for (const name of ['node:http', 'node:https']) { require(name).request = noNetwork; require(name).get = noNetwork; }
 const revive = (_, v) => v?.__pm_map__ ? new Map(v.__pm_map__) : v?.__pm_set__ ? new Set(v.__pm_set__) : v;
 const snapshot = JSON.parse(fs.readFileSync(path.join(root, 'safe-state.json'), 'utf8'), revive);
 assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && !snapshot.state.mails.length);
 const persist = require(path.join(root, 'persist.js')); persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {};
 const file = path.join(root, 'demo-api.js'), mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root);
-mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,deliverDueMails,isBookingReminder,queueBookingMail,bookingUseNoticeIncludedInConfirmation,consumeTicket};', file);
+mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,deliverDueMails,isBookingReminder,queueBookingMail,bookingUseNoticeIncludedInConfirmation,consumeTicket,mailI18n,mailHtml,BOOKING_MAIL};', file);
 const ops = require(path.join(root, 'ledger-operations.js')), policy = require(path.join(root, 'booth-policy.js'));
 const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__: [...x] } : x instanceof Set ? { __pm_set__: [...x] } : x);
 (async () => {
@@ -24,6 +29,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     state.staffReconciliation = { version: 1 }; state.staff = ['A', 'B', 'C', 'D', 'E'].map(id => ({ id, name: 'テスト担当' + id, active: 1, gender: 'male', courses: '[]', sort_order: id.charCodeAt(0), profile: JSON.stringify({ message: 'テスト紹介', personalNomination: true, nominationFee: 500 }) }));
     state.photos = new Map(state.staff.map(s => [s.id, 'data:image/jpeg;base64,/9j/']));
     state.settings.freeMessage = { visible: true, required: false, maxLength: 2000 }; state.settings.shopMaster.resStart = 600; state.settings.shopMaster.resEnd = 1560;
+    state.settings.mailI18n = { enabled: false };
     a.courseStore.clear(); for (const x of courses) a.courseStore.set(x.id, { ...x }); state.courses = null;
     for (const d of [date, next]) {
       state.days.set(d, { version: 0, enabled: true }); state.events.set(d, { bookings: [], blocks: [], assignments: [] });
@@ -54,6 +60,70 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const mailRows=id=>state.mails.filter(m=>m.bookingId===id), noReminders=()=>assert(!state.mails.some(a.isBookingReminder));
   const ticket=()=>{const t={id:'test-ticket',token:'test-ticket-token',plan_id:'tp-5',plan_name:'テスト回数券',buyer_name:'テスト会員',buyer_email:'booth-test@example.test',member_email:'booth-test@example.test',uses_total:5,uses_left:5,menu_scope:'all',valid_months:12,history:[],purchased_at:new Date().toISOString(),expires_at:Date.now()+365*864e5};state.tickets.set(t.id,t);return t;};
   const oldUse=(t,b,extra={})=>({id:'TEST-OLD-USE',kind:'customer',type:'ticket',to:t.buyer_email,status:'pending',scheduledAt:Date.now()+864e5,body:'テスト残数通知',tpl:{name:'ticketLeft',ticketId:t.id,kind:'use',ref:b.reference},...extra});
+  const checkDetails = (m, people, nominated) => {
+    const lines = m.body.split('\n');
+    assert.equal(lines.filter(x => x === `人数 ${people}名`).length, 1, '人数は予約どおり1か所に記載');
+    const staffLine = lines.find(x => x.startsWith('担当スタッフ '));
+    assert(staffLine, '担当スタッフがない');
+    if (nominated) assert(staffLine.includes(`テスト担当${nominated}（ご指名）`), '指名されたスタッフを明記');
+    assert.equal((staffLine.match(/（ご指名）/g) || []).length, nominated ? 1 : 0, '指名なし・同行者の担当を指名と表示しない');
+    if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(staffLine)); }
+  };
+  for (const source of ['公開予約', '管理画面']) for (const people of [1, 2, 3]) for (const nominated of ['', 'A']) {
+    await check(`${source} ${people}名・指名${nominated ? 'あり' : 'なし'}の人数/担当を顧客と店舗へ記載`, () => {
+      const p = source === '公開予約' ? pub({ people, staffId: nominated })
+        : post({ people, staffIds: ['A', 'B', 'C'].slice(0, people), nominatedStaffId: nominated, expectedNominationFee: 500, email: 'details-test@example.test' });
+      const rows = mailRows(p.id); assert.equal(rows.length, 2);
+      for (const m of rows) checkDetails(m, people, nominated);
+      assert.equal(state.settings.mailI18n.enabled, false); noReminders();
+    });
+  }
+  await check('人数と指名の変更後は新しい内容で通知し確認済み履歴を書き換えない', () => {
+    const p = post({ people: 2, staffIds: ['A', 'B'], nominatedStaffId: 'A', expectedNominationFee: 500, email: 'details-test@example.test' });
+    const original = mailRows(p.id).map(m => ({ ...m }));
+    update(p.id, { people: 3, staffIds: ['B', 'C', 'D'], nominatedStaffId: 'B', expectedNominationFee: 500, confirmNominationMove: true });
+    const changed = mailRows(p.id).filter(m => m.type === 'change'); assert.equal(changed.length, 2);
+    for (const m of changed) { checkDetails(m, 3, 'B'); assert(!m.body.includes('テスト担当A')); }
+    assert.deepEqual(mailRows(p.id).slice(0, 2), original);
+    schedule({ action: 'cancel', id: p.id });
+    const cancelled = mailRows(p.id).filter(m => m.type === 'cancel'); assert.equal(cancelled.length, 2);
+    for (const m of cancelled) checkDetails(m, 3, 'B');
+    noReminders();
+  });
+  await check('指名料0円でも指名されたスタッフを表示する', () => {
+    state.staff[0].profile = JSON.stringify({ message: 'テスト紹介', personalNomination: true, nominationFee: 0 });
+    const p = pub({ people: 2, expectedNominationFee: 0 });
+    for (const m of mailRows(p.id)) checkDetails(m, 2, 'A');
+  });
+  await check('保存された指名名を使い、削除済みスタッフでも指名が消えない', () => {
+    const p = pub({ people: 2 }), b = booking(p.id); state.staff = state.staff.filter(x => x.id !== 'A');
+    for (const variant of ['customerConfirm', 'storeNotify', 'customerChange', 'storeChange', 'customerCancel', 'storeCancel']) checkDetails(a.BOOKING_MAIL[variant](b), 2, 'A');
+  });
+  await check('掲載名と記号を含む名前が本文/HTMLへ正しく反映される', () => {
+    state.staff[0].profile = JSON.stringify({ message: 'テスト紹介', nickname: 'テスト <A&B>', personalNomination: true, nominationFee: 500 });
+    const p = pub();
+    for (const m of mailRows(p.id)) { assert(m.body.includes('テスト <A&B>（ご指名）')); assert(m.html.includes('テスト &lt;A&amp;B&gt;（ご指名）')); assert(!m.html.includes('<A&B>')); }
+  });
+  await check('人数未記録の旧予約は1名、担当未割当なら架空の名前を作らない', () => {
+    const p = pub({ staffId: '' }), b = booking(p.id); delete b.people; ev().assignments = [];
+    const m = a.BOOKING_MAIL.customerConfirm(b); assert(m.body.includes('人数 1名')); assert(!m.body.includes('担当スタッフ')); assert(!m.body.includes('undefined'));
+  });
+  await check('回数券の送信直前の再生成にも人数/指名を記載する', () => {
+    const t = ticket(), p = pub({ ticketId: t.id, ticketToken: t.token });
+    for (const m of mailRows(p.id)) { checkDetails(m, 1, 'A'); checkDetails(a.applyMailTemplate(m, true), 1, 'A'); }
+    noReminders();
+  });
+  const translatedGuests = { en: 'Guests 3', zh: '人数 3位', ko: '인원 3명', fr: 'Personnes 3', es: 'Personas 3', it: 'Persone 3', de: 'Personen 3' };
+  for (const [lang, guests] of Object.entries(translatedGuests)) await check(`${lang}の文面見本でも人数/指名を保持し多言語送信は有効にしない`, () => {
+    const p = pub({ people: 3, language: lang });
+    for (const type of ['confirm', 'change', 'cancel']) {
+      const m = a.mailI18n().localize({ kind: 'customer', type, bookingId: p.id }, lang);
+      assert.equal(m.body.split('\n').filter(x => x === guests).length, 1); assert(m.body.includes('テスト担当A')); assert(m.body.includes('テスト担当B'));
+      assert.equal(a.mailI18n().localize({ kind: 'store', type, bookingId: p.id }, lang), null);
+    }
+    for (const m of mailRows(p.id)) checkDetails(m, 3, 'A');
+    assert.equal(state.settings.mailI18n.enabled, false); noReminders();
+  });
   await check('公開予約は確認1通＋店舗通知1通で自動リマインドなし',()=>{
     const p=pub();assert.deepEqual(mailRows(p.id).map(m=>[m.kind,m.type]),[['customer','confirm'],['store','notify']]);noReminders();
     const before=encode(state.mails);a.deliverDueMails('timer');a.deliverDueMails('cron');assert.equal(encode(state.mails),before);

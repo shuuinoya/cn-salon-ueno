@@ -2529,11 +2529,14 @@ function ticketMailLinesStore(bk) {
 
 function mailBlock(bk) {
   const d = bk.service_date;
+  const staffLine = bookingStaffLine(bk);
   return [
     SEP,
     `${d}（${["日","月","火","水","木","金","土"][new Date(d + "T00:00:00Z").getUTCDay()]}）　${fmtTime(d, bk.start_at)}〜`,
     `予約ID ${displayId(bk)}`,
     `　${courseCategory(bk.course)} ${bk.course_name}`,
+    `人数 ${bk.people || 1}名`,
+    ...(staffLine ? [staffLine] : []),
     "",
     `合計 ${bk.total.toLocaleString("ja-JP")} 円`,
     SEP,
@@ -2542,11 +2545,14 @@ function mailBlock(bk) {
 // 店舗向けはお客様情報付きのブロック
 function mailBlockStore(bk) {
   const d = bk.service_date;
+  const staffLine = bookingStaffLine(bk);
   return [
     SEP,
     `${d}（${["日","月","火","水","木","金","土"][new Date(d + "T00:00:00Z").getUTCDay()]}）　${fmtTime(d, bk.start_at)}〜`,
     `予約ID ${displayId(bk)}`,
     `　${courseCategory(bk.course)} ${bk.course_name}`,
+    `人数 ${bk.people || 1}名`,
+    ...(staffLine ? [staffLine] : []),
     "",
     `お名前 ${bk.name || "（未入力）"}`,
     `TEL ${bk.phone || "（未入力）"}`,

@@ -541,9 +541,10 @@ module.exports = function makeMailI18n(h) {
   const common = (lang) => ["", "", ...tr(lang).foot, h.SEP, h.MAIL_STORE, ADDRESS[lang], h.MAIL_TEL].join("\n");
   // 予約内容ブロック（日本語版 mailBlock と同じ並び）
   const block = (lang, bk) => {
-    const L = tr(lang), d = bk.service_date;
+    const L = tr(lang), d = bk.service_date, sl = staffLine(lang, bk);
     return [h.SEP, L.timeFrom(dateOfDay(lang, d, true), h.fmtTime(d, bk.start_at)), L.bookingId(h.displayId(bk)),
-      `　${categoryOf(bk.course, lang)} ${menuName(bk.course_name, lang)}`, "", L.total(yen(lang, bk.total)), h.SEP].join("\n");
+      `　${categoryOf(bk.course, lang)} ${menuName(bk.course_name, lang)}`, L.guests(bk.people || 1),
+      ...(sl ? [sl] : []), "", L.total(yen(lang, bk.total)), h.SEP].join("\n");
   };
   const usage = (lang, t) => (t.uses_left <= 0 ? tr(lang).usage.none : Date.now() > t.expires_at ? tr(lang).usage.expired : tr(lang).usage.ok);
   const infoBlock = (lang, t) => {
