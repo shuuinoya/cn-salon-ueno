@@ -39,7 +39,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     a.adminSessions.clear(); a.adminSessions.set('aaaa', { user: manager.user, created: Date.now() }); a.adminSessions.set('bbbb', { user: staff.user, created: Date.now() });
   }
   const ev = (d = date) => state.events.get(d), booking = (id, d = date) => ev(d).bookings.find(x => x.id === id);
-  const pub = (extra = {}) => a.createPublicBooking({ requestKey: require('node:crypto').randomUUID(), date, start: c.minToMs(date, 720), course, people: 1, staff: 'none', staffId: 'A', expectedNominationFee: 500, name: 'テスト予約', email: 'booth-test@example.test', phone: '0000000000', consent: true, ...extra });
+  const pub = (extra = {}) => a.createPublicBooking({ companionNames: Array.from({length: Math.max(0, (extra.people || 1) - 1)}, (_, i) => "【デモテスト】同行者" + (i + 1)), requestKey: require('node:crypto').randomUUID(), date, start: c.minToMs(date, 720), course, people: 1, staff: 'none', staffId: 'A', expectedNominationFee: 500, name: 'テスト予約', email: 'booth-test@example.test', phone: '0000000000', consent: true, ...extra });
   const schedule = extra => a.postSchedule({ date, revision: state.days.get(extra.date || date)?.version || 0, ...extra }, manager);
   const unchanged = (fn, code) => { const before = encode({ state, courses: [...a.courseStore] }); assert.throws(fn, e => e.message === code); assert(encode({ state, courses: [...a.courseStore] }) === before, '拒否時に元記録が変化'); };
   const api = (method, route, body, role = 'manager') => {
@@ -63,11 +63,11 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const checkDetails = (m, people, nominated) => {
     const lines = m.body.split('\n');
     assert.equal(lines.filter(x => x === `人数 ${people}名`).length, 1, '人数は予約どおり1か所に記載');
-    const staffLine = lines.find(x => x.startsWith('担当スタッフ '));
-    assert(staffLine, '担当スタッフがない');
-    if (nominated) assert(staffLine.includes(`テスト担当${nominated}（ご指名）`), '指名されたスタッフを明記');
-    assert.equal((staffLine.match(/（ご指名）/g) || []).length, nominated ? 1 : 0, '指名なし・同行者の担当を指名と表示しない');
-    if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(staffLine)); }
+    const nominationLine = lines.find(x => x.startsWith('指名：'));
+    assert.equal(nominationLine, nominated ? `指名：【テスト担当${nominated}さん】` : '指名：なし', '正しい指名者だけを明記');
+    assert.equal(lines.filter(x => x.startsWith('指名：')).length, 1, '指名を重複表示しない');
+    if (!nominated) assert(lines.some(x => x.startsWith('担当スタッフ')), '指名なしでは自動割当の担当者を記載');
+    if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(nominationLine)); }
   };
   for (const source of ['公開予約', '管理画面']) for (const people of [1, 2, 3]) for (const nominated of ['', 'A']) {
     await check(`${source} ${people}名・指名${nominated ? 'あり' : 'なし'}の人数/担当を顧客と店舗へ記載`, () => {
@@ -102,7 +102,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await check('掲載名と記号を含む名前が本文/HTMLへ正しく反映される', () => {
     state.staff[0].profile = JSON.stringify({ message: 'テスト紹介', nickname: 'テスト <A&B>', personalNomination: true, nominationFee: 500 });
     const p = pub();
-    for (const m of mailRows(p.id)) { assert(m.body.includes('テスト <A&B>（ご指名）')); assert(m.html.includes('テスト &lt;A&amp;B&gt;（ご指名）')); assert(!m.html.includes('<A&B>')); }
+    for (const m of mailRows(p.id)) { assert(m.body.includes('指名：【テスト <A&B>さん】')); assert(m.html.includes('指名：【テスト &lt;A&amp;B&gt;さん】')); assert(!m.html.includes('<A&B>')); }
   });
   await check('人数未記録の旧予約は1名、担当未割当なら架空の名前を作らない', () => {
     const p = pub({ staffId: '' }), b = booking(p.id); delete b.people; ev().assignments = [];

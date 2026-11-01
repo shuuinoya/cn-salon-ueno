@@ -1,6 +1,7 @@
 "use strict";
 // 管理画面の詳細予約。料金・時間・技能・部屋を全件検査してから一度だけ保存する。
 const crypto = require("node:crypto");
+const companions = require("./booking-companions");
 const copy = x => JSON.parse(JSON.stringify(x));
 const text = (v, n = 2000) => String(v ?? "").trim().slice(0, n);
 const hash = x => crypto.createHash("sha256").update(JSON.stringify(x)).digest("hex");
@@ -44,6 +45,7 @@ function get(state, query, actor, c) {
     ...(!bk ? c.ticketOptions(query) : {}),
     booking: bk ? { id: bk.id, reference: bk.reference, status: bk.status, source: bk.source,
       name: bk.name, email: bk.email || "", phone: bk.phone || "", start: c.msToMin(date, bk.start_at), people: bk.people || 1,
+      companionNames: companions.namesOf(bk),
       staffIds: staffIds(state, date, bk.id), nominatedStaffId: bk.nominated_staff_id || "", nominationFee: bk.nomination_fee || 0,
       services: servicesOf(bk, c), unknownMenu: bk.course_name || "", bulkDiscountType: bk.bulk_discount_type || "none", bulkDiscount: bk.bulk_discount || 0,
       preferences: bk.preferences || "", tags: bk.tags || "", comment: bk.comment || "", total: bk.total, paid_at: bk.paid_at || null,
@@ -80,6 +82,13 @@ function post(state, body, actor, c) {
   }
   if (typeof body.name !== "string" || !body.name.trim() || (body.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) ||
       (body.phone?.trim() && !/^[0-9+()\- .]+$/.test(body.phone.trim()))) throw c.err(400, "invalid");
+  // 従来の管理画面・取込予約で同行者名が未登録でも他の編集を妨げない。
+  // 既存の名前は、明示的に編集しない限り保持する。人数減少による黙った削除も防ぐ。
+  let companionNames = companions.namesOf(old || {});
+  if (body.companionNames !== undefined) {
+    companionNames = Array.isArray(body.companionNames) && body.companionNames.length === 0 && !companionNames.length
+      ? [] : companions.validateNames(body.companionNames, people, c.err);
+  } else if (companionNames.length && companionNames.length !== people - 1) throw c.err(400, "invalid");
   c.rejectTestData({ name: body.name, email: body.email });
   const oldServices = old ? servicesOf(old, c) : [];
   const serviceIds = new Set();
@@ -151,7 +160,7 @@ function post(state, body, actor, c) {
   if (!rooms.ok) throw c.err(409, rooms.code);
   const bk = old ? copy(old) : { id: "bk-new-" + (state.bookingSerial + 1), reference: "DM" + String(state.bookingSerial + 1).padStart(6, "0"),
     service_date: date, status: "confirmed", created_at: now, source: "admin", staff: "none", customer_token: null, customer_gender: "" };
-  Object.assign(bk, { start_at: c.minToMs(date, start), end_at: c.minToMs(date, end), people,
+  Object.assign(bk, { start_at: c.minToMs(date, start), end_at: c.minToMs(date, end), people, companion_names: companionNames,
     services, course: services[0].courseId, course_name: services.map(s => s.name).join("＋"),
     bulk_discount_type: bulkType, bulk_discount: bulkValue, total: amount, base_price: old?.ticket_id || useTicket ? 0 : serviceTotal / people,
     name: text(body.name, 120), email: text(body.email, 254), phone: text(body.phone, 40), comment: text(body.comment), preferences: text(body.preferences), tags: text(body.tags, 500),
@@ -161,7 +170,7 @@ function post(state, body, actor, c) {
   bk.details_customized = services.length > 1 || duration !== firstCourse.minutes || bulkType !== "none" || services.some(s => s.discountType !== "none" || s.price !== c.getCourse(s.courseId).price) || people > 3 ||
     ["minutesBefore", "minutesBody", "minutesAfter"].some(key => services[0][key] !== timing[key]);
   c.setBookingBooths(bk, rooms, actor, now);
-  const historyFields = b => ({ name: b.name, email: b.email || "", phone: b.phone || "", comment: b.comment || "", preferences: b.preferences || "", tags: b.tags || "",
+  const historyFields = b => ({ companionNames: companions.namesOf(b), name: b.name, email: b.email || "", phone: b.phone || "", comment: b.comment || "", preferences: b.preferences || "", tags: b.tags || "",
     bulkDiscountType: b.bulk_discount_type || "none", bulkDiscount: b.bulk_discount || 0, nominationFee: b.nomination_fee || 0 });
   if (old) bk.details_history = [...(old.details_history || []), { at: now, by: actor.user, before: { ...historyFields(old), services: oldServices, people: old.people, total: old.total,
     start_at: old.start_at, end_at: old.end_at, staffIds: oldIds, nominatedStaffId: old.nominated_staff_id }, after: { ...historyFields(bk), services: copy(services), people, total: amount, start_at: bk.start_at, end_at: bk.end_at, staffIds: [...ids], nominatedStaffId: nominated || null }, nomination_confirmed: !!body.confirmNominationMove }];

@@ -648,7 +648,7 @@
         dd.textContent = T("なし");
         dl.append(dt, dd);
       }
-      const order = [T("予約ID"), bt("name"), bt("date"), bt("count"), T("メニュー"), T("オプション"), bt("staffLabel"), bt("total")];
+      const order = [T("予約ID"), bt("name"), T("同行者{n}のお名前", { n: 1 }), T("同行者{n}のお名前", { n: 2 }), bt("date"), bt("count"), T("メニュー"), T("オプション"), bt("staffLabel"), bt("nominationFee"), bt("total")];
       for (const t of order) {
         const dt = label(t);
         if (dt) { const dd = dt.nextElementSibling; dl.append(dt); if (dd?.tagName === "DD") dl.append(dd); }

@@ -17,6 +17,7 @@ const crypto = require("crypto");
 const ledgerOperations = require("./ledger-operations");
 const boothPolicy = require("./booth-policy");
 const bookingDetails = require("./booking-details");
+const companions = require("./booking-companions");
 const staffOrdering = require("./staff-ordering");
 const staffSkills = require("./staff-skills");
 const { staffLatinName } = require("./staff-names");
@@ -1571,7 +1572,7 @@ function mailHtml(body) {
 let mailI18nInst = null;
 const mailI18n = () => mailI18nInst || (mailI18nInst = require("./mail-i18n")({
   state, findBooking, ensureEvents, profileOf, displayId, fmtTime, bookingMypageUrl, origin: () => origin(),
-  ticketUsedCount, otherUsableTickets,
+  ticketUsedCount, otherUsableTickets, bookingPriceParts, companionNames: companions.namesOf,
   get SEP() { return SEP; }, get MAIL_STORE() { return MAIL_STORE; }, get MAIL_TEL() { return MAIL_TEL; },
   get VISIT_CONTACT_MAIL() { return VISIT_CONTACT_MAIL; }, get MASK_PASS() { return MASK_PASS; }, get MASK_RESET() { return MASK_RESET; },
 }));
@@ -2536,9 +2537,10 @@ function mailBlock(bk) {
     `予約ID ${displayId(bk)}`,
     `　${courseCategory(bk.course)} ${bk.course_name}`,
     `人数 ${bk.people || 1}名`,
+    ...bookingCompanionLines(bk),
     ...(staffLine ? [staffLine] : []),
     "",
-    `合計 ${bk.total.toLocaleString("ja-JP")} 円`,
+    ...bookingPriceLines(bk),
     SEP,
   ].join("\n");
 }
@@ -2552,6 +2554,7 @@ function mailBlockStore(bk) {
     `予約ID ${displayId(bk)}`,
     `　${courseCategory(bk.course)} ${bk.course_name}`,
     `人数 ${bk.people || 1}名`,
+    ...bookingCompanionLines(bk),
     ...(staffLine ? [staffLine] : []),
     "",
     `お名前 ${bk.name || "（未入力）"}`,
@@ -2559,7 +2562,7 @@ function mailBlockStore(bk) {
     `メール ${bk.email || "（未入力）"}`,
     `ご要望 ${bk.comment || "なし"}`,
     "",
-    `合計 ${bk.total.toLocaleString("ja-JP")} 円`,
+    ...bookingPriceLines(bk),
     SEP,
   ].join("\n");
 }
@@ -2640,23 +2643,35 @@ function bookingStaffLine(bk) {
   if (bk.nominated_staff_id) {
     const others = ids.filter((id) => id !== bk.nominated_staff_id).map(nameOf).filter(Boolean);
     const nom = nameOf(bk.nominated_staff_id) || bk.nominated_staff_name || "";
-    return `担当スタッフ ${nom}（ご指名）` + (others.length ? `、${others.join("、")}` : "");
+    return `指名：【${nom ? nom + "さん" : "スタッフ名未登録"}】` + (others.length ? `\n担当スタッフ（その他） ${others.join("、")}` : "");
   }
   const names = ids.map(nameOf).filter(Boolean);
-  return names.length ? `担当スタッフ ${names.join("、")}` : null;
+  return "指名：なし" + (names.length ? `\n担当スタッフ ${names.join("、")}` : "");
+}
+function bookingCompanionLines(bk) {
+  return companions.namesOf(bk).map((name, i) => `同行者${i + 1} ${name} 様`);
+}
+// 日本語・翻訳メールで同じ確定金額を使う（送信時のスタッフ料金では再計算しない）。
+function bookingPriceParts(bk) {
+  const people = bk.people || 1, fee = bk.nomination_fee || 0;
+  let base;
+  try { base = bk.ticket_id ? 0 : bk.services?.length ? bookingDetails.totalAtStart(bk, 0, err) - fee : Number.isFinite(bk.base_price) ? bk.base_price * people : NaN; }
+  catch { base = NaN; } // 古い不完全なコース情報で予約変更・取消の通知を止めない。
+  const expectedLate = bk.source !== "hotpepper" && msToMin(bk.service_date, bk.start_at) >= 1320 ? 2000 * people : 0;
+  const remainder = bk.total - base - fee;
+  // 不明な料金差額を深夜料金と決め付けない。確定値と一致する内訳だけを載せる。
+  return { people, base, fee, late: Number.isFinite(base) && remainder === expectedLate ? remainder : -1 };
 }
 // 料金の内訳（すべて予約データに保存された確定値から作る。合計は予約の合計金額そのもの）
 function bookingPriceLines(bk) {
-  const people = bk.people || 1;
-  const base = bk.services?.length ? bookingDetails.totalAtStart(bk, 0, err) - (bk.nomination_fee || 0) : (bk.base_price || 0) * people;
-  const fee = bk.nomination_fee || 0;
-  const late = bk.total - base - fee; // 深夜料金（予約作成・担当変更時にシステムが計算した分）
-  if (late < 0) return [`合計 ${bk.total.toLocaleString("ja-JP")} 円`]; // 内訳が合わない古いデータは合計のみ
+  const { people, base, fee, late } = bookingPriceParts(bk);
+  // 内訳が合わない旧記録でも保存済みの指名料は表示する。調整理由は推測しない。
+  if (late < 0) return [...(bk.nominated_staff_id || fee > 0 ? [`指名料 ${fee.toLocaleString("ja-JP")} 円`] : []), `合計 ${bk.total.toLocaleString("ja-JP")} 円`];
   const lines = [];
   if (bk.ticket_id) lines.push("コース料金 回数券でお支払い（1回分）");
   else if (bk.services?.length) lines.push(`コース料金（割引後・${people}名分） ${base.toLocaleString("ja-JP")} 円`);
   else lines.push(`コース料金 ${(bk.base_price || 0).toLocaleString("ja-JP")} 円` + (people > 1 ? ` × ${people}名` : ""));
-  if (fee > 0) lines.push(`指名料 ${fee.toLocaleString("ja-JP")} 円`);
+  if (bk.nominated_staff_id || fee > 0) lines.push(`指名料 ${fee.toLocaleString("ja-JP")} 円`);
   if (late > 0) lines.push(`深夜料金 ${late.toLocaleString("ja-JP")} 円`);
   lines.push(`合計 ${bk.total.toLocaleString("ja-JP")} 円`);
   return lines;
@@ -2687,6 +2702,7 @@ function bookingRemindBody(bk) {
     `予約ID ${displayId(bk)}`,
     `　${courseCategory(bk.course)} ${bk.course_name}`,
     `人数 ${bk.people || 1}名`,
+    ...bookingCompanionLines(bk),
     ...(staffLine ? [staffLine] : []),
     "",
     ...bookingPriceLines(bk),
@@ -3401,6 +3417,7 @@ function createPublicBooking(body, member) {
   if (!course || !validDay(date) || !(Number.isInteger(people) && people >= 1 && people <= 3) ||
       body.consent !== true || !String(body.name || "").trim() || !String(body.email || "").trim() ||
       !String(body.phone || "").trim()) throw err(400, "invalid");
+  const companionNames = companions.validateNames(body.companionNames, people, err);
   rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない
   // フリーメッセージ欄の設定（表示・必須・文字数）はサーバー側でも強制する
   const fm = state.settings.freeMessage;
@@ -3463,7 +3480,7 @@ function createPublicBooking(body, member) {
     id, reference,
     service_date: date, status: "confirmed", created_at: operationTime, source: "web",
     start_at: minToMs(date, m), end_at: minToMs(date, m + dur),
-    people, course: body.course, course_name: course.name,
+    people, companion_names: companionNames, course: body.course, course_name: course.name,
     name: String(body.name).slice(0, 120), email: String(body.email).slice(0, 254),
     phone: String(body.phone).slice(0, 40), comment,
     // 回数券利用時はコース料金を回数券でまかなう（深夜料金・指名料は通常どおり）
@@ -3542,7 +3559,7 @@ function getPublicBooking(id, token, member) {
       ticket_id: bk.ticket_id && !bk.ticket_refunded ? bk.ticket_id : null,
       language: bk.language || "ja", serviceDate: bk.service_date,
       start: bk.start_at, courseId: bk.course, courseName: bk.course_name,
-      name: bk.name, people: bk.people, staff: bk.staff || "none",
+      name: bk.name, people: bk.people, companionNames: companions.namesOf(bk), staff: bk.staff || "none",
       nominatedStaffName: bk.nominated_staff_name, nominationFee: bk.nomination_fee,
       total: bk.total,
     },

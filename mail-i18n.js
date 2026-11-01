@@ -544,7 +544,7 @@ module.exports = function makeMailI18n(h) {
     const L = tr(lang), d = bk.service_date, sl = staffLine(lang, bk);
     return [h.SEP, L.timeFrom(dateOfDay(lang, d, true), h.fmtTime(d, bk.start_at)), L.bookingId(h.displayId(bk)),
       `　${categoryOf(bk.course, lang)} ${menuName(bk.course_name, lang)}`, L.guests(bk.people || 1),
-      ...(sl ? [sl] : []), "", L.total(yen(lang, bk.total)), h.SEP].join("\n");
+      ...companionLines(lang, bk), ...(sl ? [sl] : []), "", ...priceLines(lang, bk), h.SEP].join("\n");
   };
   const usage = (lang, t) => (t.uses_left <= 0 ? tr(lang).usage.none : Date.now() > t.expires_at ? tr(lang).usage.expired : tr(lang).usage.ok);
   const infoBlock = (lang, t) => {
@@ -568,6 +568,10 @@ module.exports = function makeMailI18n(h) {
     const lead = bk.ticket_refunded ? [L.tkReturned(planName(t.plan_name, lang))] : bk.status === "cancelled" ? [L.tkNoReturn] : [L.tkUsed1, L.tkUsed2];
     return [...lead, ...infoBlock(lang, t), ...otherLines(lang, h.otherUsableTickets(t)), L.snap, ""];
   };
+  const companionLines = (lang, bk) => {
+    const label = { en: "Companion", zh: "同行者", ko: "동행자", fr: "Accompagnant", es: "Acompañante", it: "Accompagnatore", de: "Begleitperson" }[lang];
+    return h.companionNames(bk).map((name, i) => `${label} ${i + 1}: ${name}`);
+  };
   const staffLine = (lang, bk) => {
     const L = tr(lang);
     const found = h.findBooking(bk.id);
@@ -582,10 +586,11 @@ module.exports = function makeMailI18n(h) {
     return names.length ? L.staff(names) : null;
   };
   const priceLines = (lang, bk) => {
-    const L = tr(lang), people = bk.people || 1, base = (bk.base_price || 0) * people, fee = bk.nomination_fee || 0, late = bk.total - base - fee;
-    if (late < 0) return [L.total(yen(lang, bk.total))];
-    const lines = [bk.ticket_id ? L.feeTicket : L.fee(yen(lang, bk.base_price || 0), people)];
-    if (fee > 0) lines.push(L.nomFee(yen(lang, fee)));
+    const L = tr(lang), { people, base, fee, late } = h.bookingPriceParts(bk);
+    if (late < 0) return [...(bk.nominated_staff_id || fee > 0 ? [L.nomFee(yen(lang, fee))] : []), L.total(yen(lang, bk.total))];
+    const totalLabel = { en: "Treatment total after discounts", zh: "折扣后疗程总价", ko: "할인 후 시술 합계", fr: "Total des soins après réductions", es: "Total de tratamientos tras descuentos", it: "Totale trattamenti dopo gli sconti", de: "Behandlungssumme nach Rabatten" }[lang];
+    const lines = [bk.ticket_id ? L.feeTicket : bk.services?.length ? `${totalLabel}: ${yen(lang, base)}` : L.fee(yen(lang, bk.base_price || 0), people)];
+    if (bk.nominated_staff_id || fee > 0) lines.push(L.nomFee(yen(lang, fee)));
     if (late > 0) lines.push(L.lateFee(yen(lang, late)));
     lines.push(L.total(yen(lang, bk.total)));
     return lines;
@@ -602,7 +607,7 @@ module.exports = function makeMailI18n(h) {
         L.dear(bk.name), "", L.remindLead, L.detailsBelow, "", h.SEP,
         L.timeRange(dateOfDay(lang, d, true), h.fmtTime(d, bk.start_at), h.fmtTime(d, bk.end_at), minutes),
         L.bookingId(h.displayId(bk)), `　${categoryOf(bk.course, lang)} ${menuName(bk.course_name, lang)}`, L.guests(bk.people || 1),
-        ...(sl ? [sl] : []), "", ...priceLines(lang, bk), h.SEP, ...ticketLines(lang, bk),
+        ...companionLines(lang, bk), ...(sl ? [sl] : []), "", ...priceLines(lang, bk), h.SEP, ...ticketLines(lang, bk),
         L.payHead, ...(bk.total > 0 ? [L.payAtSalon, L.payFee] : [L.payTicket]), "",
         L.placeHead, h.MAIL_STORE, ADDRESS[lang], L.map(`${o()}/map`), "", L.lookForward, "", L.late, h.MAIL_TEL, "",
         L.noticeHead, L.notice, L.contact(h.VISIT_CONTACT_MAIL), "", L.howChange, L.busy, L.memberChange, L.checkCancel, h.bookingMypageUrl(bk),

@@ -113,3 +113,8 @@ a, button, summary, label, select, [role="button"], .menu-row, .slot-open { touc
 #fm-ticket-pick #fm-ticket-select { display:block; width:100%; max-width:100%; min-width:0; min-height:44px; padding:8px 32px 8px 12px; border:1px solid #d8c8ae; border-radius:6px; background-color:#fffdf9; color:#303033; font-size:14px; line-height:1.4; }
 #fm-ticket-pick .fm-tk-note { margin:6px 0 0; font-size:12px; line-height:1.5; color:#79551f; }
 #fm-ticket-pick .fm-tk-note:empty { display:none; }
+
+/* 同行者は名前だけ。既存の縦並びフォームの寸法を共有する。 */
+.booking-companions { display: grid; gap: 12px; min-width: 0; }
+.booking-companions label, .booking-companions input { min-width: 0; max-width: 100%; }
+.booking-summary dd { overflow-wrap: anywhere; }

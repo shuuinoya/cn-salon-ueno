@@ -63,8 +63,8 @@ async function publicSubmit() {
     const s=read("public/_next/static/chunks/page-WafCof8Y.js"),source=part(s,"async function Z(","return(0,x.jsx)(m,");
     const posts=[],pending=[],redirects=[];
     const context=vm.createContext({F:{current:false},P:{current:""},I:true,C:{id:"test-course"},X:true,k:"test-staff",W:{nominationFee:500},
-      w:100,T:"2026-10-22",E:1,O:"none",e:"ja",j(){},N(){},J(){},U(){},f:()=>"test-request-key",AbortSignal,Error,
-      FormData:class{get(k){return {name:"テスト確認",email:"test@example.test",phone:"000",consent:"on"}[k]||""}},
+      w:100,T:"2026-10-22",E:1,O:"none",e:"ja",clearCompanionDraft(){},j(){},N(){},J(){},U(){},f:()=>"test-request-key",AbortSignal,Error,
+      FormData:class{getAll(){return []}get(k){return {name:"テスト確認",email:"test@example.test",phone:"000",consent:"on"}[k]||""}},
       window:{location:{replace:p=>redirects.push(p)}},fetch:(_u,init)=>{posts.push(JSON.parse(init.body));const d=deferred();pending.push(d);return d.promise;}});
     vm.runInContext(source+";this.submit=Z;",context);const ev={preventDefault(){},currentTarget:{}};
     const first=context.submit(ev),double=context.submit(ev);assert.equal(posts.length,1);pending[0].reject(new Error("network"));await first;await double;

@@ -17,6 +17,11 @@
 
   /* 辞書 */
   const D = {
+    "同行者のお名前": ["Companions’ names", "同行者姓名", "동행자 이름", "Noms des accompagnants", "Nombres de los acompañantes", "Nomi degli accompagnatori", "Namen der Begleitpersonen"],
+    "予約者ご本人以外の方は、お名前のみ入力してください。": ["For everyone other than the person making the booking, enter names only.", "预约者本人以外的同行者只需填写姓名。", "예약자 본인 이외의 분은 이름만 입력해 주세요.", "Pour les personnes autres que celle qui réserve, indiquez uniquement les noms.", "Para las personas distintas de quien hace la reserva, indique solo sus nombres.", "Per le persone diverse da chi prenota, inserisci solo i nomi.", "Geben Sie für alle Personen außer der buchenden Person nur die Namen ein."],
+    "同行者{n}のお名前": ["Companion {n} name", "同行者{n}姓名", "동행자 {n} 이름", "Nom de l’accompagnant {n}", "Nombre del acompañante {n}", "Nome dell’accompagnatore {n}", "Name der Begleitperson {n}"],
+    "同行者のお名前を入力してください。": ["Please enter the companions’ names.", "请填写同行者姓名。", "동행자 이름을 입력해 주세요.", "Veuillez indiquer les noms des accompagnants.", "Introduzca los nombres de los acompañantes.", "Inserisci i nomi degli accompagnatori.", "Bitte geben Sie die Namen der Begleitpersonen ein."],
+
     "詳細を見る": ["View details", "查看详情", "상세 보기", "Voir les détails", "Ver detalles", "Vedi dettagli", "Details ansehen"],
     "使用する": ["Use", "使用", "사용하기", "Utiliser", "Usar", "Usa", "Verwenden"],
     "選択した回数券は現在使用できません。回数券を選び直してください。": ["This pass cannot be used now. Please choose another pass.", "所选次数卡目前无法使用，请重新选择。", "선택한 이용권은 현재 사용할 수 없습니다. 이용권을 다시 선택해 주세요.", "Ce forfait ne peut pas être utilisé actuellement. Veuillez en choisir un autre.", "Este bono no se puede usar ahora. Elige otro bono.", "Questo carnet non è attualmente utilizzabile. Scegli un altro carnet.", "Diese Mehrfachkarte ist derzeit nicht verwendbar. Bitte wählen Sie eine andere."],

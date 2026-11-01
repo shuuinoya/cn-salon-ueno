@@ -1540,7 +1540,9 @@
         '<div class="pm-chips"><span class="pm-chip">' + esc(menu) + '</span><button type="button" class="pm-plus" data-act="edit" aria-label="コース・時間・割引を編集">＋</button></div>' +
         '<div class="pm-btnrow pm-right"><button type="button" class="pm-red" data-act="edit">編集</button><button type="button" class="pm-red" data-act="booth">ブース変更</button><button type="button" class="pm-red" data-act="cancel">予約取消</button></div>' +
         '<table class="pm-table"><tbody>' +
-          [["時間", esc(timeLabel)], ["ブース", esc(bkRow?.booth || "未登録")], ["スタッフ", esc(staffName)],
+          [["時間", esc(timeLabel)],
+           ...(Array.isArray(bkRow?.companion_names) ? bkRow.companion_names.map((name, i) => ["同行者" + (i + 1), esc(name)]) : []),
+           ["ブース", esc(bkRow?.booth || "未登録")], ["スタッフ", esc(staffName)],
            ...(bkRow?.nominated_staff_id ? [["指名", esc(bkRow.nominated_staff_name || staffName)],
              ["指名料", Number(bkRow.nomination_fee || 0).toLocaleString("ja-JP") + "円"]] : []),
            ["コース", esc(menu)], ["オプション", ""],

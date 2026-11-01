@@ -4,3 +4,6 @@ mail-config.json
 tls/
 tools/bin/cloudflared
 tools/mac-production.env
+
+# Isolated sanitized verification input; never production data in git.
+/safe-state.json
