@@ -83,6 +83,14 @@
 #staff-listing-ordering .so-drag-preview { position:fixed; left:0; top:0; margin:0; box-sizing:border-box; z-index:10; pointer-events:none; border-color:#b78b49; background:#fff9ec; box-shadow:0 5px 18px #0003; cursor:grabbing; will-change:transform; }
 #staff-listing-ordering .so-message { min-height:2.8em; font-size:12px; line-height:1.4; margin-bottom:6px; }
 
+/* ダイアログは台帳の外にあるため、台帳内だけのボタン装飾に依存しない。 */
+:is(#staff-public-ordering,#staff-listing-ordering) .so-actions button { border:1px solid #bba484; border-radius:5px; background:#fff; color:#644b29; font:inherit; cursor:pointer; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-actions [data-so="save"] { min-height:44px; padding:9px 16px; border-color:#916d3b; background:#916d3b; color:#fff; font-weight:700; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-actions button:disabled { opacity:.6; cursor:default; }
+:is(#staff-public-ordering,#staff-listing-ordering) .so-actions button:focus-visible { outline:2px solid #906427; outline-offset:2px; }
+#staff-listing-ordering .so-toolbar { position:sticky; top:-10px; z-index:3; margin:-10px -10px 8px; padding:10px 10px 0; background:#f7f4ef; border-bottom:1px solid #d9c7ba; }
+#staff-listing-ordering .so-actions > span { flex-basis:100%; color:#666; }
+
 .so-leave-dialog { position:fixed; inset:0; margin:auto; width:min(380px,calc(100% - 32px)); box-sizing:border-box; padding:20px; border:1px solid #d9c7ba; border-radius:10px; color:#333; background:#fff; }
 .so-leave-dialog::backdrop { background:#0006; }
 .so-leave-dialog h2 { margin:0 0 10px; font-size:18px; }
