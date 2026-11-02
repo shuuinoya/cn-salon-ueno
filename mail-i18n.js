@@ -574,16 +574,11 @@ module.exports = function makeMailI18n(h) {
   };
   const staffLine = (lang, bk) => {
     const L = tr(lang);
-    const found = h.findBooking(bk.id);
-    const ev = found ? h.ensureEvents(found.date) : null;
-    const ids = ev ? ev.assignments.filter((a) => a.booking_id === bk.id).map((a) => a.staff_id) : [];
     const nameOf = (id) => { const st = h.state.staff.find((s) => s.id === id); return st ? (h.profileOf(st).nickname || st.name) : null; };
     if (bk.nominated_staff_id) {
-      const others = ids.filter((id) => id !== bk.nominated_staff_id).map(nameOf).filter(Boolean);
-      return L.staffNom(nameOf(bk.nominated_staff_id) || bk.nominated_staff_name || "", others);
+      return L.staffNom(nameOf(bk.nominated_staff_id) || bk.nominated_staff_name || "", []);
     }
-    const names = ids.map(nameOf).filter(Boolean);
-    return names.length ? L.staff(names) : null;
+    return null;
   };
   const priceLines = (lang, bk) => {
     const L = tr(lang), { people, base, fee, late } = h.bookingPriceParts(bk);

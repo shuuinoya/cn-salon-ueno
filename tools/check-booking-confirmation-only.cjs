@@ -63,11 +63,11 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const checkDetails = (m, people, nominated) => {
     const lines = m.body.split('\n');
     assert.equal(lines.filter(x => x === `人数 ${people}名`).length, 1, '人数は予約どおり1か所に記載');
-    const label = nominated ? '予約者ご本人：' : '指名：';
+    const label = '指名：';
     const nominationLine = lines.find(x => x.startsWith(label));
-    assert.equal(nominationLine, nominated ? `予約者ご本人：テスト担当${nominated}さん指名` : '指名：なし', '正しい指名者だけを明記');
+    assert.equal(nominationLine, nominated ? `指名：テスト担当${nominated}さん` : '指名：なし', '正しい指名者だけを明記');
     assert.equal(lines.filter(x => x.startsWith(label)).length, 1, '指名を重複表示しない');
-    if (!nominated) assert(lines.some(x => x.startsWith('担当スタッフ')), '指名なしでは自動割当の担当者を記載');
+    assert(!lines.some(x => x.startsWith('担当スタッフ') || x.startsWith('同行者の担当スタッフ')), '自動割当の担当者は記載しない');
     if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(nominationLine)); }
   };
   for (const source of ['公開予約', '管理画面']) for (const people of [1, 2, 3]) for (const nominated of ['', 'A']) {
@@ -102,7 +102,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await check('掲載名と記号を含む名前が本文/HTMLへ正しく反映される', () => {
     state.staff[0].profile = JSON.stringify({ message: 'テスト紹介', nickname: 'テスト <A&B>', personalNomination: true, nominationFee: 500 });
     const p = pub();
-    for (const m of mailRows(p.id)) { assert(m.body.includes('予約者ご本人：テスト <A&B>さん指名')); assert(m.html.includes('予約者ご本人：テスト &lt;A&amp;B&gt;さん指名')); assert(!m.html.includes('<A&B>')); }
+    for (const m of mailRows(p.id)) { assert(m.body.includes('指名：テスト <A&B>さん')); assert(m.html.includes('指名：テスト &lt;A&amp;B&gt;さん')); assert(!m.html.includes('<A&B>')); }
   });
   await check('人数未記録の旧予約は1名、担当未割当なら架空の名前を作らない', () => {
     const p = pub({ staffId: '' }), b = booking(p.id); delete b.people; ev().assignments = [];
@@ -118,7 +118,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p = pub({ people: 3, language: lang });
     for (const type of ['confirm', 'change', 'cancel']) {
       const m = a.mailI18n().localize({ kind: 'customer', type, bookingId: p.id }, lang);
-      assert.equal(m.body.split('\n').filter(x => x === guests).length, 1); assert(m.body.includes('テスト担当A')); assert(m.body.includes('テスト担当B'));
+      assert.equal(m.body.split('\n').filter(x => x === guests).length, 1); assert(m.body.includes('テスト担当A')); assert(!m.body.includes('テスト担当B'));
       assert.equal(a.mailI18n().localize({ kind: 'store', type, bookingId: p.id }, lang), null);
     }
     for (const m of mailRows(p.id)) checkDetails(m, 3, 'A');

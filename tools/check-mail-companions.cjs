@@ -67,7 +67,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
         assert(m.subject.startsWith('【オンライン新規予約】')); assert.equal(m.body.split('\n')[0], '【オンライン新規予約】');
         assert(m.html.includes('【オンライン新規予約】<br/>'));
         assert(m.body.includes(`人数 ${people}名`));
-        if (nominated) { assert(m.body.includes('予約者ご本人：【デモテスト】担当Aさん指名')); if (people > 1) assert(m.body.includes('同行者：指名なし')); }
+        if (nominated) { assert(m.body.includes('指名：【デモテスト】担当Aさん')); assert(!m.body.includes('同行者：指名なし')); assert(!m.body.includes('担当B')); assert(!m.body.includes('担当C')); }
       }
       const mailsBefore = encode(state.mails);
       schedule({ action: 'moveBooking', id: b.id, staffId: 'E', start: 900, end: 960, expect: { staffId: assignments[0].staff_id, start: 720 }, confirmNominationMove: true });
@@ -92,7 +92,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p=pub(), b=booking(p.id);
     for (const variant of variants) {
       const {body}=a.BOOKING_MAIL[variant](b);
-      assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'),variant);
+      assert(body.includes('指名：【デモテスト】担当Aさん'),variant);
       assert(body.includes('指名料 500 円'),variant);
       assert(body.includes('コース料金'),variant);
       assert(body.includes(`合計 ${b.total.toLocaleString('ja-JP')} 円`),variant);
@@ -109,9 +109,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p=pub({people:3,companionNames}),b=booking(p.id);ev().assignments.reverse();
     for(const variant of variants) {
       const body=a.BOOKING_MAIL[variant](b).body;
-      assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'));
-      assert(!body.includes('予約者ご本人：【デモテスト】担当Cさん指名'));
-      assert(body.includes('同行者：指名なし') && body.includes('同行者の担当スタッフ'));
+      assert(body.includes('指名：【デモテスト】担当Aさん'));
+      assert(!body.includes('指名：【デモテスト】担当Cさん'));
+      assert(!body.includes('同行者：指名なし') && !body.includes('同行者の担当スタッフ')); assert(!body.includes('担当B') && !body.includes('担当C'));
       assert(body.split('\n').includes('同行者1'));
       assert(body.split('\n').includes('同行者2'));
       assert(!body.includes(companionNames[0]) && !body.includes(companionNames[1]));
@@ -121,13 +121,13 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('指名なしの自動担当は指名として表示しない', () => {
     const b=booking(pub({staffId:'',expectedNominationFee:0}).id),body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('指名：なし'));assert(body.includes('担当スタッフ'));assert(!body.includes('指名料'));
+    assert(body.includes('指名：なし'));assert(!body.includes('担当スタッフ')); assert(!body.includes('担当A'));assert(!body.includes('指名料'));
   });
   await check('無料指名とスタッフ削除後の保存名にも対応', () => {
     state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:0});
     const b=booking(pub({expectedNominationFee:0}).id);state.staff=[];
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'));assert(body.includes('指名料 0 円'));
+    assert(body.includes('指名：【デモテスト】担当Aさん'));assert(body.includes('指名料 0 円'));
   });
   await check('古い不一致の内訳でも指名料と確定合計を表示', () => {
     const b=booking(pub().id);b.total-=1000;
@@ -229,7 +229,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       const m=a.mailI18n().localize({kind:'customer',type,bookingId:id},lang);
       const label={en:'Companion',zh:'同行者',ko:'동행자',fr:'Accompagnant',es:'Acompañante',it:'Accompagnatore',de:'Begleitperson'}[lang];
       assert(m.body.split('\n').includes(label+' 1'));assert(!m.body.includes(companionNames[0]));
-      assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));
+      assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));assert(!m.body.includes('担当B')&&!m.body.includes('担当C'));
     }
   });
   await check('7言語でも新規予約メールの件名・本文の冒頭を保持する（送信設定は変更しない）', () => {
@@ -245,6 +245,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   reset();
   state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:2500});
+  state.staff[0].name='テスト青山';
   const sample=booking(pub({people:3,expectedNominationFee:2500}).id);
   if(process.env.CN_AUDIT_OUTPUT) {
     fs.mkdirSync(process.env.CN_AUDIT_OUTPUT,{recursive:true});

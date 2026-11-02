@@ -2644,21 +2644,14 @@ function bookingMypageUrl(bk) {
     ? `${origin()}/mypage?id=${encodeURIComponent(bk.id)}&token=${encodeURIComponent(bk.customer_token)}`
     : `${origin()}/mypage`;
 }
-// その予約の今の担当スタッフ（台帳の割当から取得。管理画面で担当を変えれば変更後の名前になる）
+// メールには予約者が指名したスタッフだけを表示し、自動割当の担当名は出さない。
 function bookingStaffLine(bk) {
-  const found = findBooking(bk.id);
-  const ev = found ? ensureEvents(found.date) : null;
-  const ids = ev ? ev.assignments.filter((a) => a.booking_id === bk.id).map((a) => a.staff_id) : [];
   const nameOf = (id) => { const st = state.staff.find((s) => s.id === id); return st ? (profileOf(st).nickname || st.name) : null; };
   if (bk.nominated_staff_id) {
-    const others = ids.filter((id) => id !== bk.nominated_staff_id).map(nameOf).filter(Boolean);
     const nom = nameOf(bk.nominated_staff_id) || bk.nominated_staff_name || "";
-    return `予約者ご本人：${nom ? nom + "さん指名" : "指名あり（スタッフ名未登録）"}`
-      + (bk.people > 1 ? "\n同行者：指名なし" : "")
-      + (others.length ? `\n同行者の担当スタッフ ${others.join("、")}` : "");
+    return `指名：${nom ? nom + "さん" : "あり（スタッフ名未登録）"}`;
   }
-  const names = ids.map(nameOf).filter(Boolean);
-  return "指名：なし" + (names.length ? `\n担当スタッフ ${names.join("、")}` : "");
+  return "指名：なし";
 }
 function bookingCompanionLines(bk) {
   return companions.namesOf(bk).map((name, i) => name === `同行者${i + 1}` ? name : `同行者${i + 1} ${name} 様`);
