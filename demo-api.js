@@ -2677,15 +2677,16 @@ function bookingPriceParts(bk) {
 // 料金の内訳（すべて予約データに保存された確定値から作る。合計は予約の合計金額そのもの）
 function bookingPriceLines(bk) {
   const { people, base, fee, late } = bookingPriceParts(bk);
+  const hasNomination = !!bk.nominated_staff_id || fee > 0;
+  const totalLine = `合計 ${bk.total.toLocaleString("ja-JP")} 円` + (hasNomination ? "（指名料込み）" : "");
   // 内訳が合わない旧記録でも保存済みの指名料は表示する。調整理由は推測しない。
-  if (late < 0) return [...(bk.nominated_staff_id || fee > 0 ? [`指名料 ${fee.toLocaleString("ja-JP")} 円`] : []), `合計 ${bk.total.toLocaleString("ja-JP")} 円`];
+  if (late < 0) return [...(hasNomination ? [`指名料 ${fee.toLocaleString("ja-JP")} 円`] : []), totalLine];
   const lines = [];
   if (bk.ticket_id) lines.push("コース料金 回数券でお支払い（1回分）");
-  else if (bk.services?.length) lines.push(`コース料金（割引後・${people}名分） ${base.toLocaleString("ja-JP")} 円`);
-  else lines.push(`コース料金 ${(bk.base_price || 0).toLocaleString("ja-JP")} 円` + (people > 1 ? ` × ${people}名` : ""));
-  if (bk.nominated_staff_id || fee > 0) lines.push(`指名料 ${fee.toLocaleString("ja-JP")} 円`);
+  else lines.push(`コース料金 小計（${bk.services?.length ? "割引後・" : ""}${people}名分） ${base.toLocaleString("ja-JP")} 円`);
+  if (hasNomination) lines.push(`指名料 ${fee.toLocaleString("ja-JP")} 円` + (bk.nominated_staff_id && people > 1 ? "（予約者ご本人1名分）" : ""));
   if (late > 0) lines.push(`深夜料金 ${late.toLocaleString("ja-JP")} 円`);
-  lines.push(`合計 ${bk.total.toLocaleString("ja-JP")} 円`);
+  lines.push(totalLine);
   return lines;
 }
 // リマインド（来店前のご案内）の本文。構成は従来のリマインドを土台に、

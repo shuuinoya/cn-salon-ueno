@@ -11,7 +11,7 @@ const snapshot = JSON.parse(fs.readFileSync(path.join(root, 'safe-state.json'), 
 assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && !snapshot.state.mails.length);
 const persist = require(path.join(root, 'persist.js')); persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {};
 const file = path.join(root, 'demo-api.js'), mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root);
-mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,deliverDueMails,queueChangeMails,BOOKING_MAIL,bookingPriceParts,bookingStaffLine,mailI18n,getPublicBooking};', file);
+mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,deliverDueMails,queueChangeMails,BOOKING_MAIL,bookingPriceParts,bookingStaffLine,mailI18n,getPublicBooking,mailHtml};', file);
 const ops = require(path.join(root, 'ledger-operations.js')), policy = require(path.join(root, 'booth-policy.js'));
 const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__: [...x] } : x instanceof Set ? { __pm_set__: [...x] } : x);
 (async () => {
@@ -65,6 +65,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert.equal(state.mails.length, 2); assert.deepEqual(state.mails.map(m => m.kind).sort(), ['customer', 'store']);
       for (const m of state.mails) {
         assert(m.subject.startsWith('【オンライン新規予約】')); assert.equal(m.body.split('\n')[0], '【オンライン新規予約】');
+        assert(m.html.includes('【オンライン新規予約】<br/>'));
         assert(m.body.includes(`人数 ${people}名`));
         if (nominated) { assert(m.body.includes('予約者ご本人：【デモテスト】担当Aさん指名')); if (people > 1) assert(m.body.includes('同行者：指名なし')); }
       }
@@ -176,6 +177,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
         const body=a.BOOKING_MAIL[variant](b).body;
         assert(body.includes('指名料 '+fee.toLocaleString('ja-JP')+' 円'));
         assert(body.includes('合計 '+total.toLocaleString('ja-JP')+' 円'));
+        assert(body.includes(`コース料金 小計（${people}名分） ${(total-fee).toLocaleString('ja-JP')} 円`));
+        assert(body.includes(`合計 ${total.toLocaleString('ja-JP')} 円（指名料込み）`));
+        if(people>1) assert(body.includes('（予約者ご本人1名分）'));
         const parts=a.bookingPriceParts(b);assert.equal(parts.base+parts.fee+parts.late,total);
       }
     }
@@ -228,12 +232,32 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));
     }
   });
+  await check('7言語でも新規予約メールの件名・本文の冒頭を保持する（送信設定は変更しない）', () => {
+    const id=pub({people:3}).id;
+    const before=encode(state.settings.mailI18n);
+    for(const lang of ['en','zh','ko','fr','es','it','de']) {
+      const m=a.mailI18n().localize({kind:'customer',type:'confirm',bookingId:id},lang);
+      assert(m.subject.startsWith('【オンライン新規予約】'));
+      assert.equal(m.body.split('\n')[0],'【オンライン新規予約】');
+      assert(a.mailHtml(m.body).includes('【オンライン新規予約】<br/>'));
+    }
+    assert.equal(encode(state.settings.mailI18n),before);
+  });
   reset();
-  const sample=booking(pub({people:2,companionNames:[companionNames[0]]}).id);
+  state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:2500});
+  const sample=booking(pub({people:3,expectedNominationFee:2500}).id);
   if(process.env.CN_AUDIT_OUTPUT) {
     fs.mkdirSync(process.env.CN_AUDIT_OUTPUT,{recursive:true});
     const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const mail=a.BOOKING_MAIL.customerConfirm(sample);
+    const demoMails=['customerConfirm','storeNotify'].map(variant=>{
+      const original=a.BOOKING_MAIL[variant](sample), label=variant==='customerConfirm'?'お客様向け':'店舗向け';
+      const subject=original.subject.replace('【オンライン新規予約】',`【オンライン新規予約】【テスト・${label}】`);
+      const body=original.body.replace('【オンライン新規予約】',`【オンライン新規予約】\n【テスト・${label}】デモ予約の確認です。実際の予約・来店手続きはありません。`).replace(/https?:\/\/\S+/g,'（テストのためリンクを省略）');
+      return {variant,subject,body,html:a.mailHtml(body)};
+    });
+    fs.writeFileSync(path.join(process.env.CN_AUDIT_OUTPUT,'demo-mails.json'),JSON.stringify(demoMails,null,2),{mode:0o600});
+    fs.writeFileSync(path.join(process.env.CN_AUDIT_OUTPUT,'customer-email.html'),demoMails[0].html);
     fs.writeFileSync(path.join(process.env.CN_AUDIT_OUTPUT,'mail-preview.html'),'<!doctype html><meta charset="utf-8"><title>【デモテスト】メール確認</title><style>body{font:16px/1.7 system-ui;max-width:760px;margin:24px auto;padding:16px}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>【デモテスト】送信なしの確認</h1><pre>'+escape(mail.body.replace(/https?:\/\/\S+/g,'（確認用URL省略）'))+'</pre>');
   }
   console.log(JSON.stringify({tests:results,passed:results.filter(x=>x.ok).length,total:results.length},null,2));

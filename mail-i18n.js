@@ -598,8 +598,8 @@ module.exports = function makeMailI18n(h) {
   const sub = (lang, s) => `${h.MAIL_STORE} ${s}`;
   const o = () => h.origin();
   const booking = {
-    customerConfirm: (lang, bk) => { const L = tr(lang); return { subject: sub(lang, L.s.confirm), body: [
-      L.thanksBook(h.MAIL_STORE), L.detailsBelow, "", block(lang, bk), ...ticketLines(lang, bk), L.lookForward, "", L.late, h.MAIL_TEL, "",
+    customerConfirm: (lang, bk) => { const L = tr(lang); return { subject: `【オンライン新規予約】${sub(lang, L.s.confirm)}`, body: [
+      "【オンライン新規予約】", L.thanksBook(h.MAIL_STORE), L.detailsBelow, "", block(lang, bk), ...ticketLines(lang, bk), L.lookForward, "", L.late, h.MAIL_TEL, "",
       L.howChange, L.busy, L.cancelHere, h.bookingMypageUrl(bk)].join("\n") + common(lang) }; },
     customerRemind: (lang, bk) => {
       const L = tr(lang), d = bk.service_date, minutes = Math.round((bk.end_at - bk.start_at) / 60000), sl = staffLine(lang, bk);
