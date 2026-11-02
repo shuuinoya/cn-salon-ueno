@@ -2661,7 +2661,7 @@ function bookingStaffLine(bk) {
   return "指名：なし" + (names.length ? `\n担当スタッフ ${names.join("、")}` : "");
 }
 function bookingCompanionLines(bk) {
-  return companions.namesOf(bk).map((name, i) => `同行者${i + 1} ${name} 様`);
+  return companions.namesOf(bk).map((name, i) => name === `同行者${i + 1}` ? name : `同行者${i + 1} ${name} 様`);
 }
 // 日本語・翻訳メールで同じ確定金額を使う（送信時のスタッフ料金では再計算しない）。
 function bookingPriceParts(bk) {
@@ -3428,7 +3428,7 @@ function createPublicBooking(body, member) {
   if (!course || !validDay(date) || !(Number.isInteger(people) && people >= 1 && people <= 3) ||
       body.consent !== true || !String(body.name || "").trim() || !String(body.email || "").trim() ||
       !String(body.phone || "").trim()) throw err(400, "invalid");
-  const companionNames = companions.validateNames(body.companionNames, people, err);
+  const companionNames = companions.defaultNames(people); // 実名入力は不要。旧画面から送られた名前も新規保存しない。
   rejectTestData({ name: body.name, email: body.email }); // 本番に試しの予約を入れさせない
   // フリーメッセージ欄の設定（表示・必須・文字数）はサーバー側でも強制する
   const fm = state.settings.freeMessage;

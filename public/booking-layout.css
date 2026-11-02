@@ -114,7 +114,7 @@ a, button, summary, label, select, [role="button"], .menu-row, .slot-open { touc
 #fm-ticket-pick .fm-tk-note { margin:6px 0 0; font-size:12px; line-height:1.5; color:#79551f; }
 #fm-ticket-pick .fm-tk-note:empty { display:none; }
 
-/* 同行者は名前だけ。既存の縦並びフォームの寸法を共有する。 */
+/* 同行者は番号のみ表示する。 */
 .booking-companions { display: grid; gap: 12px; min-width: 0; }
-.booking-companions label, .booking-companions input { min-width: 0; max-width: 100%; }
+.booking-companions ul { margin: 0; padding-inline-start: 1.5em; overflow-wrap: anywhere; }
 .booking-summary dd { overflow-wrap: anywhere; }

@@ -82,13 +82,13 @@ function post(state, body, actor, c) {
   }
   if (typeof body.name !== "string" || !body.name.trim() || (body.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) ||
       (body.phone?.trim() && !/^[0-9+()\- .]+$/.test(body.phone.trim()))) throw c.err(400, "invalid");
-  // 従来の管理画面・取込予約で同行者名が未登録でも他の編集を妨げない。
-  // 既存の名前は、明示的に編集しない限り保持する。人数減少による黙った削除も防ぐ。
-  let companionNames = companions.namesOf(old || {});
-  if (body.companionNames !== undefined) {
-    companionNames = Array.isArray(body.companionNames) && body.companionNames.length === 0 && !companionNames.length
-      ? [] : companions.validateNames(body.companionNames, people, c.err);
-  } else if (companionNames.length && companionNames.length !== people - 1) throw c.err(400, "invalid");
+  // 新規予約は番号のみ。既存の実名は編集の際も勝手に削除しない。
+  let companionNames = old ? companions.namesOf(old) : companions.defaultNames(people);
+  const numberedOnly = companionNames.every((name, i) => name === `同行者${i + 1}`);
+  if (old && !numberedOnly) {
+    if (body.companionNames !== undefined) companionNames = companions.validateNames(body.companionNames, people, c.err);
+    else if (companionNames.length !== people - 1) throw c.err(400, "invalid");
+  } else companionNames = companions.defaultNames(people);
   c.rejectTestData({ name: body.name, email: body.email });
   const oldServices = old ? servicesOf(old, c) : [];
   const serviceIds = new Set();

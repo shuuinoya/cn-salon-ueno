@@ -111,10 +111,11 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'));
       assert(!body.includes('予約者ご本人：【デモテスト】担当Cさん指名'));
       assert(body.includes('同行者：指名なし') && body.includes('同行者の担当スタッフ'));
-      assert(body.includes('同行者1 【デモテスト】同行一 様'));
-      assert(body.includes('同行者2 【デモテスト】同行二 様'));
+      assert(body.split('\n').includes('同行者1'));
+      assert(body.split('\n').includes('同行者2'));
+      assert(!body.includes(companionNames[0]) && !body.includes(companionNames[1]));
     }
-    assert.deepEqual(a.getPublicBooking(p.id,p.token).booking.companionNames,companionNames);
+    assert.deepEqual(a.getPublicBooking(p.id,p.token).booking.companionNames,['同行者1','同行者2']);
     assert.throws(()=>a.getPublicBooking(p.id,'wrong'),e=>e.message==='notFound');
   });
   await check('指名なしの自動担当は指名として表示しない', () => {
@@ -141,21 +142,52 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     b.services=[{price:6000,discountType:'broken',discount:0}];
     assert(a.BOOKING_MAIL.customerCancel(b).body.includes('指名料 500 円'));
   });
-  await check('同行者名は予約者を含めず人数分−1、空欄や制御文字を拒否', () => {
-    for(const names of [undefined,[],[''],['  '],['a','b'],[null],[1],['a\nb'],['a'.repeat(121)]]) {
-      unchanged(()=>pub({people:2,companionNames:names}),'invalid');
+  await check('同行者名なしで1〜3名予約ができ、旧画面の実名も番号だけ保存する', () => {
+    for (const people of [1,2,3]) {
+      reset();
+      const p=pub({people}), b=booking(p.id);
+      assert.deepEqual(b.companion_names, Array.from({length:people-1}, (_,i)=>'同行者'+(i+1)));
+      assert.equal(ev().assignments.length,people);
     }
-    unchanged(()=>pub({people:1,companionNames:['extra']}),'invalid');
-    const b=booking(pub({people:2,companionNames:['  【デモテスト】同行者  ']}).id);
-    assert.deepEqual(b.companion_names,['【デモテスト】同行者']);
+    for (const names of [[],[''],['【デモテスト】実名'],[null],['a\nb'],['a'.repeat(121)]]) {
+      reset();
+      assert.deepEqual(booking(pub({people:2,companionNames:names}).id).companion_names,['同行者1']);
+    }
+  });
+  await check('管理の新規予約・人数変更も実名なしで番号を付ける', () => {
+    const id=post({people:2,staffIds:['A','B']}).id;
+    assert.deepEqual(get(id).booking.companionNames,['同行者1']);
+    const input=updateBody(id,{people:3,staffIds:['A','B','C']});delete input.companionNames;
+    details.post(state,input,manager,dc);
+    assert.deepEqual(get(id).booking.companionNames,['同行者1','同行者2']);
+    update(id,{people:1,staffIds:['A']});
+    assert.deepEqual(get(id).booking.companionNames,[]);
+  });
+  await check('指名料500/2000/2500円込みの総額が人数・通知6種と一致する', () => {
+    for(const people of [1,2,3]) for(const fee of [500,2000,2500]) {
+      reset();
+      state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:fee});
+      const p=pub({people,expectedNominationFee:fee}),b=booking(p.id);
+      const total=a.courseStore.get(course).price*people+fee;
+      assert.equal(b.total,total);assert.equal(b.nomination_fee,fee);
+      assert.equal(a.getPublicBooking(p.id,p.token).booking.total,total);
+      assert.equal(get(p.id).booking.total,total);
+      for(const variant of variants){
+        const body=a.BOOKING_MAIL[variant](b).body;
+        assert(body.includes('指名料 '+fee.toLocaleString('ja-JP')+' 円'));
+        assert(body.includes('合計 '+total.toLocaleString('ja-JP')+' 円'));
+        const parts=a.bookingPriceParts(b);assert.equal(parts.base+parts.fee+parts.late,total);
+      }
+    }
   });
   await check('同行者を変えた再送を重複予約にせず拒否、同じ再送は1件', () => {
     const input={people:2,companionNames:[companionNames[0]],requestKey:'【デモテスト】retry'};
     const one=pub(input);assert.deepEqual(pub(input),one);assert.equal(ev().bookings.length,1);
     unchanged(()=>pub({...input,companionNames:[companionNames[1]]}),'requestChanged');
   });
-  await check('管理画面の再読込・更新・履歴に同行者名が残る', () => {
-    const id=pub({people:2,companionNames:[companionNames[0]]}).id;
+  await check('既存予約の実名は管理編集・履歴・復元で保持する', () => {
+    const id=pub({people:2}).id;
+    booking(id).companion_names=[companionNames[0]]; // 保存済みの旧予約を再現
     assert.deepEqual(get(id).booking.companionNames,[companionNames[0]]);
     update(id,{comment:'【デモテスト】変更'});
     assert.deepEqual(booking(id).companion_names,[companionNames[0]]);
@@ -187,11 +219,13 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
     assert(body.includes('回数券でお支払い'));assert(body.includes('指名料 500 円'));assert(body.includes('深夜料金 2,000 円'));
   });
-  await check('全言語で同行者名が確認・変更・取消メールに入る', () => {
+  await check('全言語で同行者番号が確認・変更・取消の文面に入る', () => {
     const id=pub({people:2,companionNames:[companionNames[0]]}).id;
     for(const lang of ['en','zh','ko','fr','es','it','de']) for(const type of ['confirm','change','cancel']) {
       const m=a.mailI18n().localize({kind:'customer',type,bookingId:id},lang);
-      assert(m.body.includes(companionNames[0]));assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));
+      const label={en:'Companion',zh:'同行者',ko:'동행자',fr:'Accompagnant',es:'Acompañante',it:'Accompagnatore',de:'Begleitperson'}[lang];
+      assert(m.body.split('\n').includes(label+' 1'));assert(!m.body.includes(companionNames[0]));
+      assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));
     }
   });
   reset();

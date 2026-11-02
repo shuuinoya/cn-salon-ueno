@@ -9,7 +9,7 @@ const snapshot = JSON.parse(fs.readFileSync(path.join(root, 'safe-state.json'), 
 assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && !snapshot.state.mails.length);
 const persist = require(path.join(root, 'persist.js')); persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {};
 const file = path.join(root, 'demo-api.js'), mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root);
-mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate};', file);
+mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,BOOKING_MAIL,resendFailedMail,applyMailTemplate};', file);
 const ops = require(path.join(root, 'ledger-operations.js')), policy = require(path.join(root, 'booth-policy.js'));
 const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__: [...x] } : x instanceof Set ? { __pm_set__: [...x] } : x);
 (async () => {
@@ -274,10 +274,11 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     assert.equal(history.before.comment,'テスト旧コメント');assert.equal(history.after.comment,'テスト新コメント');assert.equal(history.before.bulkDiscount,0);assert.equal(history.after.bulkDiscount,100);
     assert.equal(ops.get(state,{view:'bookings',date},manager,c).bookings[0].note,'テスト新コメント');
   });
-  await check('連続コースの変更メールは全メニューと割引後の確定合計を記載', () => {
-    const p=post({email:'details-test@example.test'}),secondCourse='364323-4822664';
+  await check('連続コースの変更は追加送信せず、確認文面の内訳は確定金額と一致', () => {
+    const p=post({email:'details-test@example.test'}),secondCourse='364323-4822664',beforeMail=encode(state.mails);
     update(p.id,{services:[...get(p.id).booking.services,service(secondCourse)],bulkDiscountType:'amount',bulkDiscount:101});const b=booking(p.id);
-    const mail=state.mails.filter(x=>x.bookingId===p.id&&x.kind==='customer'&&x.type==='change').at(-1);assert(mail);
+    assert.equal(encode(state.mails),beforeMail);
+    const mail=a.BOOKING_MAIL.customerConfirm(b);
     for(const s of b.services) assert(mail.body.includes(s.name));assert(mail.body.includes('合計 '+b.total.toLocaleString('ja-JP')+' 円'));
     assert(!state.mails.some(m=>m.real));
   });
@@ -305,7 +306,8 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p=post({email:'old-test@example.test'});const original=state.mails.find(m=>m.bookingId===p.id&&m.kind==='customer'&&m.type==='confirm');original.status='failed';
     update(p.id,{email:'new-test@example.test'});unchanged(()=>a.resendFailedMail(original),'bookingChanged');
     const pending={...original,tpl:{name:'booking',variant:'customerConfirm',bookingId:p.id}};assert(a.applyMailTemplate(pending,true).skip.includes('メールアドレス'));
-    const changed=state.mails.filter(m=>m.bookingId===p.id&&m.kind==='customer'&&m.type==='change').at(-1);assert.equal(changed.to,'new-test@example.test');
+    assert.equal(get(p.id).booking.email,'new-test@example.test');
+    assert(!state.mails.some(m=>m.bookingId===p.id&&m.type==='change'));
   });
   await check('連続コースの2件目も予約がある間はメニュー削除不可', () => {
     const secondCourse='364323-4822664';post({services:[service(),service(secondCourse)]});const before=encode({courses:[...a.courseStore],events:state.events});

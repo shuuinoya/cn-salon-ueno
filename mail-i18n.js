@@ -570,7 +570,7 @@ module.exports = function makeMailI18n(h) {
   };
   const companionLines = (lang, bk) => {
     const label = { en: "Companion", zh: "同行者", ko: "동행자", fr: "Accompagnant", es: "Acompañante", it: "Accompagnatore", de: "Begleitperson" }[lang];
-    return h.companionNames(bk).map((name, i) => `${label} ${i + 1}: ${name}`);
+    return h.companionNames(bk).map((name, i) => name === `同行者${i + 1}` ? `${label} ${i + 1}` : `${label} ${i + 1}: ${name}`);
   };
   const staffLine = (lang, bk) => {
     const L = tr(lang);
