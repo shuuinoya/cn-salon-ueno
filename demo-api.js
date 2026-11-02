@@ -1560,6 +1560,7 @@ function mailHtml(body) {
     let h = escH(line);
     h = h.replace(/(https?:\/\/[^\s,]+)/g, (u) => '<a href="' + u + '" ' + A + ">" + u + "</a>");
     h = h.replace(/([\w.+-]+@[\w-]+\.[\w.]+)/g, (m) => '<a href="mailto:' + m + '" ' + A + ">" + m + "</a>");
+    if (/^【(?:ご予約内容|料金明細|ご予約者|回数券)】$/.test(line) || /^合計金額：/.test(line)) h = '<strong>' + h + '</strong>';
     return h;
   });
   return '<!DOCTYPE html><html><head><meta charset="utf-8"/>' +
@@ -2595,16 +2596,16 @@ const MAIL_COMMON = [
 ].join("\n");
 
 // ---- 予約のメール文面（完了・リマインド・変更・取消／お客様・店舗） ----
-// 文面は従来とまったく同じ。回数券を使った予約だけは、予約時に本文を固定せず、
+// 確認・新規通知は共通の明細表示。回数券を使った予約だけは、予約時に本文を固定せず、
 // 送信直前にこの関数で作り直す（回数券の行が送信時点の最新の残り回数・有効期限になる）
 const BOOKING_MAIL = {
-  customerConfirm: (bk) => ({ subject: `【オンライン新規予約】${MAIL_STORE} ご予約内容確認`,
-    body: bookingCustomerBody(bk, `【オンライン新規予約】\nこの度は「${MAIL_STORE}」にご予約いただきありがとうございます。`) }),
+  customerConfirm: (bk) => ({ subject: `【予約確認】${MAIL_STORE}`,
+    body: bookingConfirmationBody(bk) }),
   // リマインド（来店前のご案内）は予約完了メールの使い回しではなく専用の文面。
   // 送信直前にその予約の最新データ（日時・メニュー・担当・料金・回数券）から作る
   customerRemind: (bk) => ({ subject: `${MAIL_STORE} ご予約リマインド`, body: bookingRemindBody(bk) }),
   storeNotify: (bk) => ({ subject: `【オンライン新規予約】${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
-    body: bookingStoreBody(bk, `【オンライン新規予約】\n「${MAIL_STORE}」に新しいご予約が入りました。`) }),
+    body: bookingConfirmationBody(bk, true) }),
   storeRemind: (bk) => ({ subject: `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
     body: bookingStoreBody(bk, `本日のご予約のリマインドです。`) }),
   customerChange: (bk) => ({ subject: `${MAIL_STORE} ご予約内容変更のお知らせ`,
@@ -2765,6 +2766,30 @@ function bookingCustomerBody(bk, lead) {
     "予約のキャンセルはこちら ⇒",
     cancelUrl, // 末尾に余計な記号を付けない（テキストメールでもURLが壊れないように）
   ].join("\n") + MAIL_COMMON;
+}
+// 予約確認と店舗の新規通知は同じ保存済み明細を使い、連絡先などの用途だけ分ける。
+function bookingConfirmationBody(bk, store = false) {
+  const d = bk.service_date, [year, month, day] = d.split("-").map(Number);
+  const ticket = bk.ticket_id && state.tickets.get(bk.ticket_id);
+  const ticketLines = !bk.ticket_id ? [] : ticket ? [
+    `回数券利用：${ticket.plan_name}（1回分）`,
+    `購入日：${jstDateStr(Date.parse(ticket.purchased_at))}`,
+    `送信時点の残り回数：${ticket.uses_left}回／${ticket.uses_total}回`,
+    `有効期限：${jstDateStr(ticket.expires_at)}`,
+  ] : [`回数券利用：${bk.ticket_name || "（券名未登録）"}（1回分）`,
+    ...(Number.isFinite(bk.ticket_left_after) ? [`ご予約後の残り回数：${bk.ticket_left_after}回`] : [])];
+  const payment = bk.paid_at || bk.paid_amount > 0 ? [`お支払い記録：${Number(bk.paid_amount || 0).toLocaleString("ja-JP")}円 受領済み`] : [];
+  return require("./booking-confirmation-mail").render(bk, {
+    lead: store ? "【オンライン新規予約】\n新しいご予約が入りました。" : "ご予約ありがとうございます。\n以下の内容でご予約を承りました。",
+    dateTime: `${year}年${month}月${day}日（${["日","月","火","水","木","金","土"][new Date(d + "T00:00:00Z").getUTCDay()]}）${fmtTime(d, bk.start_at)}～`,
+    bookingId: `予約ID：${displayId(bk)}`,
+    nomination: bk.nominated_staff_id ? bookingStaffLine(bk) : null,
+    parts: bookingPriceParts(bk), ticketLines,
+    footer: store ? payment : [...payment, MAIL_STORE, MAIL_ADDR, `お問い合わせ：${MAIL_TEL}`,
+      "予約の確認・キャンセル：", bookingMypageUrl(bk),
+      ...(bk.details_customized || bk.paid_at || bk.paid_amount > 0 ? ["日時・内容の変更は店舗までご連絡ください。"] : [])],
+    ending: store ? null : "ご来店を心よりお待ちしております。",
+  }, "ja", store);
 }
 function bookingStoreBody(bk, lead) {
   return [

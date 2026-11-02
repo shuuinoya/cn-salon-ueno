@@ -593,9 +593,17 @@ module.exports = function makeMailI18n(h) {
   const sub = (lang, s) => `${h.MAIL_STORE} ${s}`;
   const o = () => h.origin();
   const booking = {
-    customerConfirm: (lang, bk) => { const L = tr(lang); return { subject: `【オンライン新規予約】${sub(lang, L.s.confirm)}`, body: [
-      "【オンライン新規予約】", L.thanksBook(h.MAIL_STORE), L.detailsBelow, "", block(lang, bk), ...ticketLines(lang, bk), L.lookForward, "", L.late, h.MAIL_TEL, "",
-      L.howChange, L.busy, L.cancelHere, h.bookingMypageUrl(bk)].join("\n") + common(lang) }; },
+    customerConfirm: (lang, bk) => {
+      const L = tr(lang), t = bk.ticket_id && h.state.tickets.get(bk.ticket_id);
+      return { subject: `【${L.s.confirm}】${h.MAIL_STORE}`, body: require("./booking-confirmation-mail").render(bk, {
+        lead: L.thanksBook(h.MAIL_STORE) + "\n" + L.detailsBelow,
+        dateTime: L.timeFrom(dateOfDay(lang, bk.service_date, true), h.fmtTime(bk.service_date, bk.start_at)),
+        bookingId: L.bookingId(h.displayId(bk)), nomination: staffLine(lang, bk), parts: h.bookingPriceParts(bk),
+        money: n => yen(lang, n), menuName: n => menuName(n, lang),
+        ticketLines: t ? [planName(t.plan_name, lang), L.tkUsed1, L.purchased(dateOfMs(lang, Date.parse(t.purchased_at))), L.remain(t.uses_left, t.uses_total, h.ticketUsedCount(t)), L.validUntil(dateOfMs(lang, t.expires_at)), L.snap] : ticketLines(lang, bk),
+        footer: [h.MAIL_STORE, ADDRESS[lang], h.MAIL_TEL, L.checkCancel, h.bookingMypageUrl(bk)], ending: L.lookForward,
+      }, lang) };
+    },
     customerRemind: (lang, bk) => {
       const L = tr(lang), d = bk.service_date, minutes = Math.round((bk.end_at - bk.start_at) / 60000), sl = staffLine(lang, bk);
       return { subject: sub(lang, L.s.remind), body: [

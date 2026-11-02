@@ -61,14 +61,15 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const ticket=()=>{const t={id:'test-ticket',token:'test-ticket-token',plan_id:'tp-5',plan_name:'テスト回数券',buyer_name:'テスト会員',buyer_email:'booth-test@example.test',member_email:'booth-test@example.test',uses_total:5,uses_left:5,menu_scope:'all',valid_months:12,history:[],purchased_at:new Date().toISOString(),expires_at:Date.now()+365*864e5};state.tickets.set(t.id,t);return t;};
   const oldUse=(t,b,extra={})=>({id:'TEST-OLD-USE',kind:'customer',type:'ticket',to:t.buyer_email,status:'pending',scheduledAt:Date.now()+864e5,body:'テスト残数通知',tpl:{name:'ticketLeft',ticketId:t.id,kind:'use',ref:b.reference},...extra});
   const checkDetails = (m, people, nominated) => {
-    const lines = m.body.split('\n');
-    assert.equal(lines.filter(x => x === `人数 ${people}名`).length, 1, '人数は予約どおり1か所に記載');
+    const lines = m.body.split('\n'), compact = m.body.includes('【ご予約内容】');
+    const peopleLine = compact ? `人数：${people}名` + (people > 1 ? `（ご本人＋同行者${people-1}名）` : '') : `人数 ${people}名`;
+    assert.equal(lines.filter(x => x === peopleLine).length, 1, '人数は予約どおり1か所に記載');
     const label = '指名：';
     const nominationLine = lines.find(x => x.startsWith(label));
-    assert.equal(nominationLine, nominated ? `指名：テスト担当${nominated}さん` : '指名：なし', '正しい指名者だけを明記');
-    assert.equal(lines.filter(x => x.startsWith(label)).length, 1, '指名を重複表示しない');
+    assert.equal(nominationLine, nominated ? `指名：テスト担当${nominated}さん` : compact ? undefined : '指名：なし', '正しい指名者だけを明記');
+    assert.equal(lines.filter(x => x.startsWith(label)).length, compact && !nominated ? 0 : 1, '指名を重複表示しない');
     assert(!lines.some(x => x.startsWith('担当スタッフ') || x.startsWith('同行者の担当スタッフ')), '自動割当の担当者は記載しない');
-    if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(nominationLine)); }
+    if (m.html) { assert(m.html.includes(peopleLine)); if(nominationLine) assert(m.html.includes(nominationLine)); }
   };
   for (const source of ['公開予約', '管理画面']) for (const people of [1, 2, 3]) for (const nominated of ['', 'A']) {
     await check(`${source} ${people}名・指名${nominated ? 'あり' : 'なし'}の人数/担当を顧客と店舗へ記載`, () => {
@@ -106,7 +107,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('人数未記録の旧予約は1名、担当未割当なら架空の名前を作らない', () => {
     const p = pub({ staffId: '' }), b = booking(p.id); delete b.people; ev().assignments = [];
-    const m = a.BOOKING_MAIL.customerConfirm(b); assert(m.body.includes('人数 1名')); assert(!m.body.includes('担当スタッフ')); assert(!m.body.includes('undefined'));
+    const m = a.BOOKING_MAIL.customerConfirm(b); assert(m.body.includes('人数：1名')); assert(!m.body.includes('担当スタッフ')); assert(!m.body.includes('undefined'));
   });
   await check('回数券の送信直前の再生成にも人数/指名を記載する', () => {
     const t = ticket(), p = pub({ ticketId: t.id, ticketToken: t.token });
@@ -118,7 +119,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p = pub({ people: 3, language: lang });
     for (const type of ['confirm', 'change', 'cancel']) {
       const m = a.mailI18n().localize({ kind: 'customer', type, bookingId: p.id }, lang);
-      assert.equal(m.body.split('\n').filter(x => x === guests).length, 1); assert(m.body.includes('テスト担当A')); assert(!m.body.includes('テスト担当B'));
+      assert.equal(m.body.split('\n').filter(x => type === 'confirm' ? x.includes('3') && x.includes(' + 2 ') : x === guests).length, 1); assert(m.body.includes('テスト担当A')); assert(!m.body.includes('テスト担当B'));
       assert.equal(a.mailI18n().localize({ kind: 'store', type, bookingId: p.id }, lang), null);
     }
     for (const m of mailRows(p.id)) checkDetails(m, 3, 'A');
@@ -175,7 +176,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('回数券利用は確認1通へ集約し残数を正確に記載',()=>{
     const t=ticket(),p=pub({ticketId:t.id,ticketToken:t.token}),m=mailRows(p.id).find(m=>m.kind==='customer'&&m.type==='confirm');
-    assert.equal(t.uses_left,4);assert.equal(t.history.length,1);assert.equal(state.mails.filter(m=>m.kind==='customer').length,1);assert(m.body.includes('テスト回数券'));assert(m.body.includes('残り回数 あと4回'));assert(m.ticketIds.includes(t.id));noReminders();
+    assert.equal(t.uses_left,4);assert.equal(t.history.length,1);assert.equal(state.mails.filter(m=>m.kind==='customer').length,1);assert(m.body.includes('テスト回数券'));assert(m.body.includes('送信時点の残り回数：4回'));assert(m.ticketIds.includes(t.id));noReminders();
   });
   await check('回数券付き確定の通信再送でも残数と確認は1回だけ',()=>{
     const t=ticket(),body={requestKey:'test-ticket-once',ticketId:t.id,ticketToken:t.token},p=pub(body),before=encode({t,mails:state.mails});

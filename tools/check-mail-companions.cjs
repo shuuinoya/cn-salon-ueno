@@ -55,6 +55,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const check = async (name, fn) => { reset(); try { await fn(); assert(state.mails.every(m => !m.real)); assert.equal(externalCalls, 0); results.push({ name, ok: true }); } catch (e) { results.push({ name, ok: false, error: e.message.split('\n').slice(0, 3).join(' ') }); } };
 
   const companionNames = ['【デモテスト】同行一', '【デモテスト】同行二'];
+  const compact = variant => ['customerConfirm','storeNotify'].includes(variant);
   const variants = ['customerConfirm','storeNotify','customerChange','storeChange','customerCancel','storeCancel'];
   for (const people of [1, 2, 3]) for (const nominated of [false, true]) {
     await check(`${people}名・指名${nominated ? 'あり' : 'なし'}：代表だけ指名、確認各1通、変更で追加送信なし`, () => {
@@ -64,9 +65,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert.equal(b.nominated_staff_id, nominated ? 'A' : null); assert.equal(b.nomination_fee, nominated ? 500 : 0);
       assert.equal(state.mails.length, 2); assert.deepEqual(state.mails.map(m => m.kind).sort(), ['customer', 'store']);
       for (const m of state.mails) {
-        assert(m.subject.startsWith('【オンライン新規予約】')); assert.equal(m.body.split('\n')[0], '【オンライン新規予約】');
-        assert(m.html.includes('【オンライン新規予約】<br/>'));
-        assert(m.body.includes(`人数 ${people}名`));
+        assert(m.subject.startsWith(m.kind === 'customer' ? '【予約確認】' : '【オンライン新規予約】'));
+        assert.equal(m.body.split('\n')[0], m.kind === 'customer' ? 'ご予約ありがとうございます。' : '【オンライン新規予約】');
+        assert(m.body.includes(`人数：${people}名`));
         if (nominated) { assert(m.body.includes('指名：【デモテスト】担当Aさん')); assert(!m.body.includes('同行者：指名なし')); assert(!m.body.includes('担当B')); assert(!m.body.includes('担当C')); }
       }
       const mailsBefore = encode(state.mails);
@@ -93,9 +94,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     for (const variant of variants) {
       const {body}=a.BOOKING_MAIL[variant](b);
       assert(body.includes('指名：【デモテスト】担当Aさん'),variant);
-      assert(body.includes('指名料 500 円'),variant);
-      assert(body.includes('コース料金'),variant);
-      assert(body.includes(`合計 ${b.total.toLocaleString('ja-JP')} 円`),variant);
+      assert(body.includes(compact(variant) ? '指名料：500円 × 1名 ＝ 500円' : '指名料 500 円'),variant);
+      assert(body.includes(compact(variant) ? '施術料金：' : 'コース料金'),variant);
+      assert(body.includes(compact(variant) ? `合計金額：${b.total.toLocaleString('ja-JP')}円` : `合計 ${b.total.toLocaleString('ja-JP')} 円`),variant);
     }
     assert.equal(state.mails.length,2); assert(!state.mails.some(m=>m.type==='remind'));
   });
@@ -103,7 +104,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:2500});
     const p=pub({expectedNominationFee:2500}),b=booking(p.id);
     state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:500});
-    assert(a.BOOKING_MAIL.customerConfirm(b).body.includes('指名料 2,500 円'));
+    assert(a.BOOKING_MAIL.customerConfirm(b).body.includes('指名料：2,500円 × 1名 ＝ 2,500円'));
   });
   await check('複数人・割当順が変わっても指名者を誤認しない', () => {
     const p=pub({people:3,companionNames}),b=booking(p.id);ev().assignments.reverse();
@@ -112,8 +113,8 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert(body.includes('指名：【デモテスト】担当Aさん'));
       assert(!body.includes('指名：【デモテスト】担当Cさん'));
       assert(!body.includes('同行者：指名なし') && !body.includes('同行者の担当スタッフ')); assert(!body.includes('担当B') && !body.includes('担当C'));
-      assert(body.split('\n').includes('同行者1'));
-      assert(body.split('\n').includes('同行者2'));
+      if (compact(variant)) assert(body.includes('人数：3名（ご本人＋同行者2名）'));
+      else { assert(body.split('\n').includes('同行者1')); assert(body.split('\n').includes('同行者2')); }
       assert(!body.includes(companionNames[0]) && !body.includes(companionNames[1]));
     }
     assert.deepEqual(a.getPublicBooking(p.id,p.token).booking.companionNames,['同行者1','同行者2']);
@@ -121,19 +122,19 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('指名なしの自動担当は指名として表示しない', () => {
     const b=booking(pub({staffId:'',expectedNominationFee:0}).id),body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('指名：なし'));assert(!body.includes('担当スタッフ')); assert(!body.includes('担当A'));assert(!body.includes('指名料'));
+    assert(!body.includes('指名：'));assert(!body.includes('担当スタッフ')); assert(!body.includes('担当A'));assert(!body.includes('指名料'));
   });
   await check('無料指名とスタッフ削除後の保存名にも対応', () => {
     state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:0});
     const b=booking(pub({expectedNominationFee:0}).id);state.staff=[];
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('指名：【デモテスト】担当Aさん'));assert(body.includes('指名料 0 円'));
+    assert(body.includes('指名：【デモテスト】担当Aさん'));assert(!body.includes('指名料'));
   });
   await check('古い不一致の内訳でも指名料と確定合計を表示', () => {
     const b=booking(pub().id);b.total-=1000;
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('指名料 500 円'));assert(!body.includes('深夜料金'));assert(!body.includes('コース料金'));
-    assert(body.includes(`合計 ${b.total.toLocaleString('ja-JP')} 円`));
+    assert(body.includes('指名料：500円 × 1名 ＝ 500円'));assert(!body.includes('深夜料金'));assert(!body.includes('コース料金'));
+    assert(body.includes(`合計金額：${b.total.toLocaleString('ja-JP')}円`));
   });
   await check('旧記録の不明な追加料金・欠けた単価を深夜料金と誤記しない', () => {
     const b=booking(pub().id);b.total+=1000;
@@ -175,11 +176,16 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert.equal(get(p.id).booking.total,total);
       for(const variant of variants){
         const body=a.BOOKING_MAIL[variant](b).body;
-        assert(body.includes('指名料 '+fee.toLocaleString('ja-JP')+' 円'));
-        assert(body.includes('合計 '+total.toLocaleString('ja-JP')+' 円'));
-        assert(body.includes(`コース料金 小計（${people}名分） ${(total-fee).toLocaleString('ja-JP')} 円`));
-        assert(body.includes(`合計 ${total.toLocaleString('ja-JP')} 円（指名料込み）`));
-        if(people>1) assert(body.includes('（予約者ご本人1名分）'));
+        if(compact(variant)) {
+          assert(body.includes(`指名料：${fee.toLocaleString('ja-JP')}円 × 1名 ＝ ${fee.toLocaleString('ja-JP')}円（対象：ご本人）`));
+          assert(body.includes(`施術料金：${b.base_price.toLocaleString('ja-JP')}円 × ${people}名 ＝ ${(total-fee).toLocaleString('ja-JP')}円`));
+          assert(body.includes(`合計金額：${total.toLocaleString('ja-JP')}円`));
+        } else {
+          assert(body.includes('指名料 '+fee.toLocaleString('ja-JP')+' 円'));
+          assert(body.includes(`コース料金 小計（${people}名分） ${(total-fee).toLocaleString('ja-JP')} 円`));
+          assert(body.includes(`合計 ${total.toLocaleString('ja-JP')} 円（指名料込み）`));
+          if(people>1) assert(body.includes('（予約者ご本人1名分）'));
+        }
         const parts=a.bookingPriceParts(b);assert.equal(parts.base+parts.fee+parts.late,total);
       }
     }
@@ -202,7 +208,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     assert.deepEqual(get(id).booking.companionNames,[companionNames[1]]);
     assert.deepEqual(booking(id).details_history.at(-1).after.companionNames,[companionNames[1]]);
     assert.equal(state.mails.length, 2, '管理画面の変更では追加メールなし');
-    assert(a.BOOKING_MAIL.customerConfirm(booking(id)).body.includes(companionNames[1]));
+    assert(!a.BOOKING_MAIL.customerConfirm(booking(id)).body.includes(companionNames[1])); // 人数表示にまとめ、保存された実名は保持
     const restored=JSON.parse(encode(state),revive);assert.deepEqual(restored.events.get(date).bookings[0].companion_names,[companionNames[1]]);
   });
   await check('割引付き複数コースの内訳を全言語で同じ計算にする', () => {
@@ -218,30 +224,43 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   });
   await check('深夜料金・回数券の内訳と指名料を分離', () => {
     const b=booking(pub({start:c.minToMs(date,1320)}).id);
-    assert(a.BOOKING_MAIL.customerConfirm(b).body.includes('深夜料金 2,000 円'));
+    assert(a.BOOKING_MAIL.customerConfirm(b).body.includes('深夜料金：2,000円 × 1名 ＝ 2,000円'));
     b.ticket_id='【デモテスト】券';b.base_price=0;b.total=2500;
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('回数券でお支払い'));assert(body.includes('指名料 500 円'));assert(body.includes('深夜料金 2,000 円'));
+    assert(body.includes('回数券でお支払い'));assert(body.includes('指名料：500円 × 1名 ＝ 500円'));assert(body.includes('深夜料金：2,000円 × 1名 ＝ 2,000円'));
   });
   await check('全言語で同行者番号が確認・変更・取消の文面に入る', () => {
     const id=pub({people:2,companionNames:[companionNames[0]]}).id;
     for(const lang of ['en','zh','ko','fr','es','it','de']) for(const type of ['confirm','change','cancel']) {
       const m=a.mailI18n().localize({kind:'customer',type,bookingId:id},lang);
       const label={en:'Companion',zh:'同行者',ko:'동행자',fr:'Accompagnant',es:'Acompañante',it:'Accompagnatore',de:'Begleitperson'}[lang];
-      assert(m.body.split('\n').includes(label+' 1'));assert(!m.body.includes(companionNames[0]));
+      if(type !== 'confirm') assert(m.body.split('\n').includes(label+' 1')); else assert(!m.body.split('\n').includes(label+' 1'));assert(!m.body.includes(companionNames[0]));
       assert(m.body.includes('【デモテスト】担当A'));assert(m.body.includes('500'));assert(!m.body.includes('担当B')&&!m.body.includes('担当C'));
     }
   });
-  await check('7言語でも新規予約メールの件名・本文の冒頭を保持する（送信設定は変更しない）', () => {
+  await check('7言語でも確認メールを用途別に整理する（送信設定は変更しない）', () => {
     const id=pub({people:3}).id;
     const before=encode(state.settings.mailI18n);
     for(const lang of ['en','zh','ko','fr','es','it','de']) {
       const m=a.mailI18n().localize({kind:'customer',type:'confirm',bookingId:id},lang);
-      assert(m.subject.startsWith('【オンライン新規予約】'));
-      assert.equal(m.body.split('\n')[0],'【オンライン新規予約】');
-      assert(a.mailHtml(m.body).includes('【オンライン新規予約】<br/>'));
+      assert(m.subject.startsWith('【')); assert(!m.subject.includes('オンライン新規予約'));
+      assert(!m.body.includes('オンライン新規予約')); assert(m.body.includes(' × 3')); assert(m.body.includes(' ＝ '));
     }
     assert.equal(encode(state.settings.mailI18n),before);
+  });
+  await check('両方の確認メールに全メニュー・施術時間・ご要望を記載し、店舗だけ連絡先を残す', () => {
+    const b=booking(pub({people:2}).id);
+    b.services=[{name:'テスト全身整体',price:6600,minutesBody:60,minutesBefore:10,minutesAfter:5,discountType:'none',discount:0},{name:'テスト追加 足裏',price:3000,minutesBody:30,minutesBefore:0,minutesAfter:5,discountType:'none',discount:0}];
+    b.total=19700;b.comment='テスト要望 <香りなし>';b.preferences='テスト希望 弱め';
+    const before=encode(b);
+    for(const variant of ['customerConfirm','storeNotify']) {
+      const m=a.BOOKING_MAIL[variant](b),html=a.mailHtml(m.body);
+      assert(m.body.includes('コース 1：テスト全身整体 (60分)'));assert(m.body.includes('コース 2：テスト追加 足裏 (30分)'));
+      assert(m.body.includes('施術時間：90分'));assert(m.body.includes('テスト要望 <香りなし>'));assert(m.body.includes('テスト希望 弱め'));
+      assert(html.includes('&lt;香りなし&gt;'));assert(!html.includes('<香りなし>'));assert(html.includes('<strong>合計金額：19,700円</strong>'));
+      assert.equal(m.body.includes(b.email),variant==='storeNotify');
+    }
+    assert.equal(encode(b),before);
   });
   reset();
   state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:2500});
@@ -253,8 +272,8 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const mail=a.BOOKING_MAIL.customerConfirm(sample);
     const demoMails=['customerConfirm','storeNotify'].map(variant=>{
       const original=a.BOOKING_MAIL[variant](sample), label=variant==='customerConfirm'?'お客様向け':'店舗向け';
-      const subject=original.subject.replace('【オンライン新規予約】',`【オンライン新規予約】【テスト・${label}】`);
-      const body=original.body.replace('【オンライン新規予約】',`【オンライン新規予約】\n【テスト・${label}】デモ予約の確認です。実際の予約・来店手続きはありません。`).replace(/https?:\/\/\S+/g,'（テストのためリンクを省略）');
+      const subject=`【テスト・${label}】${original.subject}`;
+      const body=(`【テスト・${label}】実際の予約・来店手続きはありません。\n\n`+original.body).replace(/https?:\/\/\S+/g,'（テストのためリンクを省略）');
       return {variant,subject,body,html:a.mailHtml(body)};
     });
     fs.writeFileSync(path.join(process.env.CN_AUDIT_OUTPUT,'demo-mails.json'),JSON.stringify(demoMails,null,2),{mode:0o600});
