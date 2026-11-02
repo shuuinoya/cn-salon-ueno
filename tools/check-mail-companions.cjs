@@ -4,12 +4,14 @@ const fs = require('node:fs'), path = require('node:path'), Module = require('no
 assert(process.argv[2]); const root = path.resolve(process.argv[2]); assert(!fs.existsSync(path.join(root, 'mail-config.json')));
 process.env.DEMO_EPHEMERAL = '1'; process.env.HP_MAIL = '0'; process.env.CLOUD = '0';
 for (const k of Object.keys(process.env)) if (/^(MAIL_|GH_|ADMIN_PASS)/.test(k)) delete process.env[k];
+let externalCalls = 0; const denyNetwork = () => { externalCalls++; throw new Error('外部通信禁止'); };
+global.fetch = denyNetwork; require('node:net').connect = denyNetwork; require('node:tls').connect = denyNetwork;
 const revive = (_, v) => v?.__pm_map__ ? new Map(v.__pm_map__) : v?.__pm_set__ ? new Set(v.__pm_set__) : v;
 const snapshot = JSON.parse(fs.readFileSync(path.join(root, 'safe-state.json'), 'utf8'), revive);
 assert(!snapshot.state.mailRelay?.url && !snapshot.state.mailRelay?.secret && !snapshot.state.mails.length);
 const persist = require(path.join(root, 'persist.js')); persist.loadSnapshotWithRemote = async () => ({ enabled: false, data: snapshot }); persist.startSaver = () => {};
 const file = path.join(root, 'demo-api.js'), mod = new Module(file); mod.filename = file; mod.paths = Module._nodeModulePaths(root);
-mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,BOOKING_MAIL,bookingPriceParts,bookingStaffLine,mailI18n,getPublicBooking};', file);
+mod._compile(fs.readFileSync(file, 'utf8') + '\nmodule.exports.audit={state,courseStore,postSchedule,getSchedule,ledgerContext,createPublicBooking,getAvailability,hpNotify,adminSessions,bookingDetailsContext,bookingMismatch,bookingPriceLines,bookingRemindBody,bookingCustomerBody,resendFailedMail,applyMailTemplate,deliverDueMails,queueChangeMails,BOOKING_MAIL,bookingPriceParts,bookingStaffLine,mailI18n,getPublicBooking};', file);
 const ops = require(path.join(root, 'ledger-operations.js')), policy = require(path.join(root, 'booth-policy.js'));
 const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__: [...x] } : x instanceof Set ? { __pm_set__: [...x] } : x);
 (async () => {
@@ -50,15 +52,46 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const post = extra => details.post(state, payload(extra), manager, dc);
   const updateBody = (id, extra = {}) => { const d = get(id), b = d.booking; return payload({ ...b, action: 'update', id, bookingFingerprint: d.bookingFingerprint, nominatedStaffId: b.nominatedStaffId, ...extra }); };
   const update = (id, extra = {}) => details.post(state, updateBody(id, extra), manager, dc);
-  const check = async (name, fn) => { reset(); try { await fn(); assert(state.mails.every(m => !m.real)); results.push({ name, ok: true }); } catch (e) { results.push({ name, ok: false, error: e.message.split('\n').slice(0, 3).join(' ') }); } };
+  const check = async (name, fn) => { reset(); try { await fn(); assert(state.mails.every(m => !m.real)); assert.equal(externalCalls, 0); results.push({ name, ok: true }); } catch (e) { results.push({ name, ok: false, error: e.message.split('\n').slice(0, 3).join(' ') }); } };
 
   const companionNames = ['【デモテスト】同行一', '【デモテスト】同行二'];
   const variants = ['customerConfirm','storeNotify','customerChange','storeChange','customerCancel','storeCancel'];
+  for (const people of [1, 2, 3]) for (const nominated of [false, true]) {
+    await check(`${people}名・指名${nominated ? 'あり' : 'なし'}：代表だけ指名、確認各1通、変更で追加送信なし`, () => {
+      const p = pub({ people, companionNames: companionNames.slice(0, people - 1), staffId: nominated ? 'A' : '', expectedNominationFee: nominated ? 500 : 0 });
+      const b = booking(p.id), assignments = ev().assignments.filter(x => x.booking_id === b.id);
+      assert.equal(assignments.length, people); assert.equal(new Set(assignments.map(x => x.staff_id)).size, people);
+      assert.equal(b.nominated_staff_id, nominated ? 'A' : null); assert.equal(b.nomination_fee, nominated ? 500 : 0);
+      assert.equal(state.mails.length, 2); assert.deepEqual(state.mails.map(m => m.kind).sort(), ['customer', 'store']);
+      for (const m of state.mails) {
+        assert(m.subject.startsWith('【オンライン新規予約】')); assert.equal(m.body.split('\n')[0], '【オンライン新規予約】');
+        assert(m.body.includes(`人数 ${people}名`));
+        if (nominated) { assert(m.body.includes('予約者ご本人：【デモテスト】担当Aさん指名')); if (people > 1) assert(m.body.includes('同行者：指名なし')); }
+      }
+      const mailsBefore = encode(state.mails);
+      schedule({ action: 'moveBooking', id: b.id, staffId: 'E', start: 900, end: 960, expect: { staffId: assignments[0].staff_id, start: 720 }, confirmNominationMove: true });
+      assert.equal(encode(state.mails), mailsBefore);
+      schedule({ action: 'moveBooking', id: b.id, staffId: 'E', start: 960, end: 1020, toDate: next, toRevision: state.days.get(next).version, expect: { staffId: 'E', start: 900 }, confirmNominationMove: true });
+      assert.equal(encode(state.mails), mailsBefore);
+      assert.equal(booking(b.id, next).people, people);
+      assert.equal(booking(b.id, next).nomination_fee, nominated ? 500 : 0);
+    });
+  }
+  await check('旧プログラムの変更・リマインド待ちを停止し再送も拒否、送信済み履歴は保持', () => {
+    const b = booking(pub().id), sent = encode(state.mails);
+    for (const type of ['change', 'remind']) for (const kind of ['customer', 'store']) {
+      state.mails.push({ id: 'テスト-' + type + kind, bookingId: b.id, kind, type, status: 'pending', scheduledAt: Date.now() + 86400000 });
+      assert.throws(() => a.resendFailedMail({ type, status: 'failed' }), e => e.message === 'cannotResend');
+    }
+    state.mails.push({ id: 'テスト-legacy-template', bookingId: b.id, type: 'notify', status: 'pending', tpl: { name: 'booking', variant: 'storeChange' } });
+    a.deliverDueMails();
+    assert.equal(encode(state.mails.slice(0, 2)), sent); assert(state.mails.slice(2).every(m => m.status === 'skipped'));
+  });
   await check('確認・変更・取消メール全6種に正しい指名と内訳（500円）', () => {
     const p=pub(), b=booking(p.id);
     for (const variant of variants) {
       const {body}=a.BOOKING_MAIL[variant](b);
-      assert(body.includes('指名：【【デモテスト】担当Aさん】'),variant);
+      assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'),variant);
       assert(body.includes('指名料 500 円'),variant);
       assert(body.includes('コース料金'),variant);
       assert(body.includes(`合計 ${b.total.toLocaleString('ja-JP')} 円`),variant);
@@ -75,9 +108,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     const p=pub({people:3,companionNames}),b=booking(p.id);ev().assignments.reverse();
     for(const variant of variants) {
       const body=a.BOOKING_MAIL[variant](b).body;
-      assert(body.includes('指名：【【デモテスト】担当Aさん】'));
-      assert(!body.includes('指名：【【デモテスト】担当Cさん】'));
-      assert(body.includes('担当スタッフ（その他）'));
+      assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'));
+      assert(!body.includes('予約者ご本人：【デモテスト】担当Cさん指名'));
+      assert(body.includes('同行者：指名なし') && body.includes('同行者の担当スタッフ'));
       assert(body.includes('同行者1 【デモテスト】同行一 様'));
       assert(body.includes('同行者2 【デモテスト】同行二 様'));
     }
@@ -92,7 +125,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     state.staff[0].profile=JSON.stringify({personalNomination:true,nominationFee:0});
     const b=booking(pub({expectedNominationFee:0}).id);state.staff=[];
     const body=a.BOOKING_MAIL.customerConfirm(b).body;
-    assert(body.includes('指名：【【デモテスト】担当Aさん】'));assert(body.includes('指名料 0 円'));
+    assert(body.includes('予約者ご本人：【デモテスト】担当Aさん指名'));assert(body.includes('指名料 0 円'));
   });
   await check('古い不一致の内訳でも指名料と確定合計を表示', () => {
     const b=booking(pub().id);b.total-=1000;
@@ -132,7 +165,8 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     update(id,{companionNames:[companionNames[1]]});
     assert.deepEqual(get(id).booking.companionNames,[companionNames[1]]);
     assert.deepEqual(booking(id).details_history.at(-1).after.companionNames,[companionNames[1]]);
-    assert(state.mails.at(-1).body.includes(companionNames[1]));
+    assert.equal(state.mails.length, 2, '管理画面の変更では追加メールなし');
+    assert(a.BOOKING_MAIL.customerConfirm(booking(id)).body.includes(companionNames[1]));
     const restored=JSON.parse(encode(state),revive);assert.deepEqual(restored.events.get(date).bookings[0].companion_names,[companionNames[1]]);
   });
   await check('割引付き複数コースの内訳を全言語で同じ計算にする', () => {

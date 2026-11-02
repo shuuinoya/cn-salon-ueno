@@ -26,6 +26,22 @@ function workingIds(shifts, date) {
 }
 // 台帳と同じ安定ソート。同順位なら登録済み配列の順を保つ。
 const shiftOrder = staff => [...staff].sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+// 管理画面だけの並び。掲載順位や保存済みの sort_order は書き換えない。
+// 固定の2人は登録IDで判定するため、表示名を編集しても先頭を保つ。
+const ADMIN_FIRST = ["10000001-0000-4000-8000-000000000001", "10000018-0000-4000-8000-000010000018"];
+function adminView(state, date) {
+  const month = date.slice(0, 7), days = new Map(state.staff.map(s => [s.id, new Set()]));
+  for (const [day, shifts] of state.shifts) {
+    if (!day.startsWith(month + "-")) continue;
+    for (const shift of shifts) {
+      if (shift.date === day && Number.isFinite(shift.start_at) && Number.isFinite(shift.end_at) && shift.end_at > shift.start_at) days.get(shift.staff_id)?.add(day);
+    }
+  }
+  const counts = new Map([...days].map(([id, dates]) => [id, dates.size]));
+  const priority = id => ADMIN_FIRST.includes(id) ? ADMIN_FIRST.indexOf(id) : ADMIN_FIRST.length;
+  const staff = shiftOrder(state.staff).sort((a, b) => priority(a.id) - priority(b.id) || counts.get(b.id) - counts.get(a.id));
+  return { staff, counts, month };
+}
 const businessDate = () => new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
 function validDate(date) {
   return typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
@@ -100,4 +116,4 @@ function save(state, body, actor, err, today = businessDate()) {
   while (state.staffOrderingKeys.size > 100) state.staffOrderingKeys.delete(state.staffOrderingKeys.keys().next().value);
   return { ...result };
 }
-module.exports = { initialize, nextOrder, compare, ordered, workingIds, version, save, validOrder, validDate, migrate, view, comparator };
+module.exports = { initialize, nextOrder, compare, ordered, workingIds, version, save, validOrder, validDate, migrate, view, comparator, adminView };

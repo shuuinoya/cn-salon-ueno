@@ -3370,8 +3370,9 @@
           const d = ledgerDate();
           const j = await (await fetch("/api/demo/schedule?date=" + d, { cache: "no-store" })).json();
           const day = (j.days || []).find((x) => x.date === d);
-          const v = d + ":" + (day ? day.version : "") + ":" + (j.bookings || []).length;
-          if (last !== null && v !== last && last.startsWith(d + ":")) kick();
+          // スタッフ名・スキル・写真・別日のシフトによる月内順位の変更も検知する。
+          const v = d + ":" + (j.syncVersion || JSON.stringify([day?.version, j.staff, j.shifts, j.bookings]));
+          if (last === null || v !== last) kick();
           last = v;
         } catch {}
         window.__pmCheckNewBookings?.(); // 別の日の新しい予約の通知
@@ -3384,6 +3385,7 @@
       let firstMsg = true, opened = false;
       es.onmessage = (ev) => {
         sseOk = true;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
         const same = firstMsg && window.__cnBootSeqInit != null && String(ev.data) === window.__cnBootSeqInit;
         firstMsg = false;
         if (!same) kick();
@@ -3391,6 +3393,8 @@
       };
       // 再接続時は必ず最新へ再同期（切断中の変更を取りこぼさない）。最初の接続は上の最初の合図で判断する
       es.onopen = () => { if (opened || window.__cnBootSeqInit == null) kick(); opened = true; };
+      // 接続後に切れた場合も、再接続を待つ間は変更の確認を続ける。
+      es.onerror = () => { sseOk = false; startPolling(); };
       // サーバーは接続した直後に必ず1通送るため、10秒たっても何も届かなければ通知が使えない接続と判断する
       setTimeout(() => { if (!sseOk) { try { es.close(); } catch {} startPolling(); } }, 10000);
     } catch { startPolling(); }

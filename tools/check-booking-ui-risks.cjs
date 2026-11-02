@@ -46,6 +46,28 @@ async function autoRefreshDuringDrag() {
   });
 }
 async function cacheRisk() {
+  await test("通知接続が切れた後もスタッフ情報だけの変更を検知し、再接続で重複監視を止める", async()=>{
+    const intervals=new Map(),timeouts=new Map();let serial=0,reloads=0,stream,editing=false;
+    let payload={syncVersion:'server.1',days:[{date:'2026-11-02',version:1}],staff:[],bookings:[]};
+    const window={__cnBootSeqInit:'server.1'},document={hidden:false,body:{classList:{contains:()=>false},appendChild(){}},
+      querySelector:s=>s==='.ledger-refresh'?{disabled:false,click(){reloads++;}}:editing?{}:null,
+      getElementById:()=>({remove(){}}),addEventListener(){}};
+    const context=vm.createContext({window,document,location:{pathname:'/admin'},
+      EventSource:class{constructor(){stream=this}close(){}},
+      setInterval:(f,ms)=>{const id=++serial;intervals.set(id,{f,ms});return id},clearInterval:id=>intervals.delete(id),
+      setTimeout:(f,ms)=>{const id=++serial;timeouts.set(id,{f,ms});return id},clearTimeout:id=>timeouts.delete(id),
+      ledgerDate:()=> '2026-11-02',fetch:async()=>({json:async()=>payload}),refreshSched:async()=>{},decorateEvents(){},refreshLocks(){},refreshShop(){},prefetchCalendar(){}});
+    vm.runInContext(part(layout,'  if (!window.__pmSse &&','  // セッション切れの番人'),context);
+    const flush=()=>{for(const [id,t] of [...timeouts])if(t.ms===250){timeouts.delete(id);t.f()}};
+    stream.onmessage({data:'server.1'});flush();assert.equal(reloads,0);
+    stream.onerror();const poll=[...intervals.values()].find(t=>t.ms===10000);assert(poll);
+    await poll.f();flush();assert.equal(reloads,1);
+    await poll.f();flush();assert.equal(reloads,1);
+    payload={...payload,syncVersion:'server.2'};await poll.f();flush();assert.equal(reloads,2);
+    editing=true;payload={...payload,syncVersion:'server.3'};await poll.f();flush();assert.equal(reloads,2);
+    editing=false;[...intervals.values()].find(t=>t.ms===1000).f();assert.equal(reloads,3);
+    stream.onmessage({data:'server.3'});flush();assert(![...intervals.values()].some(t=>t.ms===10000));
+  });
   await test("保存前GETの遅着で古い台帳を再キャッシュしない",async()=>{
     const pending=[],events=[];class ES{constructor(){this.listeners={}}addEventListener(k,f){this.listeners[k]=f}emit(v){this.listeners.message({data:v})}}
     const response=v=>new Response(JSON.stringify({version:v}),{headers:{"Content-Type":"application/json"}});

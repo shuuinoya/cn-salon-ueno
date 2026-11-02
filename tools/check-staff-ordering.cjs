@@ -159,7 +159,45 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   });
   await check('元のシフト順が同順位でも登録配列順をそのまま表示', () => {
     state.staff.reverse();state.staff.forEach(s=>s.sort_order=0);
-    assert.deepEqual(ids(a.getStaffOrdering(date,manager).staff),ids(a.getSchedule(date).staff));
+    assert.deepEqual(ids(a.getStaffOrdering(date,manager).staff),['E','D','C','B','A']);
+    assert.deepEqual(ids(a.getSchedule(date).staff),['E','C','B','D','A']);
+  });
+  await check('豊・大水はIDで先頭固定、月内出勤日数順・無勤務は後方、重複勤務は1日', () => {
+    const top = ['10000001-0000-4000-8000-000000000001', '10000018-0000-4000-8000-000010000018'];
+    state.staff.push(...top.map((id, i) => ({ ...staff('A'), id, name: 'テスト改名済み' + i, sort_order: 100 + i })));
+    state.staff.push({ ...staff('A'), id: 'M', name: 'テスト松野', sort_order: 0 });
+    state.shifts.get(date).push({ ...state.shifts.get(date)[0] });
+    a.getSchedule(date);
+    const before = encode(state), view = a.getSchedule(date);
+    assert.deepEqual(ids(view.allStaff), [...top, 'B', 'C', 'E', 'A', 'D', 'M']);
+    assert(view.allStaff.find(s => s.id === 'B').month_work_days > view.allStaff.find(s => s.id === 'A').month_work_days);
+    assert.equal(order.adminView(state, date).counts.get('B'), 9);
+    assert.equal(view.allStaff.at(-1).month_work_days, 0);
+    assert.equal(encode(state), before);
+    const other = '2027-08-01';
+    state.shifts.set(other, [{ staff_id: 'M', date: other, start_at: a.minToMs(other, 600), end_at: a.minToMs(other, 1200) }]);
+    assert.deepEqual(ids(order.adminView(state, other).staff), [...top, 'M', 'A', 'B', 'C', 'D', 'E']);
+    assert.deepEqual(ids(a.publicStaffList(date)), ['B', 'C', 'E']);
+  });
+  await check('スタッフ編集で全体版を更新し、表示名・写真・スキル・指名料を全画面へ反映', () => {
+    const before = a.getSchedule(date), shifts = encode(state.shifts), s = staff('B');
+    const originalPhoto = a.publicStaffList(date).find(s => s.id === 'B').photo;
+    const edit = { action:'staff',date,id:s.id,name:'テスト登録改名',gender:'male',active:true,allCourses:false,courses:[course],
+      profile:{nickname:'テスト表示改名',personalNomination:true,nominationFee:1200},sortOrder:s.sort_order,staffRevision:0,photo:'data:image/jpeg;base64,dGVzdA==' };
+    a.postSchedule(edit, manager);
+    const after = a.getSchedule(date), pub = a.publicStaffList(date).find(s => s.id === 'B');
+    assert.notEqual(after.syncVersion, before.syncVersion);
+    assert.equal(after.days.find(d=>d.date===date).version, before.days.find(d=>d.date===date).version);
+    assert.equal(after.staff.find(s=>s.id==='B').name,'テスト表示改名');
+    assert.equal(after.allStaff.find(s=>s.id==='B').name,'テスト登録改名');
+    assert.equal(pub.name,'テスト表示改名'); assert.equal(pub.nominationFee,1200); assert.notEqual(pub.photo,originalPhoto);
+    assert.equal(a.nominationOf('B').name,'テスト表示改名');
+    const av = a.getAvailability(new URLSearchParams({date,course,people:'1',staff:'none',staffId:'B'}));
+    assert.equal(av.nomination.nominationFee,1200);assert(av.days[0].slots.some(s=>s.minute===720&&s.available));
+    const otherCourse = [...a.courseStore.values()].find(c=>c.id!==course && !/女性|男性/.test(c.name));
+    assert(!a.freeStaffIds(date,720,780,otherCourse.id,'none').includes('B'));
+    assert.equal(encode(state.shifts),shifts);
+    assert.throws(()=>a.postSchedule(edit,manager), e=>e.message==='staffChanged');
   });
   await check('旧全日共通の手動順は移行当日だけ保護し翌日へ持ち越さない', () => {
     state.staffListingDailyVersion=0;state.staff.forEach((s,i)=>s.listing_order=5-i);
@@ -246,7 +284,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   });
   await check('上位が予約済みなら次のNoへ、複数名も異なる担当を確保', () => {
     const first=pub();assert.deepEqual(assigned(first.id),['B']);
-    const second=pub({people:2});assert.deepEqual(assigned(second.id),['C','E']);
+    const second=pub({people:2,companionNames:['テスト同行者']});assert.deepEqual(assigned(second.id),['C','E']);
     const before=encode(ev());assert.throws(()=>pub(),e=>e.message==='soldOut');assert.equal(encode(ev()),before);
   });
   await check('上位の休憩・業務・鍵・技能不一致・勤務不足を飛ばす', () => {
@@ -319,7 +357,7 @@ const mod = load(), order = require(path.join(root, 'staff-ordering.js'));
   });
   await check('連続コース予約の移動は上位でも2件目に未対応の担当を除外', () => {
     const other=[...a.courseStore.values()].find(c=>c.id!==course&&!/男性|女性/.test(c.name));assert(other);
-    const p=pub({people:2}),bk=a.findBooking(p.id).bk,price=a.courseStore.get(course).price;
+    const p=pub({people:2,companionNames:['テスト同行者']}),bk=a.findBooking(p.id).bk,price=a.courseStore.get(course).price;
     bk.services=[course,other.id].map(courseId=>({courseId,price:price/2,minutesBefore:0,minutesBody:30,minutesAfter:0,discountType:'none',discount:0}));
     bk.bulk_discount_type='none';bk.bulk_discount=0;staff('C').courses=JSON.stringify([course]);
     a.postSchedule({action:'moveBooking',date,revision:state.days.get(date).version,id:p.id,staffId:'B',start:900,end:960,confirmNominationMove:true,expect:{staffId:'B',start:720}},manager);

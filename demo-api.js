@@ -21,9 +21,11 @@ const companions = require("./booking-companions");
 const staffOrdering = require("./staff-ordering");
 const staffSkills = require("./staff-skills");
 const { staffLatinName } = require("./staff-names");
-const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（予約確認・変更・取消の通知のみ送信します）";
+const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（新規予約時に確認メールを1通送信します）";
+const BOOKING_CHANGE_STOP_REASON = "管理画面での日時・担当・内容の変更メールは停止しています（お客様・店舗とも新規予約時の通知のみ）";
 const BOOKING_TICKET_NOTICE_STOP_REASON = "この予約の回数券利用・残り回数は予約確認メールに記載済みのため、別の残数通知は送信しません";
 function isBookingReminder(m) { return m?.type === "remind" || (m?.tpl?.name === "booking" && /Remind$/.test(m.tpl.variant || "")); }
+function isBookingChangeMail(m) { return m?.type === "change" || (m?.tpl?.name === "booking" && /Change$/.test(m.tpl.variant || "")); }
 function bookingUseNoticeIncludedInConfirmation(m) {
   if (m?.type !== "ticket" || m.tpl?.name !== "ticketLeft" || m.tpl.kind !== "use" || !m.tpl.ref || !m.tpl.ticketId) return false;
   const matches = [];
@@ -701,6 +703,7 @@ const persistReady = (() => {
       for (const m of state.mails || []) {
         if (m.status !== "pending") continue;
         if (isBookingReminder(m)) { m.status = "skipped"; m.skipReason = BOOKING_REMINDER_STOP_REASON; }
+        else if (isBookingChangeMail(m)) { m.status = "skipped"; m.skipReason = BOOKING_CHANGE_STOP_REASON; }
         else if (bookingUseNoticeIncludedInConfirmation(m)) { m.status = "skipped"; m.skipReason = BOOKING_TICKET_NOTICE_STOP_REASON; }
       }
       for (const m of state.mails || []) {
@@ -924,9 +927,12 @@ function getSchedule(date) {
     shifts.push(...scheduleShifts(d).filter((x) => shown.has(x.staff_id)));
   }
   const ev = ensureEvents(date);
-  const staffRow = (st) => ({ ...st, locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_info_missing: staffBookingMissing(st), booking_status: staffBookingStatus(st) });
-  const sorted = [...state.staff].sort((a, b) => a.sort_order - b.sort_order);
+  const { staff: sorted, counts, month } = staffOrdering.adminView(state, date);
+  const ranks = new Map(sorted.map((st, i) => [st.id, i + 1]));
+  const staffRow = (st) => ({ ...st, admin_order: ranks.get(st.id), month_work_days: counts.get(st.id), locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_info_missing: staffBookingMissing(st), booking_status: staffBookingStatus(st) });
   return {
+    syncVersion: sseTag(),
+    staffOrderMonth: month,
     // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。
     staff: sorted.filter((st) => shown.has(st.id)).map((st) => ({ ...staffRow(st), name: profileOf(st).nickname || st.name })),
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
@@ -1259,7 +1265,7 @@ function postSchedule(body, actor) {
         ...(nominationMove ? { nomination_confirmed: true, nominated_from: oldNominee, nominated_to: bk.nominated_staff_id } : {}),
       }].slice(-20);
       if (bk.sb_done) { bk.sb_done = false; bk.sb_changed = true; } // 転記済みの予約を動かしたら再転記が必要
-      queueChangeMails(bk); // 変更の操作通知のみ（自動リマインドなし）
+      queueChangeMails(bk); // 移動ではメールを追加せず、旧版の送信待ちだけ止める。
       bump();
       if (toDate !== date) bump(toDate);
       return { ok: true, date: toDate };
@@ -1602,6 +1608,7 @@ const JST_DT = (ms) => {
 // パスワード等を含むメール・再送済み・内容が古くなった予約メールは再送しない。送れないときは理由つきで err を投げる
 function resendFailedMail(m) {
   if (isBookingReminder(m)) throw err(409, "cannotResend");
+  if (isBookingChangeMail(m)) throw err(409, "cannotResend");
   if (bookingUseNoticeIncludedInConfirmation(m)) throw err(409, "cannotResend");
   if (m.status !== "failed") throw err(409, "notFailed");
   if (m.type === "member") throw err(409, "hasSecret"); // パスワード等を含むメールは記録から再送できない
@@ -1670,6 +1677,9 @@ function deliverDueMails(source) {
   for (const m of state.mails) {
     if (m.status === "pending" && isBookingReminder(m)) {
       m.status = "skipped"; m.skipReason = BOOKING_REMINDER_STOP_REASON; continue;
+    }
+    if (m.status === "pending" && isBookingChangeMail(m)) {
+      m.status = "skipped"; m.skipReason = BOOKING_CHANGE_STOP_REASON; continue;
     }
     if (m.status === "pending" && bookingUseNoticeIncludedInConfirmation(m)) {
       m.status = "skipped"; m.skipReason = BOOKING_TICKET_NOTICE_STOP_REASON; continue;
@@ -2588,13 +2598,13 @@ const MAIL_COMMON = [
 // 文面は従来とまったく同じ。回数券を使った予約だけは、予約時に本文を固定せず、
 // 送信直前にこの関数で作り直す（回数券の行が送信時点の最新の残り回数・有効期限になる）
 const BOOKING_MAIL = {
-  customerConfirm: (bk) => ({ subject: `${MAIL_STORE} ご予約内容確認`,
-    body: bookingCustomerBody(bk, `この度は「${MAIL_STORE}」にご予約いただきありがとうございます。`) }),
+  customerConfirm: (bk) => ({ subject: `【オンライン新規予約】${MAIL_STORE} ご予約内容確認`,
+    body: bookingCustomerBody(bk, `【オンライン新規予約】\nこの度は「${MAIL_STORE}」にご予約いただきありがとうございます。`) }),
   // リマインド（来店前のご案内）は予約完了メールの使い回しではなく専用の文面。
   // 送信直前にその予約の最新データ（日時・メニュー・担当・料金・回数券）から作る
   customerRemind: (bk) => ({ subject: `${MAIL_STORE} ご予約リマインド`, body: bookingRemindBody(bk) }),
-  storeNotify: (bk) => ({ subject: `${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
-    body: bookingStoreBody(bk, `「${MAIL_STORE}」に新しいご予約が入りました。`) }),
+  storeNotify: (bk) => ({ subject: `【オンライン新規予約】${MAIL_STORE} 新規予約のお知らせ（予約ID ${displayId(bk)}）`,
+    body: bookingStoreBody(bk, `【オンライン新規予約】\n「${MAIL_STORE}」に新しいご予約が入りました。`) }),
   storeRemind: (bk) => ({ subject: `${MAIL_STORE} 本日のご予約リマインド（予約ID ${displayId(bk)}）`,
     body: bookingStoreBody(bk, `本日のご予約のリマインドです。`) }),
   customerChange: (bk) => ({ subject: `${MAIL_STORE} ご予約内容変更のお知らせ`,
@@ -2643,7 +2653,9 @@ function bookingStaffLine(bk) {
   if (bk.nominated_staff_id) {
     const others = ids.filter((id) => id !== bk.nominated_staff_id).map(nameOf).filter(Boolean);
     const nom = nameOf(bk.nominated_staff_id) || bk.nominated_staff_name || "";
-    return `指名：【${nom ? nom + "さん" : "スタッフ名未登録"}】` + (others.length ? `\n担当スタッフ（その他） ${others.join("、")}` : "");
+    return `予約者ご本人：${nom ? nom + "さん指名" : "指名あり（スタッフ名未登録）"}`
+      + (bk.people > 1 ? "\n同行者：指名なし" : "")
+      + (others.length ? `\n同行者の担当スタッフ ${others.join("、")}` : "");
   }
   const names = ids.map(nameOf).filter(Boolean);
   return "指名：なし" + (names.length ? `\n担当スタッフ ${names.join("、")}` : "");
@@ -2774,7 +2786,8 @@ function bookingStoreBody(bk, lead) {
 //  ・回数券を使った予約のその他のメール…回数券の行を最新の残り回数・有効期限で作る
 // 回数券を使わない予約の完了・変更・取消メールは、従来どおり即時に送る文面のまま
 function queueBookingMail(kind, type, to, variant, bk, at) {
-  if (isBookingReminder({ type, tpl: { name: "booking", variant } })) return null;
+  const mail = { type, tpl: { name: "booking", variant } };
+  if (isBookingReminder(mail) || isBookingChangeMail(mail)) return null;
   const b = BOOKING_MAIL[variant](bk);
   const tpl = (type === "remind" || bk.ticket_id) ? { name: "booking", variant, bookingId: bk.id } : undefined;
   return queueMail(kind, type, to, b.subject, b.body, at, bk.id, tpl);
@@ -2800,12 +2813,11 @@ function dropPendingReminders(bookingId) {
 
 function queueChangeMails(bk) {
   dropPendingReminders(bk.id);
-  const now = Date.now();
-  if (bk.email) {
-    queueBookingMail("customer", "change", bk.email, "customerChange", bk, now);
+  // ドラッグ、別日移動、予約詳細の編集で、お客様・店舗へ追加通知を送らない。
+  // 更新前のプログラムが作った送信待ちも停止。送信済みの履歴は保持する。
+  for (const m of state.mails) if (m.bookingId === bk.id && m.status === "pending" && isBookingChangeMail(m)) {
+    m.status = "skipped"; m.skipReason = BOOKING_CHANGE_STOP_REASON;
   }
-  queueBookingMail("store", "change", storeMail(), "storeChange", bk, now);
-  deliverDueMails();
 }
 
 function queueCancelMails(bk) {

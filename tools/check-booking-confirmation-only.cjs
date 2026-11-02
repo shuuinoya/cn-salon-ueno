@@ -63,9 +63,10 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   const checkDetails = (m, people, nominated) => {
     const lines = m.body.split('\n');
     assert.equal(lines.filter(x => x === `人数 ${people}名`).length, 1, '人数は予約どおり1か所に記載');
-    const nominationLine = lines.find(x => x.startsWith('指名：'));
-    assert.equal(nominationLine, nominated ? `指名：【テスト担当${nominated}さん】` : '指名：なし', '正しい指名者だけを明記');
-    assert.equal(lines.filter(x => x.startsWith('指名：')).length, 1, '指名を重複表示しない');
+    const label = nominated ? '予約者ご本人：' : '指名：';
+    const nominationLine = lines.find(x => x.startsWith(label));
+    assert.equal(nominationLine, nominated ? `予約者ご本人：テスト担当${nominated}さん指名` : '指名：なし', '正しい指名者だけを明記');
+    assert.equal(lines.filter(x => x.startsWith(label)).length, 1, '指名を重複表示しない');
     if (!nominated) assert(lines.some(x => x.startsWith('担当スタッフ')), '指名なしでは自動割当の担当者を記載');
     if (m.html) { assert(m.html.includes(`人数 ${people}名`)); assert(m.html.includes(nominationLine)); }
   };
@@ -78,12 +79,11 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
       assert.equal(state.settings.mailI18n.enabled, false); noReminders();
     });
   }
-  await check('人数と指名の変更後は新しい内容で通知し確認済み履歴を書き換えない', () => {
+  await check('人数と指名の変更では通知せず、取消には最新内容を表示し確認済み履歴は保持', () => {
     const p = post({ people: 2, staffIds: ['A', 'B'], nominatedStaffId: 'A', expectedNominationFee: 500, email: 'details-test@example.test' });
     const original = mailRows(p.id).map(m => ({ ...m }));
     update(p.id, { people: 3, staffIds: ['B', 'C', 'D'], nominatedStaffId: 'B', expectedNominationFee: 500, confirmNominationMove: true });
-    const changed = mailRows(p.id).filter(m => m.type === 'change'); assert.equal(changed.length, 2);
-    for (const m of changed) { checkDetails(m, 3, 'B'); assert(!m.body.includes('テスト担当A')); }
+    assert.equal(mailRows(p.id).filter(m => m.type === 'change').length, 0);
     assert.deepEqual(mailRows(p.id).slice(0, 2), original);
     schedule({ action: 'cancel', id: p.id });
     const cancelled = mailRows(p.id).filter(m => m.type === 'cancel'); assert.equal(cancelled.length, 2);
@@ -102,7 +102,7 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await check('掲載名と記号を含む名前が本文/HTMLへ正しく反映される', () => {
     state.staff[0].profile = JSON.stringify({ message: 'テスト紹介', nickname: 'テスト <A&B>', personalNomination: true, nominationFee: 500 });
     const p = pub();
-    for (const m of mailRows(p.id)) { assert(m.body.includes('指名：【テスト <A&B>さん】')); assert(m.html.includes('指名：【テスト &lt;A&amp;B&gt;さん】')); assert(!m.html.includes('<A&B>')); }
+    for (const m of mailRows(p.id)) { assert(m.body.includes('予約者ご本人：テスト <A&B>さん指名')); assert(m.html.includes('予約者ご本人：テスト &lt;A&amp;B&gt;さん指名')); assert(!m.html.includes('<A&B>')); }
   });
   await check('人数未記録の旧予約は1名、担当未割当なら架空の名前を作らない', () => {
     const p = pub({ staffId: '' }), b = booking(p.id); delete b.people; ev().assignments = [];
@@ -140,9 +140,9 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
     schedule({action:'createBooking',staffId:'A',start:720,course,people:1,consent:true,name:'テスト従来受付',email:'legacy-test@example.test'});
     assert.equal(state.mails.length,2);assert.equal(state.mails.filter(m=>m.kind==='customer'&&m.type==='confirm').length,1);noReminders();
   });
-  await check('変更と取消の操作通知は維持し自動再通知は作らない',()=>{
+  await check('変更通知は作らず取消通知を維持する',()=>{
     const p=post({email:'details-test@example.test'});update(p.id,{start:900});schedule({action:'cancel',id:p.id});
-    assert.deepEqual(mailRows(p.id).filter(m=>m.kind==='customer').map(m=>m.type),['confirm','change','cancel']);noReminders();
+    assert.deepEqual(mailRows(p.id).filter(m=>m.kind==='customer').map(m=>m.type),['confirm','cancel']);noReminders();
   });
   await check('保存済みの期限到来/未来リマインドは顧客も店舗も中止履歴になる',()=>{
     const rows=['customer','store'].flatMap(kind=>[-86400000,86400000].map((offset,i)=>({id:'TEST-OLD-'+kind+i,bookingId:'TEST-OLD',kind,type:'remind',to:'old-test@example.test',status:'pending',scheduledAt:Date.now()+offset,body:'テスト予約リマインド',subject:'テスト'})));
