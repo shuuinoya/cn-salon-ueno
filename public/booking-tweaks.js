@@ -889,7 +889,11 @@
         '<b style="font-size:18px;overflow-wrap:anywhere">' + esc2(window.CNI18N?.staffName(nomStaff) || nomStaff.name) + "</b>" +
         '<div style="color:#8a6420;font-size:14px">' + esc2(T("指名料")) + " <b>" + esc2(price(nomStaff.nominationFee)) + "</b></div>" +
         '<div style="color:#6b7280;font-size:13px">' + esc2(T(none ? "このスタッフが担当できるメニューは現在ありません。" : "このスタッフが担当できるメニューを表示しています。")) + "</div>" +
-        links + "</div></div>";
+        links + "</div></div>" +
+        (nomStaff.message ? '<details class="fm-nom-message" style="margin:0 16px 14px;font-size:14px;line-height:1.75">' +
+          '<summary style="color:#8a6420;cursor:pointer;padding:8px 0">' + esc2(T("続きを読む")) + '</summary>' +
+          '<div style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;overscroll-behavior:contain">' +
+          esc2(I18N?.staffMsg ? I18N.staffMsg(nomStaff.message) : nomStaff.message) + '</div></details>' : '');
     }
     stack.before(bar);
   }

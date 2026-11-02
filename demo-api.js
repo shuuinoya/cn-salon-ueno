@@ -1445,7 +1445,7 @@ function postSchedule(body, actor) {
       const warnings = [];
       const missing = staffInfoMissing(rec);
       if (missing.length) {
-        warnings.push(`保存しました。ただし「${missing.join("・")}」が未入力のため、新しいシフトの登録には入力が必要です。\n` +
+        warnings.push(`保存しました。「${missing.join("・")}」は未入力ですが、シフトの登録はできます。\n` +
           "登録済みの勤務日は予約サイトに掲載します。写真・紹介文の不足では指名予約を止めません。スタッフ情報の内容も確認してください。");
       }
       if (affected.length) {
@@ -2955,12 +2955,11 @@ function publicStaffList(date = todayJst()) {
       };
     });
 }
-// 「指名して予約する」で来たメニュー選択ページ用：そのスタッフ（指名できなければ null）。紹介文は要らないので外す
+// 「指名して予約する」で来たメニュー選択ページも、紹介ページと同じ最新プロフィールを使う。
 function nominationOf(staffId, date = todayJst()) {
   const st = publicStaffList(validDay(date) ? date : todayJst()).find((x) => x.id === staffId);
   if (!st || !st.nominatable) return null;
-  const { message, ...rest } = st;
-  return rest;
+  return st;
 }
 
 // 指名の資格。週表示で選択済みの本人を保持するため、勤務日の絞り込みとは分ける。
