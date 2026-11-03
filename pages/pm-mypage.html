@@ -464,6 +464,7 @@
     if (!member) return loginGate();
     return '<div class="card mp-ticket-area"><h2>' + esc(tr("保有中の回数券")) + '</h2>' + window.CNTickets.offer(memberData?.ticketSettings) +
       '<div class="mp-ticket-grid">' + (own || '<p class="empty">' + esc(tr("保有中の回数券はありません。")) + '</p>') + '</div></div>' +
+      (window.CNTicketPurchase?.hasPending(member.email) ? '<div class="btnrow"><button type="button" class="gold" data-ticket-retry>' + esc(tr("購入結果を確認")) + '</button></div>' : '') +
       '<details class="card mp-ticket-purchase"' + (!myTickets.some(t => window.CNTickets.usable(t)) ? ' open' : '') + '><summary>' + esc(tr("回数券のご購入")) + '</summary>' +
       (ticketNote ? '<p class="mp-ticket-purchase-note">' + esc(tr(ticketNote)) + '</p>' : '') +
       '<p class="mp-ticket-purchase-note">' + esc(tr("回数券の有効期限は購入日から1年間です。")) + '</p><div class="mp-ticket-grid">' + (plans || '<p class="empty">' + esc(tr("現在販売中の回数券はありません。")) + '</p>') + '</div></details>';
@@ -514,7 +515,7 @@
       return;
     }
     const buyId = e.target.closest("[data-buy]")?.dataset.buy;
-    if (buyId) {
+    if (buyId || e.target.closest('[data-ticket-retry]')) {
       if (!member) { if (window.CNMember) window.CNMember.open(); return; }
       if (!window.CNTicketPurchase) { window.alert(tr("読み込めませんでした。時間をおいてお試しください。")); return; }
       window.CNTicketPurchase.open({ planId: buyId, onSaved: async j => {

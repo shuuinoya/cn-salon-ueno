@@ -16,6 +16,7 @@ let checks=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);checks++;};
  for(const [email,phone]of [['a@example.test','00011112222'],['b@example.test','00033334444']])s.members.set(email,{email,name:'テスト 同姓同名',phone,bookings:[],tickets:[]});
  for(const role of ['admin','manager','staff']){s.accounts.set('test-'+role,{user:'test-'+role,active:true,role});adminSessions.set({admin:'aa',manager:'bb',staff:'cc'}[role],{user:'test-'+role,created:Date.now()});}
  s.memberSessions.set('abcd',{email:'a@example.test',created:Date.now()});
+ s.memberSessions.set('bcde',{email:'b@example.test',created:Date.now()});
  const api=(url,body,cookie='pm_session=bb')=>new Promise(resolve=>{
   const req=new EventEmitter();Object.assign(req,{method:body?'POST':'GET',headers:{cookie},socket:{remoteAddress:'127.0.0.1'}});
   const res=new EventEmitter();let status;Object.assign(res,{writeHead(n){status=n;this.statusCode=n;},end(bytes){this.emit('finish');resolve({status,data:bytes?JSON.parse(bytes):null});}});
@@ -30,7 +31,7 @@ let checks=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);checks++;};
  eq((await api(url+'?q=A%40EXAMPLE.TEST')).data.customers[0].email,'a@example.test');
  for(const row of found.customers)eq(Object.keys(row).sort(),['email','id','name','phone','source','version'].sort());
  const buyer=found.customers.find(x=>x.email==='a@example.test'),plan=found.plans[0],body={customerId:buyer.id,expectedCustomer:buyer.version,planId:plan.id,expectedPlan:plan.purchase_version,requestKey:'test-admin-first'};
- const before=JSON.stringify([...s.members]),first=await api(url,body);eq(first.status,200);eq(first.data.ticket.token,undefined);
+ const first=await api(url,body);eq(first.status,200);eq(first.data.ticket.token,undefined);
  const id=first.data.ticket.id,t=s.tickets.get(id);eq(t.buyer_email,buyer.email);eq(t.price,plan.price);eq(t.uses_left,plan.uses);eq(t.valid_months,12);eq(t.history[0].by,'test-manager');eq(t.member_email,buyer.email);
  eq(s.members.get('b@example.test').tickets.length,0);eq(s.members.get('a@example.test').tickets,[id]);
  const mailCount=s.mails.length;eq(mailCount,1);
@@ -48,12 +49,35 @@ let checks=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);checks++;};
  }
  s.members.get(buyer.email).name+='更新';eq((await api(url,{...body,requestKey:'test-customer-change'})).status,409);eq((await api(url,body)).data.ticket.id,id);s.members.get(buyer.email).name=buyer.name;
  // 公開側にも同じ価格・条件の確認を適用。
- const pub={planId:plan.id,name:buyer.name,expectedPlan:plan.purchase_version,requestKey:'test-public-first'};
+ const unchanged=()=>JSON.stringify({tickets:[...s.tickets],keys:[...s.ticketPurchaseKeys],members:[...s.members],mails:s.mails});
+ const snapshotBeforeSwitch=unchanged();
+ const switched={planId:plan.id,name:buyer.name,expectedPlan:plan.purchase_version,expectedMember:buyer.email,requestKey:'test-public-switch'};
+ eq((await api('/api/tickets/purchase',switched,'cn_member=bcde')).data.error,'memberChanged');
+ eq((await api('/api/tickets/purchase',switched,'')).data.error,'memberChanged');
+ eq(unchanged(),snapshotBeforeSwitch,'確認後にログイン会員が変わった場合は誰の券も発行しない');
+ eq((await api(url,{...body,requestKey:'test-admin-switch',expectedActor:'test-admin'})).data.error,'actorChanged');
+ eq(unchanged(),snapshotBeforeSwitch,'管理者の切替後は購入を登録しない');
+ const pub={planId:plan.id,name:buyer.name,expectedPlan:plan.purchase_version,expectedMember:buyer.email,expectedCustomer:buyer.version,requestKey:'test-public-first'};
+ s.members.get(buyer.email).phone+='9';
+ eq((await api('/api/tickets/purchase',pub,'cn_member=abcd')).data.error,'customerChanged');
+ s.members.get(buyer.email).phone=buyer.phone;
  const p=s.ticketPlans.get(plan.id);p.price+=100;eq((await api('/api/tickets/purchase',pub,'cn_member=abcd')).status,409);p.price-=100;
  const publicResult=await api('/api/tickets/purchase',pub,'cn_member=abcd');eq(publicResult.status,200);assert(publicResult.data.ticket.token);checks++;
  eq((await api('/api/tickets/purchase',pub,'cn_member=abcd')).data.ticket.id,publicResult.data.ticket.id);
+ s.members.get(buyer.email).name+='更新';
+ eq((await api('/api/tickets/purchase',pub,'cn_member=abcd')).data.ticket.id,publicResult.data.ticket.id,'購入後の会員情報変更は元の購入確認を妨げない');
+ s.members.get(buyer.email).name=buyer.name;
  // 保存・再起動で戻した購入キーでも結果は一意。
  s.ticketPurchaseKeys=new Map(JSON.parse(JSON.stringify([...s.ticketPurchaseKeys])));eq((await api(url,body)).data.ticket.id,id);
  eq((await api(url,body,'pm_session=cc')).status,403);
+ // 検索用の全角・半角変換を、購入者の識別には使わない。
+ const wideEmail='ａ@example.test';s.members.set(wideEmail,{email:wideEmail,name:'テスト 全角会員',phone:'00099990000',bookings:[],tickets:[]});
+ const wideSearch=(await api(url+'?q='+encodeURIComponent(wideEmail))).data;
+ const wideBuyer=wideSearch.customers.find(x=>x.id==='member:'+wideEmail);
+ eq(wideBuyer.email,wideEmail,'全角を含む別会員のメールを半角会員へ変換しない');
+ const asciiBefore=JSON.stringify(s.members.get('a@example.test').tickets);
+ const widePurchase=await api(url,{...body,requestKey:'test-wide-member',customerId:wideBuyer.id,expectedCustomer:wideBuyer.version});
+ eq(widePurchase.status,200);eq(s.tickets.get(widePurchase.data.ticket.id).member_email,wideEmail);
+ eq(JSON.stringify(s.members.get('a@example.test').tickets),asciiBefore);eq(s.members.get(wideEmail).tickets,[widePurchase.data.ticket.id]);
  console.log('PASS '+checks+' ticket purchase checks: ownership, same-name customers, staff permissions, plan/customer changes, 100 retries, one mail, public reflection, restart keys');
 })().then(()=>process.exit(0),e=>{console.error(e);process.exit(1)});

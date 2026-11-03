@@ -82,12 +82,12 @@
         } else {
           const j = await json('/api/member/me');
           if (!j.member) throw new Error('memberOnly');
-          buyer = { name:j.member.name, email:j.member.email }; owner = 'member:' + buyer.email;
+          buyer = { name:j.member.name, email:j.member.email, version:j.member.purchase_version }; owner = 'member:' + buyer.email;
           plans = j.plans || (await json('/api/tickets/plans')).plans;
           selected = plans.find(p => p.id === options.planId);
-          if (!selected) throw new Error('planChanged');
         }
         summary(); status.textContent = ''; setBusy(false); restorePending();
+        if (!admin && !selected) throw new Error('planChanged');
       } catch (error) {
         setBusy(false); submit.disabled = true;
         status.textContent = tr(error.message === 'memberOnly' ? '回数券のご購入にはログインが必要です。' : '読み込めませんでした。時間をおいてお試しください。');
@@ -114,7 +114,8 @@
       if (!retry) {
         // 送信前に保存。応答不明・再読込でも同じキーと内容で確認し、二重購入を防ぐ。
         retry = { plan:selected, buyer, body:{ planId:selected.id, expectedPlan:selected.purchase_version,
-          requestKey:'tp-' + crypto.randomUUID(), ...(admin ? {customerId:buyer.id,expectedCustomer:buyer.version} : {name:buyer.name,language:window.CNI18N?.lang() || 'ja'}) } };
+          requestKey:'tp-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2,'0')).join(''), expectedCustomer:buyer.version,
+          ...(admin ? {customerId:buyer.id,expectedActor:owner.slice(6)} : {name:buyer.name,expectedMember:buyer.email,language:window.CNI18N?.lang() || 'ja'}) } };
         try { pending.write(owner, retry); } catch { retry = null; status.textContent = tr('購入の確認情報を保存できません。ブラウザの保存設定をご確認ください。'); return; }
       }
       setBusy(true); status.textContent = tr('購入を確認しています…');
@@ -123,7 +124,10 @@
         result = await json(admin ? '/api/demo/ticket-purchase' : '/api/tickets/purchase', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(retry.body) });
         if (!result.ok || !result.ticket?.id) throw new Error('unavailable');
       } catch (error) {
-        if (error.message === 'requestKeyUsed') {
+        if (['memberChanged','actorChanged'].includes(error.message)) {
+          setBusy(false); submit.disabled = true;
+          status.textContent = tr('ログインが変更されています。閉じて、元のアカウントでログインし直してください。');
+        } else if (error.message === 'requestKeyUsed') {
           setBusy(false); submit.disabled = true;
           status.textContent = tr('購入履歴を確認してください。内容が一致しないため、再購入は行っていません。');
         } else if ([400,409,422].includes(error.status)) {
@@ -148,5 +152,7 @@
     });
     await load();
   }
-  window.CNTicketPurchase = { open };
+  window.CNTicketPurchase = { open, hasPending(email) {
+    try { return !!email && !!pending.read('member:' + email); } catch { return false; }
+  } };
 })();

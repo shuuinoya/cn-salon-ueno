@@ -254,15 +254,18 @@ function ok(value, message) { report.assertions++; assert(value, message); }
       const req=http.request({hostname:'127.0.0.1',port,path:route,method:'POST',headers:{'Content-Type':'application/json',cookie}},res=>{let raw='';res.on('data',c=>raw+=c);res.on('end',()=>resolve({status:res.statusCode,data:JSON.parse(raw)}));});req.on('error',reject);req.end(JSON.stringify(b));
     });
     try {
-      for(const count of [2,5,10,25,50]) for(const kind of ['purchaseRetry','bookingRetry','lastUse','mixedChannels']) await test('concurrent_http',[kind,count].join('/'),async()=>{
+      for(const count of [2,5,10,25,50]) for(const kind of ['purchaseRetry','adminPurchaseRetry','bookingRetry','lastUse','mixedChannels']) await test('concurrent_http',[kind,count].join('/'),async()=>{
         const t=ticket({uses_total:1,uses_left:1}), b=publicBody({ticketId:t.id,ticketToken:t.token});
         const purchase={planId:'tp-5',requestKey:'test-burst',name:'テスト同時購入',email};
-        const outputs=await Promise.all(Array.from({length:count},(_,i)=>kind==='purchaseRetry'?request('/api/tickets/purchase',purchase):kind==='mixedChannels'&&i%2===1?
+        const info=api('/api/demo/ticket-purchase?q='+encodeURIComponent(email)).data;
+        const buyer=info.customers.find(x=>x.email===email),plan=info.plans.find(x=>x.id==='tp-5');
+        const adminPurchase={customerId:buyer.id,expectedCustomer:buyer.version,expectedActor:actor.user,planId:plan.id,expectedPlan:plan.purchase_version,requestKey:'test-admin-burst'};
+        const outputs=await Promise.all(Array.from({length:count},(_,i)=>kind==='purchaseRetry'?request('/api/tickets/purchase',purchase):kind==='adminPurchaseRetry'?request('/api/demo/ticket-purchase',adminPurchase,'pm_session=aaaa'):kind==='mixedChannels'&&i%2===1?
           request('/api/demo/booking-details',adminBody({ticketId:t.id,start:720+(i%8)*60}),'pm_session=aaaa'):
           request('/api/bookings',{...b,...(kind==='bookingRetry'?{}:{requestKey:'test-concurrent-'+i,start:c.minToMs(date,720+(i%8)*60)})})));
         const success=outputs.filter(x=>x.status===200);
-        equal(success.length,['purchaseRetry','bookingRetry'].includes(kind)?count:1);
-        if(kind==='purchaseRetry'){equal(state.tickets.size,2);equal(new Set(success.map(x=>x.data.ticket.id)).size,1);}
+        equal(success.length,['purchaseRetry','adminPurchaseRetry','bookingRetry'].includes(kind)?count:1);
+        if(['purchaseRetry','adminPurchaseRetry'].includes(kind)){equal(state.tickets.size,2);equal(new Set(success.map(x=>x.data.ticket.id)).size,1);equal(state.mails.filter(m=>m.tpl?.name==='ticketPurchase'||m.template?.name==='ticketPurchase').length,1,'購入メールを重複作成しない');}
         else {equal(ev().bookings.length,1);equal(t.uses_left,0);equal(t.history.filter(x=>x.type==='use').length,1);}
         ok(outputs.every(x=>[200,409].includes(x.status)),'同時操作でサーバー障害');
       });

@@ -17,6 +17,7 @@
 
   /* 辞書 */
   const D = {
+    "ログインが変更されています。閉じて、元のアカウントでログインし直してください。": ["Your login has changed. Close this window and sign in again with the original account.", "登录账号已更改。请关闭此窗口并使用原账号重新登录。", "로그인 계정이 변경되었습니다. 창을 닫고 원래 계정으로 다시 로그인해 주세요.", "Votre compte de connexion a changé. Fermez cette fenêtre et reconnectez-vous avec le compte d’origine.", "La cuenta ha cambiado. Cierre esta ventana e inicie sesión de nuevo con la cuenta original.", "L’account di accesso è cambiato. Chiudi questa finestra e accedi di nuovo con l’account originale.", "Ihr angemeldetes Konto hat sich geändert. Schließen Sie dieses Fenster und melden Sie sich erneut mit dem ursprünglichen Konto an."],
     "購入内容の確認": ["Review purchase", "确认购买内容", "구매 내용 확인", "Vérifier l’achat", "Revisar la compra", "Verifica l’acquisto", "Kauf prüfen"],
     "戻る": ["Back", "返回", "돌아가기", "Retour", "Volver", "Indietro", "Zurück"],
     "購入する": ["Buy", "购买", "구매하기", "Acheter", "Comprar", "Acquista", "Kaufen"],

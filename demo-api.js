@@ -126,7 +126,8 @@ function bookingCreatedAt(b) {
   return m ? Date.parse(m[1] + "T" + m[2] + ":00+09:00") : 0;
 }
 function memberPublic(m) {
-  return { email: m.email, name: m.name || "", phone: m.phone || "", createdAt: m.createdAt };
+  return { email: m.email, name: m.name || "", phone: m.phone || "", createdAt: m.createdAt,
+    purchase_version: ticketPurchase.customer(state, "member:" + m.email)?.version };
 }
 // 会員に予約・回数券を紐付ける（本人のものだけ。重複なし）
 function memberAttachBooking(m, bk) {
@@ -3698,6 +3699,9 @@ function purchaseTicket(req, b, adminBuyer = null, actor = null) {
   const plan = state.ticketPlans.get(String(b.planId || ""));
   // ログイン中の会員は、会員情報のメールアドレス・お名前で購入する（入力不要）
   const member = adminBuyer ? state.members.get(adminBuyer.email) || null : memberOf(req);
+  if (adminBuyer && !member) throw err(409, "customerChanged");
+  // 別タブのログアウト・会員切替で、確認画面と異なる人へ発行しない。
+  if (!adminBuyer && b.expectedMember !== undefined && (!member || b.expectedMember !== member.email)) throw err(409, "memberChanged");
   const name = String(b.name || (member ? member.name : "") || "").trim().slice(0, 120);
   const email = member ? member.email : String(b.email || "").trim().toLowerCase().slice(0, 254);
   if (!name || !email.includes("@")) throw err(400, "invalid");
@@ -3722,7 +3726,7 @@ function purchaseTicket(req, b, adminBuyer = null, actor = null) {
   // 完了済みの再送は、後から販売を停止・削除しても元の購入結果を返す。
   if (!plan || plan.active !== 1) throw err(409, "planChanged");
   if (b.expectedPlan !== undefined && b.expectedPlan !== ticketPurchase.planVersion(plan)) throw err(409, "planChanged");
-  if (adminBuyer && b.expectedCustomer !== adminBuyer.version) throw err(409, "customerChanged");
+  if (b.expectedCustomer !== undefined && b.expectedCustomer !== (adminBuyer || ticketPurchase.customer(state, "member:" + member?.email))?.version) throw err(409, "customerChanged");
   const serialBefore = state.ticketSerial;
   state.ticketSerial++;
   const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
@@ -5026,6 +5030,7 @@ function handleDemoApi(req, res, url) {
     if (req.method === "POST") {
       readJson(req, res, 100000, b => {
         if (!/^[\w-]{10,100}$/.test(b.requestKey || "") || !b.expectedPlan || !b.expectedCustomer) throw err(400, "invalid");
+        if (b.expectedActor !== undefined && b.expectedActor !== sessionAccount(req).user) throw err(409, "actorChanged");
         const buyer = ticketPurchase.customer(state, b.customerId);
         if (!buyer) throw err(409, "customerChanged");
         const result = purchaseTicket(req, { planId: b.planId, requestKey: b.requestKey, expectedPlan: b.expectedPlan,

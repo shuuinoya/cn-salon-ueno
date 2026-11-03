@@ -7,7 +7,8 @@ function planVersion(plan) {
     plan.menu_scope ?? "all", plan.active, plan.revive !== false, plan.revive_group || ""]);
 }
 function row(id, name, email, phone, source) {
-  email = normalize(email);
+  // 検索のNFKC変換を会員の識別に使うと、全角メールを別会員へ結び付けてしまう。
+  email = String(email || "").trim().toLowerCase();
   if (!String(name || "").trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
   const value = { id, name: String(name).trim(), email, phone: String(phone || ""), source };
   return { ...value, version: hash(value) };
