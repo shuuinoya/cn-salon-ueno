@@ -388,6 +388,8 @@
       "Con questo acquisto sono state ripristinate {n} sedute non usate di un carnet scaduto (carnet «sedute ripristinate»).",
       "Mit diesem Kauf wurden {n} nicht genutzte Behandlung(en) einer abgelaufenen Karte wiederhergestellt (Karte „wiederhergestellte Behandlungen“)."],
     "有効期限": ["Valid until", "有效期至", "유효기간", "Valable jusqu’au", "Válido hasta", "Valido fino al", "Gültig bis"],
+    "回数券購入時の注意事項": ["Session ticket purchase information", "购买次卡注意事项", "회수권 구매 시 유의사항", "Informations sur l’achat de carnets", "Información sobre la compra de bonos", "Informazioni sull’acquisto dei carnet", "Hinweise zum Kauf von Mehrfachkarten"],
+    "回数券の有効期限は購入日から1年間です。": ["Session tickets are valid for one year from the date of purchase.", "次卡有效期为自购买日起一年。", "회수권의 유효기간은 구매일로부터 1년입니다.", "Les carnets sont valables un an à compter de la date d’achat.", "Los bonos tienen una validez de un año desde la fecha de compra.", "I carnet sono validi per un anno dalla data di acquisto.", "Mehrfachkarten sind ab dem Kaufdatum ein Jahr gültig."],
     "{uses}回分／有効期限は購入日から{valid}": [
       "{uses} sessions / valid for {valid} from the date of purchase", "{uses}次／有效期为自购买日起{valid}", "{uses}회분／유효기간은 구매일로부터 {valid}",
       "{uses} séances / valable {valid} à compter de la date d’achat", "{uses} sesiones / válido durante {valid} desde la fecha de compra",

@@ -568,12 +568,17 @@
     document.getElementById("fm-doc-modal")?.remove();
     const lang = curLang();
     const title = T(doc === "privacy" ? "プライバシーポリシー" : "利用規約");
+    // 購入時の注意事項は8言語で共通表示。既存の規約本文・訳文の読込には依存させない。
+    const purchaseNotice = doc === "terms" ? docHtml([
+      ["ar", T("回数券購入時の注意事項")],
+      ["p", T("回数券の有効期限は購入日から1年間です。")],
+    ]) : "";
     const wrap = document.createElement("div");
     wrap.id = "fm-doc-modal";
     wrap.innerHTML =
       '<div class="fm-doc-card" role="dialog" aria-modal="true" aria-label="' + esc2(title) + '">' +
         '<div class="fm-doc-head"><b>' + esc2(title) + '</b><button type="button" class="fm-doc-x" aria-label="' + esc2(T("閉じる")) + '">×</button></div>' +
-        '<div class="fm-doc-body">' +
+        '<div class="fm-doc-body">' + purchaseNotice +
           (lang === "ja" ? docHtml(doc === "privacy" ? PRIVACY_DOC : TERMS_DOC) : "<p>" + esc2(T("読み込んでいます…")) + "</p>") +
         "</div>" +
         '<div class="fm-doc-foot"><button type="button" class="fm-doc-close">' + esc2(T("閉じる")) + "</button></div>" +
@@ -581,10 +586,10 @@
     if (lang !== "ja") {
       loadLegal(lang).then((d) => {
         const body = wrap.querySelector(".fm-doc-body");
-        if (body) body.innerHTML = docHtml(doc === "privacy" ? d.privacy : d.terms);
+        if (body) body.innerHTML = purchaseNotice + docHtml(doc === "privacy" ? d.privacy : d.terms);
       }).catch(() => {
         const body = wrap.querySelector(".fm-doc-body");
-        if (body) body.innerHTML = "<p>" + esc2(T("読み込めませんでした。時間をおいてお試しください。")) + "</p>";
+        if (body) body.innerHTML = purchaseNotice + "<p>" + esc2(T("読み込めませんでした。時間をおいてお試しください。")) + "</p>";
       });
     }
     wrap.addEventListener("click", (e) => {
