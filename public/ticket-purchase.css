@@ -1,0 +1,25 @@
+dialog.cn-tp { width:440px; padding:0; border:1px solid #dfcba8; border-radius:12px; color:#34312d; background:#fffdfa; font:14px/1.6 "Noto Sans JP",sans-serif; box-shadow:0 12px 44px #0003; }
+dialog.cn-tp::backdrop { background:#0006; }
+.cn-tp header,.cn-tp footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; }
+.cn-tp header { border-bottom:1px solid #e8ddcc; }
+.cn-tp h2 { font-size:17px; margin:0; }
+.cn-tp h3 { font-size:16px; margin:0 0 12px; }
+.cn-tp .cn-tp-body { padding:14px 18px; }
+.cn-tp button { font:inherit; border:1px solid #c5a15e; border-radius:6px; padding:8px 14px; min-height:40px; background:#fff; color:#80602b; cursor:pointer; }
+.cn-tp header button { border:0; font-size:21px; padding:0 6px; }
+.cn-tp button.cn-tp-primary { background:#a48043; color:#fff; font-weight:700; }
+.cn-tp button:disabled { opacity:.55; cursor:default; }
+.cn-tp input,.cn-tp select { display:block; width:100%; box-sizing:border-box; min-height:42px; padding:8px; border:1px solid #d5cabb; border-radius:5px; background:#fff; color:inherit; font:inherit; }
+.cn-tp label { display:block; margin-bottom:10px; }
+.cn-tp [data-search] { display:flex; align-items:end; gap:8px; margin-bottom:10px; }
+.cn-tp [data-search] label { flex:1; min-width:0; margin:0; }
+.cn-tp dl { margin:8px 0; }
+.cn-tp dl>div { display:grid; grid-template-columns:90px minmax(0,1fr); gap:8px; padding:7px 0; border-bottom:1px solid #efe7db; }
+.cn-tp dt { color:#746b5d; font-size:12px; }
+.cn-tp dd { margin:0; overflow-wrap:anywhere; white-space:pre-line; }
+.cn-tp .cn-tp-note { font-size:12px; color:#686056; margin:10px 0; }
+.cn-tp .cn-tp-status { font-size:13px; margin:8px 0 0; overflow-wrap:anywhere; }
+.cn-tp .cn-tp-status:empty { display:none; }
+.cn-tp footer { position:sticky; bottom:0; justify-content:flex-end; border-top:1px solid #e8ddcc; background:#fffdfa; }
+.cn-tp [hidden] { display:none !important; }
+@media(max-width:480px) { .cn-tp input,.cn-tp select {font-size:16px;} .cn-tp button {min-height:44px;} }

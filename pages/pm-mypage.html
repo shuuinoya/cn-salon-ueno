@@ -516,37 +516,12 @@
     const buyId = e.target.closest("[data-buy]")?.dataset.buy;
     if (buyId) {
       if (!member) { if (window.CNMember) window.CNMember.open(); return; }
-      const pl = ticketPlans.find((p) => p.id === buyId);
-      if (!window.confirm(pl
-        ? tr("{plan}（{uses}回分・{price}）を購入します。よろしいですか？\nお支払いは店頭にて承ります。", { plan: plan(pl.name), uses: pl.uses, price: price(pl.price) })
-        : tr("この回数券を購入します。よろしいですか？\nお支払いは店頭にて承ります。"))) return;
-      // ログイン中は会員情報のメールアドレスで購入（入力不要）。お名前が未登録のときだけ確認する
-      let nm = member.name || "";
-      if (!nm) { nm = window.prompt(tr("お名前を入力してください。"), "") || ""; if (!nm.trim()) return; }
-      // 購入キー：通信の再試行・二重押しでも、同じ購入として1回だけ処理される（サーバー側で判定）
-      const requestKey = "tp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-      try {
-        const r = await fetch("/api/tickets/purchase", { method: "POST", credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId: buyId, name: nm.trim(), requestKey, language: pageLang }) });
-        const j = await r.json();
-        if (!r.ok || !j.ok) {
-          if (j.error === "memberOnly") {
-            window.alert(tr("回数券のご購入にはログインが必要です。"));
-            return;
-          }
-          throw new Error(j.error || "purchase");
-        }
+      if (!window.CNTicketPurchase) { window.alert(tr("読み込めませんでした。時間をおいてお試しください。")); return; }
+      window.CNTicketPurchase.open({ planId: buyId, onSaved: async j => {
         tkSave([...tkStore(), { id: j.ticket.id, token: j.ticket.token },
           ...(j.revival ? [{ id: j.revival.ticket.id, token: j.revival.ticket.token }] : [])]);
-        window.alert(tr("回数券を購入しました。お支払いは店頭にて承ります。\n残り回数：{n}回", { n: j.ticket.uses_left }) +
-          (j.revival ? tr("\n\n以前ご購入の回数券で有効期限が切れていた未使用分 {n}回を復活しました。\n（「{plan}」・有効期限 {date}）", { n: j.revival.total, plan: plan(j.revival.ticket.plan_name), date: dateLabel(j.revival.ticket.expires_label) }) : ""));
-      } catch {
-        window.alert(tr("購入できませんでした。入力内容をご確認ください。"));
-        return;
-      }
-      await loadTickets();
-      render();
+        await loadAll(); render();
+      } });
       return;
     }
     const id = e.target.closest("[data-cancel]")?.dataset.cancel;

@@ -441,6 +441,9 @@ function sendFile(res, file, status, type, head, url, req) {
         text = text
           .split('href="/pm-layout.css"').join('href="/pm-layout.css?v=' + PM_VER + '"')
           .split('src="/pm-layout.js"').join('src="/pm-layout.js?v=' + PM_VER + '"');
+        if (/pm-mypage\.html$/.test(file) || text.includes('src="/pm-layout.js')) {
+          text = text.replace("</head>", '<link rel="stylesheet" href="/ticket-purchase.css?v=' + fileVer("ticket-purchase.css") + '"/><script src="/ticket-purchase.js?v=' + fileVer("ticket-purchase.js") + '" defer></script></head>');
+        }
         // 小窓の中央配置・背景固定・外側タップは全ページ共通の操作ルール。
         text = text.replace("</head>", '<link rel="stylesheet" href="/popup-behavior.css?v=' + fileVer("popup-behavior.css") + '"/><script src="/popup-behavior.js?v=' + fileVer("popup-behavior.js") + '" defer></script></head>');
         // このページが使う部品の先読みの指定（初めて開くとき、部品の読み込みが順番待ちにならない）

@@ -2507,7 +2507,7 @@
       '<details class="pm-tk-section"><summary>有効期限前のリマインドメール</summary>' +
       '<div class="pm-tk-remind">読み込み中…</div></details>' +
       '</div><div id="pm-tk-owned-panel" role="tabpanel" aria-labelledby="pm-tk-owned-tab">' +
-      '<div class="pm-tk-toolbar"><label>お客様・回数券を探す<input type="search" class="pm-tk-search" data-ui-only placeholder="お名前・メール・電話・券名" aria-label="お客様・回数券を探す"></label><span class="pm-tk-count" aria-live="polite"></span></div>' +
+      '<div class="pm-tk-toolbar"><button type="button" class="pm-red" id="pm-tk-purchase">回数券の購入登録</button><label>お客様・回数券を探す<input type="search" class="pm-tk-search" data-ui-only placeholder="お名前・メール・電話・券名" aria-label="お客様・回数券を探す"></label><span class="pm-tk-count" aria-live="polite"></span></div>' +
       '<div class="pm-tk-filters"><label>回数券<select class="pm-tk-plan-filter" data-ui-only><option value="">すべての回数券</option></select></label><label>対象メニュー<select class="pm-tk-menu-filter" data-ui-only><option value="">すべてのメニュー</option></select></label><label>状態<select class="pm-tk-status-filter" data-ui-only><option value="">すべて</option><option>有効</option><option>使い切り</option><option>期限切れ</option></select></label><button type="button" class="pm-tk-filter-clear">絞り込みを解除</button></div>' +
       '<div class="pm-tk-filter-context" hidden><span></span><button type="button" class="pm-tk-filter-settings">この回数券の設定</button></div>' +
       '<div class="pm-tk-list">読み込み中…</div><p class="pm-tk-no-match" hidden>該当する回数券がありません。</p></div>' +
@@ -2808,6 +2808,14 @@
         wrap.querySelectorAll("button,input,textarea,select").forEach(el => { el.dataset.tkWasDisabled = el.disabled ? "1" : "0"; el.disabled = true; });
       }
       try {
+      if (e.target.id === 'pm-tk-purchase') {
+        if (!window.CNTicketPurchase) { window.alert('購入画面を読み込めませんでした。画面を開き直してください。'); return; }
+        window.CNTicketPurchase.open({ admin:true, planId:selectedPlan, onSaved:async result => {
+          selectedPlan = result.ticket.plan_id || ''; wrap.querySelector('.pm-tk-search').value = '';
+          wrap.querySelector('.pm-tk-menu-filter').value = ''; wrap.querySelector('.pm-tk-status-filter').value = '';
+          await loadTickets();
+        } }); return;
+      }
       const tab = e.target.closest('[data-ticket-tab]'); if (tab) { showTicketTab(tab.dataset.ticketTab); return; }
       if (e.target.classList.contains('tk-holders')) {
         selectedPlan = e.target.dataset.planId;

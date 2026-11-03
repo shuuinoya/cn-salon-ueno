@@ -2383,7 +2383,7 @@ function applyMailTemplate(m, atSend) {
 // お客様向けのプラン情報（対象メニューの名前つき）
 function planPublicJson(p2) {
   const scope = Array.isArray(p2.menu_scope) && p2.menu_scope.length ? p2.menu_scope : "all";
-  return { id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses, menu_scope: scope,
+  return { purchase_version: ticketPurchase.planVersion(p2), id: p2.id, name: p2.name, description: p2.description, price: p2.price, uses: p2.uses, menu_scope: scope,
     menu_names: scope === "all" ? [] : scope.map((id) => getCourse(id)?.name).filter(Boolean),
     valid_months: planMonths(p2), valid_label: validLabel(planMonths(p2)),
     regular_price: p2.regular_price > p2.price ? p2.regular_price : 0, show_banner: p2.show_banner !== false, sort: p2.sort || 0 };
@@ -3692,6 +3692,87 @@ function reportStats(date) {
   };
 }
 
+// 予約サイトと管理画面は、同じ購入・復活・二重送信防止の処理を使用する。
+const ticketPurchase = require("./ticket-purchase");
+function purchaseTicket(req, b, adminBuyer = null, actor = null) {
+  const plan = state.ticketPlans.get(String(b.planId || ""));
+  // ログイン中の会員は、会員情報のメールアドレス・お名前で購入する（入力不要）
+  const member = adminBuyer ? state.members.get(adminBuyer.email) || null : memberOf(req);
+  const name = String(b.name || (member ? member.name : "") || "").trim().slice(0, 120);
+  const email = member ? member.email : String(b.email || "").trim().toLowerCase().slice(0, 254);
+  if (!name || !email.includes("@")) throw err(400, "invalid");
+  rejectTestData({ name, email }); // 本番に試しの回数券購入を入れさせない
+  // 会員のみ購入可（ログイン中の会員、または予約実績のあるメールアドレス）。
+  // 画面の表示制御だけに頼らず、サーバー側で必ず確認する
+  if (!adminBuyer && !member && !isRepeatEmail(email)) throw err(403, "memberOnly");
+  // 多重送信防止：同じ購入キーは同じ結果を返す（再読み込み・再送信・APIの再実行で二重に購入・復活しない）
+  if (b.requestKey !== undefined && (typeof b.requestKey !== "string" || b.requestKey.length > 100)) throw err(400, "invalid");
+  const rk = b.requestKey || "";
+  const fingerprint = rk ? (adminBuyer ? bookingRequestFingerprint({ planId:b.planId, requestKey:rk,
+    customerId:b.customerId, expectedCustomer:b.expectedCustomer, expectedPlan:b.expectedPlan, actor:actor.user, channel:"admin" }, null)
+    : bookingRequestFingerprint(b, member)) : null;
+  if (rk && state.ticketPurchaseKeys.has(rk)) {
+    const prev = state.ticketPurchaseKeys.get(rk);
+    const pt = state.tickets.get(prev.ticketId);
+    if (!pt || prev.email !== email || !prev.fingerprint || prev.fingerprint !== fingerprint) throw err(409, "requestKeyUsed");
+    const rv = pt.revival && pt.revival.ticket_id ? state.tickets.get(pt.revival.ticket_id) : null;
+    return { ok: true, repeated: true, ticket: { ...ticketPublicJson(pt), token: pt.token },
+      revival: rv ? { total: pt.revival.total, ticket: { ...ticketPublicJson(rv), token: rv.token } } : null };
+  }
+  // 完了済みの再送は、後から販売を停止・削除しても元の購入結果を返す。
+  if (!plan || plan.active !== 1) throw err(409, "planChanged");
+  if (b.expectedPlan !== undefined && b.expectedPlan !== ticketPurchase.planVersion(plan)) throw err(409, "planChanged");
+  if (adminBuyer && b.expectedCustomer !== adminBuyer.version) throw err(409, "customerChanged");
+  const serialBefore = state.ticketSerial;
+  state.ticketSerial++;
+  const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
+  const ttoken = crypto.randomBytes(16).toString("hex"); // 回数券の合言葉（推測できない乱数）
+  const now = Date.now();
+  const t = {
+    id: tid, token: ttoken, plan_id: plan.id, plan_name: plan.name,
+    price: plan.price, uses_total: plan.uses, uses_left: plan.uses,
+    buyer_name: name, buyer_email: email, buyer_phone: String(b.phone || member?.phone || "").slice(0, 40),
+    purchased_at: new Date(now).toISOString(),
+    expires_at: ticketExpiryMs(now, planMonths(plan)), // 購入日から○か月（プランの設定。日本時間・自動確定して保存）
+    valid_months: planMonths(plan),
+    // 購入時点のプランの利用条件・復活条件を券に記録（後でプランが変更・削除されても判定できるように）
+    menu_scope: plan.menu_scope ?? "all", revive_group: plan.revive_group ?? "",
+    remind_sent: false, remind_log: [],
+    history: [{ at: new Date(now).toISOString(), type: "purchase", delta: plan.uses, left_after: plan.uses, ...(actor ? { by: actor.user, note: "管理画面から購入登録" } : {}) }],
+    // 購入したときの予約サイトの言語（お客様の言語でメールを送る設定のときに使う）
+    language: langNorm(b.language) || (member && member.language) || "",
+  };
+  if (member && langNorm(b.language)) member.language = langNorm(b.language);
+  state.tickets.set(tid, t);
+  let revival = null;
+  try {
+    if (member) {
+      memberAttachTicket(member, t); // 会員の券として記録（マイページ・予約時の選択に出る）
+      // 会員の購入：期限切れの未使用分を復活（同じ組・同じ対象メニューのものだけ）
+      revival = reviveForPurchase(t);
+    }
+  } catch (e2) {
+    // 復活の途中で失敗した → 復活の変更は reviveForPurchase 内で戻し済み。購入記録も取り消す
+    state.tickets.delete(tid);
+    if (member) member.tickets = member.tickets.filter((x) => x !== tid);
+    state.ticketSerial = serialBefore;
+    console.log("（警告）回数券の購入・復活処理に失敗したため取り消しました: " + e2.message);
+    throw err(500, "purchaseFailed");
+  }
+  if (rk) {
+    state.ticketPurchaseKeys.set(rk, { ticketId: tid, email, fingerprint, at: now });
+  }
+  // 購入メール（既存メールと同じ書式・実送信はallowToのみ）。
+  // 本文は送信直前に最新の回数券データで作る（ticketPurchase テンプレート）
+  queueMail("customer", "ticket", email,
+    `${MAIL_STORE} 回数券ご購入のご案内`, "", now, null,
+    { name: "ticketPurchase", ticketId: tid });
+  deliverDueMails();
+  const rv = revival && revival.ticket_id ? state.tickets.get(revival.ticket_id) : null;
+  return { ok: true, ticket: { ...ticketPublicJson(t), token: ttoken },
+    revival: rv ? { total: revival.total, ticket: { ...ticketPublicJson(rv), token: rv.token } } : null };
+}
+
 // server.js から呼ばれる入口。処理した場合は true を返す。
 function ledgerContext() {
   return { err, validDay, validSpan, todayJst, addDays, minToMs, msToMin, staffInfoMissing, staffBookingMissing, staffReady, bookingMismatch, courseNameOf,
@@ -3810,6 +3891,7 @@ function handleDemoApi(req, res, url) {
     if (P.startsWith("/api/demo/") || P.startsWith("/api/partner/")) {
       if (P === "/api/demo/settings" && isGet) need = null;               // 未ログインには freeMessage のみ返す（下で制限）
       else if ((P === "/api/demo/course-photo" || P === "/api/demo/staff-photo") && isGet) need = null; // 公開画像
+      else if (P === "/api/demo/ticket-purchase") need = "manager";
       else if (P === "/api/demo/accounts") need = "admin";                // アカウント管理は管理者のみ
       else if (P === "/api/demo/mail-relay") need = "admin";              // メール送信設定は管理者のみ（全メールの送り先になるため）
       else if (P === "/api/demo/mails" && !isGet) need = "manager";
@@ -4702,82 +4784,9 @@ function handleDemoApi(req, res, url) {
     req.on("end", () => {
       try {
         const b = JSON.parse(raw || "{}");
-        const plan = state.ticketPlans.get(String(b.planId || ""));
-        // ログイン中の会員は、会員情報のメールアドレス・お名前で購入する（入力不要）
-        const member = memberOf(req);
-        const name = String(b.name || (member ? member.name : "") || "").trim().slice(0, 120);
-        const email = member ? member.email : String(b.email || "").trim().toLowerCase().slice(0, 254);
-        if (!name || !email.includes("@")) throw err(400, "invalid");
-        rejectTestData({ name, email }); // 本番に試しの回数券購入を入れさせない
-        // 会員のみ購入可（ログイン中の会員、または予約実績のあるメールアドレス）。
-        // 画面の表示制御だけに頼らず、サーバー側で必ず確認する
-        if (!member && !isRepeatEmail(email)) throw err(403, "memberOnly");
-        // 多重送信防止：同じ購入キーは同じ結果を返す（再読み込み・再送信・APIの再実行で二重に購入・復活しない）
-        if (b.requestKey !== undefined && (typeof b.requestKey !== "string" || b.requestKey.length > 100)) throw err(400, "invalid");
-        const rk = b.requestKey || "";
-        const fingerprint = rk ? bookingRequestFingerprint(b, member) : null;
-        if (rk && state.ticketPurchaseKeys.has(rk)) {
-          const prev = state.ticketPurchaseKeys.get(rk);
-          const pt = state.tickets.get(prev.ticketId);
-          if (!pt || prev.email !== email || !prev.fingerprint || prev.fingerprint !== fingerprint) throw err(409, "requestKeyUsed");
-          const rv = pt.revival && pt.revival.ticket_id ? state.tickets.get(pt.revival.ticket_id) : null;
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, repeated: true, ticket: { ...ticketPublicJson(pt), token: pt.token },
-            revival: rv ? { total: pt.revival.total, ticket: { ...ticketPublicJson(rv), token: rv.token } } : null }));
-          return;
-        }
-        // 完了済みの再送は、後から販売を停止・削除しても元の購入結果を返す。
-        if (!plan || plan.active !== 1) throw err(400, "invalid");
-        const serialBefore = state.ticketSerial;
-        state.ticketSerial++;
-        const tid = "tk-" + String(state.ticketSerial).padStart(5, "0");
-        const ttoken = crypto.randomBytes(16).toString("hex"); // 回数券の合言葉（推測できない乱数）
-        const now = Date.now();
-        const t = {
-          id: tid, token: ttoken, plan_id: plan.id, plan_name: plan.name,
-          price: plan.price, uses_total: plan.uses, uses_left: plan.uses,
-          buyer_name: name, buyer_email: email, buyer_phone: String(b.phone || "").slice(0, 40),
-          purchased_at: new Date(now).toISOString(),
-          expires_at: ticketExpiryMs(now, planMonths(plan)), // 購入日から○か月（プランの設定。日本時間・自動確定して保存）
-          valid_months: planMonths(plan),
-          // 購入時点のプランの利用条件・復活条件を券に記録（後でプランが変更・削除されても判定できるように）
-          menu_scope: plan.menu_scope ?? "all", revive_group: plan.revive_group ?? "",
-          remind_sent: false, remind_log: [],
-          history: [{ at: new Date(now).toISOString(), type: "purchase", delta: plan.uses, left_after: plan.uses }],
-          // 購入したときの予約サイトの言語（お客様の言語でメールを送る設定のときに使う）
-          language: langNorm(b.language) || (member && member.language) || "",
-        };
-        if (member && langNorm(b.language)) member.language = langNorm(b.language);
-        state.tickets.set(tid, t);
-        let revival = null;
-        try {
-          if (member) {
-            memberAttachTicket(member, t); // 会員の券として記録（マイページ・予約時の選択に出る）
-            // 会員の購入：期限切れの未使用分を復活（同じ組・同じ対象メニューのものだけ）
-            revival = reviveForPurchase(t);
-          }
-        } catch (e2) {
-          // 復活の途中で失敗した → 復活の変更は reviveForPurchase 内で戻し済み。購入記録も取り消す
-          state.tickets.delete(tid);
-          if (member) member.tickets = member.tickets.filter((x) => x !== tid);
-          state.ticketSerial = serialBefore;
-          console.log("（警告）回数券の購入・復活処理に失敗したため取り消しました: " + e2.message);
-          throw err(500, "purchaseFailed");
-        }
-        if (rk) {
-          state.ticketPurchaseKeys.set(rk, { ticketId: tid, email, fingerprint, at: now });
-          if (state.ticketPurchaseKeys.size > 3000) state.ticketPurchaseKeys.delete(state.ticketPurchaseKeys.keys().next().value);
-        }
-        // 購入メール（既存メールと同じ書式・実送信はallowToのみ）。
-        // 本文は送信直前に最新の回数券データで作る（ticketPurchase テンプレート）
-        queueMail("customer", "ticket", email,
-          `${MAIL_STORE} 回数券ご購入のご案内`, "", now, null,
-          { name: "ticketPurchase", ticketId: tid });
-        deliverDueMails();
+        const result = purchaseTicket(req, b);
         res.writeHead(200, { "Content-Type": "application/json" });
-        const rv = revival && revival.ticket_id ? state.tickets.get(revival.ticket_id) : null;
-        res.end(JSON.stringify({ ok: true, ticket: { ...ticketPublicJson(t), token: ttoken },
-          revival: rv ? { total: revival.total, ticket: { ...ticketPublicJson(rv), token: rv.token } } : null }));
+        res.end(JSON.stringify(result));
       } catch (e) {
         res.writeHead(e.status || 500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: e.status ? e.message : "unavailable" }));
@@ -5004,6 +5013,29 @@ function handleDemoApi(req, res, url) {
       res.end(JSON.stringify({ ok: true, member: memberPublic(m) }));
     });
     return true;
+  }
+
+  // 管理者・マネージャーが既存のお客様を選んで購入登録。顧客情報を自由入力で上書きしない。
+  if (url.pathname === "/api/demo/ticket-purchase") {
+    if (req.method === "GET" || req.method === "HEAD") {
+      const result = { actor: sessionAccount(req).user, plans: sortedPlans().filter(p => p.active === 1).map(planPublicJson),
+        customers: ticketPurchase.customers(state, url.searchParams.get("q") || "") };
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(result)); return true;
+    }
+    if (req.method === "POST") {
+      readJson(req, res, 100000, b => {
+        if (!/^[\w-]{10,100}$/.test(b.requestKey || "") || !b.expectedPlan || !b.expectedCustomer) throw err(400, "invalid");
+        const buyer = ticketPurchase.customer(state, b.customerId);
+        if (!buyer) throw err(409, "customerChanged");
+        const result = purchaseTicket(req, { planId: b.planId, requestKey: b.requestKey, expectedPlan: b.expectedPlan,
+          expectedCustomer: b.expectedCustomer, customerId: buyer.id, name: buyer.name, email: buyer.email, phone: buyer.phone }, buyer, sessionAccount(req));
+        delete result.ticket.token;
+        if (result.revival) delete result.revival.ticket.token;
+        res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(result));
+      }); return true;
+    }
+    res.writeHead(405); res.end(); return true;
   }
 
   // ---- 回数券：管理画面向け ----
