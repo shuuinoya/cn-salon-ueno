@@ -50,7 +50,7 @@
   }
   function setMessage(app, message, error) {
     const node = app.host.querySelector('.so-message');
-    node.textContent = message; node.className = 'so-message' + (error ? ' so-error' : '');
+    node.textContent = message; node.className = 'so-message' + (error ? ' so-error' : app.cards && app.data?.canManage ? ' so-quiet' : '');
     node.setAttribute('role', error ? 'alert' : 'status');
   }
   function controls(app) {
@@ -59,13 +59,13 @@
     });
     app.host.setAttribute('aria-busy', String(app.busy));
     const save = app.host.querySelector('[data-so=save]');
-    if (save) save.textContent = app.busy && app.pending ? '保存中…' : app.unknown ? '同じ内容で保存結果を確認' : 'この順番で保存';
+    if (save) save.textContent = app.busy && app.pending ? '保存中…' : '内容を保存';
   }
   function render(app) {
     const data = app.data;
     app.host.innerHTML = '<p class="so-help">予約サイトには選んだ日の勤務者を掲載します。並べ替えはその日だけ適用し、翌営業日はシフト順に戻ります。台帳や月間シフトの順番は変わりません。</p>' +
       '<div class="so-toolbar"><p class="so-message" role="status"></p>' +
-      '<div class="so-actions"><button type="button" data-so="save" class="staff-primary">この順番で保存</button><button type="button" data-so="reload">最新の情報を読み直す</button><span>' + esc(data.date) + ' のみ ／ 掲載 ' + data.staff.filter(s => s.listed && s.working).length + '人 ／ 登録 ' + data.staff.length + '人</span></div></div>' +
+      '<div class="so-actions"><button type="button" data-so="save" class="staff-primary">内容を保存</button><button type="button" data-so="reload">やり直し</button>' + (app.cards ? '' : '<span>' + esc(data.date) + ' のみ ／ 掲載 ' + data.staff.filter(s => s.listed && s.working).length + '人 ／ 登録 ' + data.staff.length + '人</span>') + '</div></div>' +
       '<div class="so-scroll"><table class="so-table"><thead><tr><th>No.</th><th>写真</th><th>スタッフ名</th><th>プロフィール</th><th>公開状態</th><th>編集</th></tr></thead><tbody>' + data.staff.map(s => '<tr data-staff-id="' + esc(s.id) + '"><td><input type="number" min="1" max="999999" step="1" inputmode="numeric" required aria-label="' + esc(s.name) + 'の掲載順位 No." data-order-id="' + esc(s.id) + '" value="' + esc(s.listingOrder) + '"></td><td>' + (s.photo ? '<img src="' + esc(s.photo) + '" alt="" width="48" height="64" loading="lazy">' : '<span class="so-muted">写真なし</span>') + '</td><td><b>' + esc(s.name) + '</b>' + (s.registeredName !== s.name ? '<small>' + esc(s.registeredName) + '</small>' : '') + '<small>ID: ' + esc(s.id.slice(0, 8)) + '</small></td><td><p class="so-profile">' + esc(s.message || '紹介文なし') + '</p></td><td><b>' + (s.listed ? s.working ? '掲載中' : '勤務なし' : '非掲載') + '</b><small>' + esc(s.listed ? '' : (s.reasons || []).join(' / ')) + '</small></td><td><button type="button" data-so="edit" data-id="' + esc(s.id) + '" aria-label="' + esc(s.name) + 'の詳細編集">詳細編集</button></td></tr>').join('') + '</tbody></table></div>' +
       '<div class="so-discard" hidden><p>入力中の順位を破棄して、最新の情報を読み直します。保存結果が分からない場合も、保存済みの順位をここで確認できます。</p><button type="button" data-so="discard">読み直す</button><button type="button" data-so="keep">入力に戻る</button></div>';
     if (app.cards) renderCards(app);
@@ -114,14 +114,14 @@
       window.dispatchEvent(new CustomEvent('cn:staff-ordering-saved'));
     } catch {
       app.unknown = true;
-      setMessage(app, '保存結果を確認できません。同じ内容で保存結果を確認するか、最新の情報を読み直してください。', true);
+      setMessage(app, '保存結果を確認できません。「内容を保存」で再確認するか、「やり直し」で最新の情報を読み込んでください。', true);
     } finally { clearTimeout(timer); app.busy = false; controls(app); }
     if (success) {
       const refreshed = await load(app);
       setMessage(app, refreshed
         ? app.data.date !== payload.date ? payload.date + 'の掲載順位を保存しました。現在の営業日の掲載順を表示しています。'
         : app.data.version === savedVersion ? '掲載順位を保存しました。この日だけ予約サイトに反映されます。' : '掲載順位の保存後に別の変更がありました。最新の保存済み順位を表示しています。'
-        : '掲載順位は保存されましたが、最新の表示を取得できませんでした。「最新の情報を読み直す」で確認してください。', !refreshed);
+        : '掲載順位は保存されましたが、最新の表示を取得できませんでした。「やり直し」で確認してください。', !refreshed || app.data.date !== payload.date || app.data.version !== savedVersion);
       window.__pmKickSync?.();
     }
   }
@@ -174,7 +174,7 @@
   }
   function renumber(app) {
     [...app.host.querySelectorAll('.so-card')].forEach((card, i) => { card.querySelector('[data-order-id]').value = i + 1; card.querySelector('.so-rank').textContent = i + 1; });
-    app.dirty = true; controls(app); setMessage(app, '未保存の変更があります。「この順番で保存」で予約サイトに反映します。', false);
+    app.dirty = true; controls(app); setMessage(app, '未保存の変更があります。「内容を保存」で予約サイトに反映します。', false);
   }
   const cardAnimations = new WeakMap();
   const quietMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
