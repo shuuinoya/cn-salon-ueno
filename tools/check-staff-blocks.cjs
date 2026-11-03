@@ -22,12 +22,12 @@ const encode = v => JSON.stringify(v, (_, x) => x instanceof Map ? { __pm_map__:
   await mod.exports.ready;
   const a = mod.exports.audit, state = a.state, course = '364323-4822701', realNow = Date.now;
   const date = a.addDays(a.todayJst(), 1), next = a.addDays(date, 1), actor = { user: 'test-manager', role: 'manager' };
-  const publicIds = new Set(a.publicStaffList().filter(s => s.courses.includes(course) && !a.staffInfoMissing(state.staff.find(x=>x.id===s.id)).length).map(s => s.id));
-  const ready = state.staff.filter(s => publicIds.has(s.id)).slice(0, 2);
-  const bare = state.staff.find(s => a.staffInfoMissing(s).length > 0);
-  assert.equal(ready.length, 2); assert(bare);
-  const original = [ready[0], bare, ready[1]], [A, B, C] = original.map(s => s.id);
-  const originalPhotos = new Map(ready.map(s => [s.id, state.photos.get(s.id)]));
+  // 当日の出勤人数や紹介文の入力状況にかかわらず、同じ条件を最後まで検査する。
+  const original = [1, 2, 3].map((n, i) => ({ id: 'aaaaaaaa-0000-4000-8000-' + String(n).padStart(12, '0'),
+    name: 'テスト担当' + i, active: 1, gender: 'male', courses: JSON.stringify([course]), sort_order: n,
+    profile: JSON.stringify({ nickname: 'テスト表示' + i, message: i === 1 ? '' : 'テスト紹介文', personalNomination: true, nominationFee: 500 }) }));
+  const [A, B, C] = original.map(s => s.id);
+  const originalPhotos = new Map([A, C].map(id => [id, 'data:image/jpeg;base64,/9j/']));
   const results = [];
   function reset() {
     Date.now = realNow;

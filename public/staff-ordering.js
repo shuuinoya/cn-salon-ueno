@@ -78,8 +78,9 @@
     app.busy = true; controls(app);
     if (!app.data) app.host.innerHTML = '<p class="so-message" role="status">読み込み中…</p>';
     const sequence = ++app.sequence;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch('/api/demo/staff-ordering', { cache: 'no-store' });
+      const response = await fetch('/api/demo/staff-ordering', { cache: 'no-store', signal: controller.signal });
       const data = await response.json();
       if (!response.ok || !Array.isArray(data.staff) || !data.version || !/^\d{4}-\d{2}-\d{2}$/.test(data.date || '')) throw Error(errors[data.error] || '掲載順位を読み込めませんでした。');
       if (!app.host.isConnected || sequence !== app.sequence) return;
@@ -87,8 +88,8 @@
       return true;
     } catch (error) {
       if (!app.data) app.host.innerHTML = '<p class="so-message" role="alert"></p><button type="button" data-so="reload">再読み込み</button>';
-      setMessage(app, error.message || '通信に失敗しました。再度読み込んでください。', true);
-    } finally { app.busy = false; controls(app); }
+      setMessage(app, controller.signal.aborted ? '読み込みに時間がかかっています。通信を確認して、もう一度読み込んでください。' : error.message || '通信に失敗しました。再度読み込んでください。', true);
+    } finally { clearTimeout(timer); app.busy = false; controls(app); }
   }
   async function save(app) {
     if (app.busy || app.dragging || !app.data?.canManage || !app.dirty) return;

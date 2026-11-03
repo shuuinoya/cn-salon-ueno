@@ -30,6 +30,33 @@ async function test(name, fn) { try { await fn(); passed++; } catch (e) { failur
   await test('失敗を保存成功と見せず入力を保持', async () => { const x = setup(); x.inputs[0].value = '8'; x.ctx.fetch = async () => response({ error: 'staffOrderingConflict' }, 409); await x.api.save(x.app); assert.equal(x.inputs[0].value, '8'); assert.equal(x.app.dirty, true); assert.equal(x.app.unknown, false); assert.match(x.message.textContent, /ほかの画面/); });
   for (const status of [500, 503, 408]) await test('結果不明時は同じキー・内容で安全に再送 ' + status, async () => { const x = setup(), sent = []; x.ctx.fetch = async (_, init) => { if (!init.method) return response({ ...x.app.data, version: 'v2' }); sent.push(init.body); return sent.length === 1 ? response({}, status) : response({ ok: true, version: 'v2' }); }; await x.api.save(x.app); assert.equal(x.app.unknown, true); assert.ok(x.inputs.every(i => i.disabled)); await x.api.save(x.app); assert.equal(sent[0], sent[1]); assert.equal(x.app.unknown, false); assert.equal(x.app.dirty, false); });
   await test('通信切断を結果不明として保持', async () => { const x = setup(); x.ctx.fetch = async () => { throw Error('offline'); }; await x.api.save(x.app); assert.equal(x.app.unknown, true); assert.match(x.message.textContent, /保存結果を確認できません/); });
+  for (const initial of [true, false]) await test((initial ? '初回' : '再') + '読込の通信が止まっても15秒で操作を戻し再読込できる', async () => {
+    const x = setup(); if (initial) x.app.data = null; x.app.dirty = false;
+    let timeout, timeoutMs, signal, cleared = false;
+    x.ctx.setTimeout = (fn, ms) => { timeout = fn; timeoutMs = ms; return 9; };
+    x.ctx.clearTimeout = id => { assert.equal(id, 9); cleared = true; };
+    x.ctx.fetch = (_, init) => new Promise((resolve, reject) => {
+      signal = init.signal; signal?.addEventListener('abort', () => reject(Error('aborted')), { once: true });
+    });
+    const pending = x.api.load(x.app);
+    assert.equal(x.app.busy, true); assert.equal(timeoutMs, 15000); assert(signal);
+    timeout(); await pending;
+    assert.equal(x.app.busy, false); assert.equal(x.reload.disabled, false); assert(cleared);
+    assert.match(x.message.textContent, /時間がかかっています/); assert.equal(await x.api.confirmLeave(x.app), true);
+    x.ctx.fetch = async () => response({ date: '2026-10-22', version: 'v2', canManage: true, staff: [] });
+    assert.equal(await x.api.load(x.app), true); assert.equal(x.app.data.version, 'v2'); assert.equal(x.app.busy, false);
+  });
+  await test('保存成功後の読み直しだけが止まっても未保存扱いに戻さず閉じられる', async () => {
+    const x = setup(), reading = defer(); let timeout;
+    x.ctx.setTimeout = fn => { timeout = fn; return 1; }; x.ctx.clearTimeout = () => {};
+    x.ctx.fetch = (_, init) => init.method ? Promise.resolve(response({ ok: true, version: 'v2' })) : new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }); reading.resolve();
+    });
+    const pending = x.api.save(x.app); await reading.promise; timeout(); await pending;
+    assert.equal(x.app.busy, false); assert.equal(x.app.dirty, false); assert.equal(x.app.unknown, false);
+    assert.equal(x.save.disabled, true); assert.equal(x.reload.disabled, false);
+    assert.match(x.message.textContent, /掲載順位は保存されましたが/); assert.equal(await x.api.confirmLeave(x.app), true);
+  });
   await test('再送成功の後に別端末で変わった順位は最新GETを表示', async () => { const x = setup(); x.app.unknown = true; x.app.pending = { date: x.app.data.date, version: 'v1', orders: x.api.orders(x.app), requestKey: 'replay' }; x.ctx.fetch = async (_, init) => init.method ? response({ ok: true, version: 'v2' }) : response({ ...x.app.data, version: 'v3', staff: x.app.data.staff.map(s => ({ ...s, listingOrder: s.listingOrder + 10 })) }); await x.api.save(x.app); assert.equal(x.app.data.version, 'v3'); assert.equal(x.app.data.staff[0].listingOrder, 11); assert.match(x.message.textContent, /別の変更/); });
   await test('一般スタッフは順位を保存できない', async () => { const x = setup(); x.app.data.canManage = false; x.api.controls(x.app); assert.ok(x.inputs.every(i => i.disabled)); await x.api.save(x.app); });
   await test('保存済みの再読込で順位はAPI値を利用', async () => { const x = setup(); x.ctx.fetch = async () => response({ ...x.app.data, version: 'v3', staff: [{ id: 'b', name: 'テストB', registeredName: 'テストB', listingOrder: 7, listed: false, reasons: ['非公開'] }] }); await x.api.load(x.app); assert.equal(x.app.data.staff[0].listingOrder, 7); assert.match(x.app.host.innerHTML, /value="7"/); assert.match(x.app.host.innerHTML, /非掲載/); assert.equal(x.app.dirty, false); });
