@@ -200,6 +200,12 @@
   function bindCards(app) {
     let drag = null, suppressClick = false;
     const host = app.host, dialog = host.closest('dialog'), lifetime = new AbortController();
+    // 中央配置の transform がある小窓では fixed の原点も小窓内になる。
+    // 画面座標をそのまま使わず、写しの実際の原点との差を引いて追従・着地をそろえる。
+    const previewPosition = (d, x, y) => {
+      const rect = d.preview.getBoundingClientRect();
+      return { x: x - rect.left + d.previewX, y: y - rect.top + d.previewY };
+    };
     const cleanup = (d, cancel) => {
       if (drag !== d) return;
       drag = null; cancelAnimationFrame(d.frame); d.settle?.cancel();
@@ -227,9 +233,10 @@
       if (d.settling) return;
       d.settling = true;
       const target = d.card.getBoundingClientRect();
+      const position = previewPosition(d, target.left, target.top);
       d.settle = d.preview.animate([
         { transform: d.preview.style.transform },
-        { transform: `translate3d(${target.left}px,${target.top}px,0)` }
+        { transform: `translate3d(${position.x}px,${position.y}px,0)` }
       ], { ...cardMotion, duration: 140, fill: 'forwards' });
       d.settle.finished.then(() => cleanup(d, false), () => {});
     };
@@ -267,7 +274,9 @@
       if (d.card.nextElementSibling !== before) moveCards(d.list, () => d.list.insertBefore(d.card, before), d.card);
       const x = Math.max(box.left + 2, Math.min(box.right - d.width - 2, d.lastX - d.grabX));
       const y = Math.max(box.top + 2, Math.min(box.bottom - d.height - 2, d.lastY - d.grabY));
-      d.preview.style.transform = `translate3d(${x}px,${y}px,0)`;
+      const position = previewPosition(d, x, y);
+      d.previewX = position.x; d.previewY = position.y;
+      d.preview.style.transform = `translate3d(${position.x}px,${position.y}px,0)`;
     };
     const tick = time => { draw(time); if (drag?.moved && !drag.settling) drag.frame = requestAnimationFrame(tick); };
     host.addEventListener('pointermove', e => {
@@ -279,7 +288,8 @@
         d.preview = d.card.cloneNode(true); d.preview.classList.add('so-drag-preview');
         d.preview.setAttribute('aria-hidden', 'true'); d.preview.inert = true;
         d.preview.querySelectorAll('input').forEach(input => input.remove());
-        Object.assign(d.preview.style, { width: d.width + 'px', height: d.height + 'px' });
+        d.previewX = 0; d.previewY = 0;
+        Object.assign(d.preview.style, { width: d.width + 'px', height: d.height + 'px', transform: 'translate3d(0,0,0)' });
         host.appendChild(d.preview); d.card.classList.add('so-drag-placeholder'); host.classList.add('so-sorting');
         controls(app); draw(performance.now(), false); d.frame = requestAnimationFrame(tick);
       }

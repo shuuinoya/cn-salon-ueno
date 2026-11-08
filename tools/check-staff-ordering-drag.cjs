@@ -2,14 +2,14 @@
 // 実際のドラッグ処理へポインター・時間・配置を渡す。外部通信や本番の変更はしない。
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../public/staff-ordering.js'),'utf8');
-function setup({quiet=false,manage=true,dirty=false}={}){
+function setup({quiet=false,manage=true,dirty=false,origin=[0,0]}={}){
  let seq=0,time=100,capture=null;const frames=new Map(),animations=[],events=new Map();
  const target=()=>({listeners:{},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);},emit(k,e={}){for(const fn of this.listeners[k]||[])fn(e);}});
  const cls=()=>{const s=new Set();return{add(...x){x.forEach(v=>s.add(v));},remove(...x){x.forEach(v=>s.delete(v));},contains:x=>s.has(x)};};
  const doc={...target(),hidden:false},win={...target(),matchMedia:()=>({matches:quiet})},dialog=target();
  const msg={setAttribute(){},textContent:''},save={matches:s=>s==='[data-so=save]'},host={...target(),isConnected:true,scrollTop:0,classList:cls(),previews:[],setAttribute(){},closest:()=>dialog,getBoundingClientRect:()=>({top:0,bottom:400,left:0,right:600,height:400}),setPointerCapture(id){capture=id;},hasPointerCapture:id=>id===capture,releasePointerCapture(){capture=null;},appendChild(el){this.previews.push(el);},querySelector:s=>s==='.so-message'?msg:save};
  const list={children:[],getBoundingClientRect:()=>({top:100-host.scrollTop}),insertBefore(card,before){const i=this.children.indexOf(card);if(i>=0)this.children.splice(i,1);this.children.splice(before?this.children.indexOf(before):this.children.length,0,card);},appendChild(card){this.insertBefore(card,null);}};
- function card(id,preview=false){const input={value:String(id+1),dataset:{orderId:String(id)},remove(){},matches:s=>s==='[data-order-id]'},rank={textContent:id+1};return{id,style:{},classList:cls(),parentNode:list,inert:false,setAttribute(){},get offsetTop(){return list.children.indexOf(this)*50;},offsetHeight:46,get nextElementSibling(){return list.children[list.children.indexOf(this)+1]||null;},getBoundingClientRect(){return{top:preview?100:100+this.offsetTop-host.scrollTop,left:10,width:580,height:46};},closest(s){return s==='button,input,a'?null:s.includes('so-card')?this:null;},querySelector:s=>s==='[data-order-id]'?input:rank,querySelectorAll:()=>[input],cloneNode(){return card(id,true);},remove(){host.previews=host.previews.filter(x=>x!==this);},animate(keyframes,options){let resolve;const finished=new Promise(r=>resolve=r),animation={finished,keyframes,options,cancel(){},resolve};animations.push(animation);return animation;}};}
+ function card(id,preview=false){const input={value:String(id+1),dataset:{orderId:String(id)},remove(){},matches:s=>s==='[data-order-id]'},rank={textContent:id+1};return{id,style:{},classList:cls(),parentNode:list,inert:false,setAttribute(){},get offsetTop(){return list.children.indexOf(this)*50;},offsetHeight:46,get nextElementSibling(){return list.children[list.children.indexOf(this)+1]||null;},getBoundingClientRect(){const xy=preview?(this.style.transform||'').match(/translate3d\(([-.\d]+)px,([-.\d]+)px,0\)/):null;return{top:preview?origin[1]+Number(xy?.[2]||0):100+this.offsetTop-host.scrollTop,left:preview?origin[0]+Number(xy?.[1]||0):10,width:580,height:46};},closest(s){return s==='button,input,a'?null:s.includes('so-card')?this:null;},querySelector:s=>s==='[data-order-id]'?input:rank,querySelectorAll:()=>[input],cloneNode(){return card(id,true);},remove(){host.previews=host.previews.filter(x=>x!==this);},animate(keyframes,options){let resolve;const finished=new Promise(r=>resolve=r),animation={finished,keyframes,options,cancel(){},resolve};animations.push(animation);return animation;}};}
  list.children=Array.from({length:8},(_,i)=>card(i));
  host.querySelectorAll=s=>s==='.so-card'?list.children:s==='[data-order-id]'?list.children.map(c=>c.querySelector(s)):[save];
  const app={host,dragging:false,data:{canManage:manage,staff:list.children.map(c=>({id:String(c.id)}))},dirty,busy:false,unknown:false};
@@ -20,13 +20,35 @@ function setup({quiet=false,manage=true,dirty=false}={}){
  const frame=(dt=16)=>{time+=dt;const f=[...frames.values()];frames.clear();f.forEach(fn=>fn(time));};
  const down=(extra={})=>emit('pointerdown',extra),move=(y,x=80)=>{emit('pointermove',{clientX:x,clientY:y});frame();};
  const order=()=>list.children.map(c=>c.id).join(','),flush=async()=>{animations.forEach(a=>a.resolve());await Promise.resolve();await Promise.resolve();};
- return{app,ctx,host,list,doc,win,dialog,msg,save,down,move,emit,frame,order,flush,animations,frames};
+ return{app,ctx,host,list,doc,win,dialog,msg,save,down,move,emit,frame,order,flush,animations,frames,origin};
 }
 let passed=0;const failures=[];async function test(name,run){try{await run();passed++;}catch(e){failures.push({name,error:e.stack});}}
 (async()=>{
  await test('クリックだけでは順位を変えない',()=>{const x=setup();x.down();x.emit('pointerup');assert.equal(x.order(),'0,1,2,3,4,5,6,7');assert.equal(x.app.dirty,false);assert.equal(x.host.previews.length,0);});
  await test('小さな手ぶれをドラッグにしない',()=>{const x=setup();x.down();x.move(124);assert.equal(x.host.previews.length,0);x.emit('pointerup',{clientY:124});assert.equal(x.app.dirty,false);});
  await test('写しは掴んだ位置のまま指に追従し周囲はアニメーションする',async()=>{const x=setup();x.down();x.move(230);assert.equal(x.host.previews[0].style.transform,'translate3d(10px,210px,0)');assert.equal(x.order(),'1,2,0,3,4,5,6,7');assert(x.animations.some(a=>a.keyframes[0].transform==='translateY(50px)'));x.emit('pointerup',{clientY:230});assert.equal(x.app.dragging,true);await x.flush();assert.equal(x.app.dragging,false);assert.equal(x.host.previews.length,0);assert.equal(x.app.dirty,true);assert.deepEqual(x.list.children.map(c=>Number(c.querySelector('[data-order-id]').value)),[1,2,3,4,5,6,7,8]);});
+ // 本物の中央固定ダイアログは transform によって fixed の原点が移る。
+ for(const origin of [[341,111],[20,150],[600,300],[-40,-20]])await test('中央小窓の原点 '+origin+' でも指と着地点が一致する',async()=>{
+  const x=setup({origin});x.down();x.move(230);
+  for(let i=0;i<15;i++)x.frame();
+  assert.equal(x.host.previews[0].getBoundingClientRect().left,10);
+  assert.equal(x.host.previews[0].getBoundingClientRect().top,210);
+  x.emit('pointerup',{clientY:230});
+  const settle=x.animations.find(a=>a.options.fill==='forwards');
+  assert.equal(settle.keyframes[1].transform,`translate3d(${10-origin[0]}px,${200-origin[1]}px,0)`);
+  await x.flush();assert.equal(x.app.dirty,true);assert.equal(x.host.previews.length,0);
+ });
+ await test('小窓内をスクロールして原点が変わっても写しは飛ばない',()=>{
+  const x=setup({origin:[341,111]});x.down();x.move(230);x.origin[1]-=80;x.frame();
+  assert.equal(x.host.previews[0].getBoundingClientRect().top,210);
+  x.move(120);assert.equal(x.host.previews[0].getBoundingClientRect().top,100);
+  x.app.cancelDrag();assert.equal(x.order(),'0,1,2,3,4,5,6,7');assert.equal(x.app.dirty,false);
+ });
+ await test('端の自動スクロール中もカードと指の位置を保つ',()=>{
+  const x=setup({origin:[341,111]});x.down();x.move(390);
+  for(let i=0;i<20;i++){x.frame();assert.equal(x.host.previews[0].getBoundingClientRect().top,352);}
+  assert(x.host.scrollTop>100);x.app.cancelDrag();assert.equal(x.host.previews.length,0);
+ });
  await test('逆方向へ戻しても震えず順序が保たれる',()=>{const x=setup();x.down();x.move(280);for(let i=0;i<30;i++)x.frame();assert.equal(x.order(),'1,2,3,0,4,5,6,7');x.move(120);assert.equal(x.order(),'0,1,2,3,4,5,6,7');x.app.cancelDrag();});
  for(const type of ['pointercancel','lostpointercapture','Escape','blur','resize','hidden','close'])await test(type+'で元の順序へ戻して写しを消す',()=>{const x=setup({dirty:true});x.down();x.move(280);if(type==='Escape')x.emit('keydown',{key:'Escape'});else if(type==='hidden'){x.doc.hidden=true;x.doc.emit('visibilitychange');}else if(type==='close')x.dialog.emit('close');else if(['blur','resize'].includes(type))x.win.emit(type);else x.emit(type);assert.equal(x.order(),'0,1,2,3,4,5,6,7');assert.equal(x.host.previews.length,0);assert.equal(x.app.dragging,false);assert.equal(x.app.dirty,true);assert.equal(x.frames.size,0);});
  await test('領域外で離した場合は取り消す',()=>{const x=setup();x.down();x.move(230);x.emit('pointerup',{clientX:700,clientY:230});assert.equal(x.order(),'0,1,2,3,4,5,6,7');assert.equal(x.app.dirty,false);});
