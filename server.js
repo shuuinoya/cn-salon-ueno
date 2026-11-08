@@ -260,7 +260,7 @@ function adminWarmList() {
   const f = path.join(ROOT, r.file);
   let m = 0;
   try { m = fs.statSync(f).mtimeMs; } catch { return []; }
-  const key = m + ":" + staticVer() + ":" + pmVer() + ":" + fileVer("ledger-operations.js") + ":" + fileVer("ledger-operations.css") + ":" + fileVer("customer-records.js") + ":" + fileVer("customer-records.css") + ":" + fileVer("booth-settings.js") + ":" + fileVer("booth-settings.css") + ":" + fileVer("booking-details-ui.js") + ":" + fileVer("booking-details-ui.css") + ":" + fileVer("staff-ordering.js") + ":" + fileVer("staff-ordering.css");
+  const key = m + ":" + staticVer() + ":" + pmVer() + ":" + fileVer("admin-header.css") + ":" + fileVer("ledger-operations.js") + ":" + fileVer("ledger-operations.css") + ":" + fileVer("customer-records.js") + ":" + fileVer("customer-records.css") + ":" + fileVer("booth-settings.js") + ":" + fileVer("booth-settings.css") + ":" + fileVer("booking-details-ui.js") + ":" + fileVer("booking-details-ui.css") + ":" + fileVer("staff-ordering.js") + ":" + fileVer("staff-ordering.css");
   if (adminWarm.m === key) return adminWarm.list;
   let list = [];
   try {
@@ -268,7 +268,7 @@ function adminWarmList() {
     const refs = new Set([...html.matchAll(/"\/(_next\/static\/(?:chunks|css)\/[^"]+)"/g)].map((x) => x[1]));
     for (const d of preloadsFor(html)) refs.add(d);
     list = [...refs].map((d) => pinStatic("/" + d));
-    list.push("/pm-layout.js?v=" + pmVer(), "/pm-layout.css?v=" + pmVer(), "/pm-motion.css?v=" + fileVer("pm-motion.css"));
+    list.push("/pm-layout.js?v=" + pmVer(), "/pm-layout.css?v=" + pmVer(), "/pm-motion.css?v=" + fileVer("pm-motion.css"), "/admin-header.css?v=" + fileVer("admin-header.css"));
     list.push("/ledger-operations.js?v=" + fileVer("ledger-operations.js"), "/ledger-operations.css?v=" + fileVer("ledger-operations.css"), "/customer-records.js?v=" + fileVer("customer-records.js"), "/customer-records.css?v=" + fileVer("customer-records.css"), "/booth-settings.js?v=" + fileVer("booth-settings.js"), "/booth-settings.css?v=" + fileVer("booth-settings.css"), "/booking-details-ui.js?v=" + fileVer("booking-details-ui.js"), "/booking-details-ui.css?v=" + fileVer("booking-details-ui.css"), "/staff-ordering.js?v=" + fileVer("staff-ordering.js"), "/staff-ordering.css?v=" + fileVer("staff-ordering.css"));
   } catch { list = []; }
   adminWarm = { m: key, list };
@@ -431,6 +431,14 @@ function sendFile(res, file, status, type, head, url, req) {
         // 管理画面の全ページに、操作アニメーション（pm-motion.css）を差し込む（書き換えたらすぐ届くよう版番号つき）
         if (brandFor(file, url) === ADMIN_BRAND) {
           text = text.replace("</head>", '<link rel="stylesheet" href="/pm-motion.css?v=' + fileVer("pm-motion.css") + '"/></head>');
+          if (!/pm-login\.html$/.test(file)) {
+            text = text.replace("</head>", '<link rel="stylesheet" href="/admin-header.css?v=' + fileVer("admin-header.css") + '"/></head>');
+            if (/pm-(?:mails|mail-setup|hotpepper|report|customer)\.html$/.test(file)) {
+              const header = fs.readFileSync(path.join(ROOT, "pages/admin-header.html"), "utf8");
+              text = text.replace(/<header\b[^>]*>([\s\S]*?)<\/header>/, (_, content) => header + '<div class="pm-page-heading">' + content + '</div>');
+              text = text.replace("</body>", '<script src="/admin-header.js?v=' + fileVer("admin-header.js") + '" defer></script></body>');
+            }
+          }
         }
         // 管理画面の上書きスクリプト・CSSにも版番号を付け、古いキャッシュが残らないようにする
         const PM_VER = pmVer();

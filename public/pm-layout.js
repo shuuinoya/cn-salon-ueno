@@ -891,6 +891,28 @@
 
     // 7) 以前ここで飾りの「未定」行を足していたが、今は実在スタッフになったため不要
     document.getElementById("pm-undecided")?.remove();
+    openRequestedAdminPanel();
+  }
+
+  // 別の管理ページの共通メニューから戻ってきた場合も、元のボタンで同じ画面を開く。
+  // URLには表示先だけを持ち、保存・削除などの操作は受け付けない。
+  function openRequestedAdminPanel() {
+    const url = new URL(location.href), panel = url.searchParams.get("panel");
+    if (!panel) return;
+    const ledgerViews = ["dashboard", "bookings", "checkout", "retail", "returns", "online", "templates", "patterns", "integrity"];
+    const labels = { month: "月間シフト入力", shop: "店舗情報", listing: "スタッフ掲載情報一覧", staff: "スタッフ情報", menus: "メニュー一覧", tickets: "回数券管理", booths: "ブース情報", accounts: "ユーザ情報（アカウント管理）", customers: "顧客情報 ▾", help: "ヘルプ ▾" };
+    let open;
+    if (ledgerViews.includes(panel)) {
+      if (!window.__pmOpenLedger) return;
+      open = () => window.__pmOpenLedger(panel);
+    } else if (labels[panel]) {
+      if (panel === "listing" && !window.__pmOpenStaffListing || panel === "booths" && !window.__pmOpenBooths) return;
+      const button = [...document.querySelectorAll('.ledger-nav button')].find(b => b.style.display !== "none" && b.textContent.trim().replace(/\s+/g, " ") === labels[panel]);
+      if (!button) return;
+      open = () => button.click();
+    } else return;
+    url.searchParams.delete("panel"); history.replaceState(history.state, "", url);
+    open();
   }
 
   // 予約詳細パネルを本物（PeakManager）と同じ構成に見せる。

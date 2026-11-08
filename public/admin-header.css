@@ -1,0 +1,94 @@
+/* 全管理ページで同じ二段ヘッダー。台帳・スタッフ画面の固有指定より優先する。 */
+html:has(.ledger-nav) { scrollbar-gutter: stable; }
+.ledger-nav.ledger-nav.ledger-nav {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 20px 36px 100px;
+  grid-template-rows: 36px auto;
+  align-items: center;
+  gap: 0;
+  width: 100%; min-width: 0; max-width: none;
+  height: auto; min-height: 76px;
+  margin: 0; padding: 4px 8px;
+  position: sticky; top: 0; z-index: 12;
+  background: #926141; color: #fff;
+  font: 12px/20px Arial, "Noto Sans JP", sans-serif;
+  box-shadow: 0 1px 2px #0002;
+}
+.ledger-nav.ledger-nav > .ledger-logo {
+  grid-column: 1; grid-row: 1; order: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin: 0; padding: 0;
+  border: 0; background: none; font-size: 0; color: transparent;
+}
+.ledger-nav.ledger-nav > .ledger-logo::before {
+  content: ""; display: block; width: 28px; height: 28px; flex: 0 0 28px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.ledger-nav.ledger-nav > .ledger-brand {
+  grid-column: 5; grid-row: 1; order: 0;
+  box-sizing: border-box; width: 100px; max-width: 100px;
+  margin: 0; padding: 4px 0; border: 0; background: none;
+  color: #fff; font: 700 12px/20px Arial, "Noto Sans JP", sans-serif;
+  text-align: right; white-space: nowrap; cursor: pointer;
+}
+.ledger-nav.ledger-nav > .ledger-brand::before { content: "👤 "; font-size: 12px; }
+.ledger-nav.ledger-nav > .ledger-brand::after { content: " ▾"; font-size: 10px; }
+.ledger-nav.ledger-nav > .pm-warn { grid-column: 3; grid-row: 1; margin: 0; text-align: center; }
+.ledger-nav.ledger-nav > .pm-alert { grid-column: 4; grid-row: 1; margin: 0; padding: 2px 6px; text-align: center; }
+.ledger-nav.ledger-nav > nav {
+  grid-column: 1 / -1; grid-row: 2; order: 0;
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
+  width: 100%; min-width: 0; margin: 0; padding: 0; gap: 0;
+  align-items: stretch; overflow: visible;
+}
+.ledger-nav.ledger-nav > nav > button,
+.ledger-nav.ledger-nav > nav > a,
+.ledger-nav.ledger-nav > nav > .ledger-nav-menu > summary {
+  box-sizing: border-box; display: flex; align-items: center; justify-content: flex-start;
+  gap: 3px; width: 100%; min-width: 0; height: 36px; min-height: 36px;
+  margin: 0; padding: 6px 4px; border: 0; border-radius: 0;
+  background: transparent; color: #fff;
+  font: 600 12px/20px Arial, "Noto Sans JP", sans-serif;
+  text-decoration: none; white-space: nowrap; cursor: pointer; list-style: none;
+}
+.ledger-nav.ledger-nav > nav small { font-size: 10px; line-height: inherit; }
+.ledger-nav.ledger-nav > nav > .ledger-help-button { display: none; } /* 同じヘルプを二重に出さない */
+.ledger-nav.ledger-nav > nav > button.selected { background: transparent; }
+.ledger-nav.ledger-nav > nav > button:hover,
+.ledger-nav.ledger-nav > nav > a:hover,
+.ledger-nav.ledger-nav > nav > .ledger-nav-menu > summary:hover { background: #825f44; }
+.ledger-nav.ledger-nav .ledger-nav-menu { position: relative; min-width: 0; margin: 0; }
+.ledger-nav.ledger-nav summary::-webkit-details-marker { display: none; }
+.ledger-nav.ledger-nav .ledger-nav-menu > div {
+  position: absolute; top: 100%; left: 0; z-index: 50;
+  box-sizing: border-box; min-width: 190px; max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 180px); overflow: auto;
+  margin: 0; padding: 4px; border: 1px solid #cdbcae;
+  background: #fff; color: #443d36; box-shadow: 0 3px 8px #0002;
+}
+.ledger-nav.ledger-nav .ledger-nav-menu > div a,
+.ledger-nav.ledger-nav .ledger-nav-menu > div button {
+  box-sizing: border-box; display: block; width: 100%; min-height: 36px;
+  margin: 0; padding: 8px; border: 0; border-radius: 0;
+  background: #fff; color: #443d36; font: 12px/20px Arial, "Noto Sans JP", sans-serif;
+  text-decoration: none; text-align: left; white-space: normal; cursor: pointer;
+}
+.ledger-nav.ledger-nav .ledger-nav-menu > div a:hover,
+.ledger-nav.ledger-nav .ledger-nav-menu > div button:hover { background: #eee6e0; }
+.ledger-nav.ledger-nav > nav > .ledger-nav-menu:nth-last-child(-n+3) > div { left: auto; right: 0; }
+.ledger-nav.ledger-nav :is(button, a, summary):focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+.ledger-nav.ledger-nav .ledger-nav-menu > div :focus-visible { outline-color: #926141; }
+.pm-page-heading { box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; padding: 10px 16px; color: #443d36; font: 13px/20px Arial, "Noto Sans JP", sans-serif; }
+.pm-page-heading b { font-size: 15px; }
+.pm-page-heading a { color: #765336; text-decoration: underline; }
+.pm-static-user-menu { position: fixed; z-index: 60; padding: 4px; border: 1px solid #cdbcae; background: #fff; box-shadow: 0 3px 8px #0002; }
+.pm-static-user-menu button { padding: 10px 16px; border: 0; background: #fff; color: #443d36; cursor: pointer; }
+@media (max-width: 680px) {
+  .ledger-nav.ledger-nav > nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ledger-nav.ledger-nav > nav > button,
+  .ledger-nav.ledger-nav > nav > a,
+  .ledger-nav.ledger-nav > nav > .ledger-nav-menu > summary { min-height: 44px; height: 44px; padding: 10px 4px; }
+  .ledger-nav.ledger-nav .ledger-nav-menu > div { max-height: calc(100dvh - 160px); }
+  .ledger-nav.ledger-nav .ledger-nav-menu > div :is(a, button) { min-height: 44px; }
+}
