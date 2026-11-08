@@ -12,17 +12,39 @@
     app.leavePrompt = new Promise(resolve => {
       const focus = document.activeElement, prompt = document.createElement('dialog');
       prompt.className = 'so-leave-dialog'; prompt.setAttribute('aria-labelledby', 'so-leave-title');
-      prompt.innerHTML = '<h2 id="so-leave-title">変更を破棄しますか？</h2><p>' + (app.unknown
-        ? '保存結果を確認できていません。この画面の入力を破棄して戻ります。すでに保存された内容は取り消されません。'
-        : '保存していない掲載順の変更があります。') + '</p><div><button type="button" data-leave="keep" autofocus>編集を続ける</button><button type="button" data-leave="discard">変更を破棄して戻る</button></div>';
-      let done = false;
+      prompt.innerHTML = '<h2 id="so-leave-title">変更を保存しますか？</h2><p>' + (app.unknown
+        ? '保存結果を確認できていません。破棄して戻っても、すでに保存された内容は取り消されません。'
+        : '保存していない掲載順の変更があります。') + '</p><p class="so-leave-status" role="alert" hidden></p><div><button type="button" data-leave="save">保存して戻る</button><button type="button" data-leave="keep" autofocus>戻る</button><button type="button" data-leave="discard">破棄して戻る</button></div>';
+      let done = false, saving = false;
+      const updateButtons = () => {
+        prompt.querySelectorAll('button').forEach(button => { button.disabled = saving || (button.dataset.leave === 'save' && !app.data?.canManage); });
+        prompt.querySelector('[data-leave="save"]').textContent = saving ? '保存中…' : '保存して戻る';
+        prompt.setAttribute('aria-busy', String(saving));
+      };
       const finish = discard => {
-        if (done) return; done = true; prompt.close(); prompt.remove(); app.leavePrompt = null;
+        if (done || saving) return; done = true; prompt.close(); prompt.remove(); app.leavePrompt = null;
         if (!discard && focus?.isConnected) focus.focus(); resolve(discard);
       };
-      prompt.addEventListener('click', e => { const action=e.target.closest('[data-leave]')?.dataset.leave; if(action)finish(action==='discard'); });
+      prompt.addEventListener('click', async e => {
+        const action = e.target.closest('[data-leave]')?.dataset.leave;
+        if (!action || done || saving) return;
+        if (action !== 'save') { finish(action === 'discard'); return; }
+        if (!app.data?.canManage) return;
+        saving = true; updateButtons();
+        const status = prompt.querySelector('.so-leave-status'); status.hidden = true;
+        let saved = false;
+        try { saved = await save(app, { refresh: false }); }
+        catch { setMessage(app, '保存できませんでした。入力内容を確認して、もう一度お試しください。', true); }
+        finally { saving = false; updateButtons(); }
+        if (saved) { finish(true); return; }
+        status.textContent = app.unknown
+          ? '保存結果を確認できません。「保存して戻る」で再確認するか、「戻る」で一覧を確認してください。'
+          : app.host.querySelector('.so-message').textContent || '保存できませんでした。入力内容を確認してください。';
+        status.hidden = false;
+        prompt.querySelector('[data-leave="keep"]').focus();
+      });
       prompt.addEventListener('cancel', e => { e.preventDefault(); finish(false); });
-      document.body.appendChild(prompt); prompt.showModal(); prompt.querySelector('[data-leave="keep"]').focus();
+      updateButtons(); document.body.appendChild(prompt); prompt.showModal(); prompt.querySelector('[data-leave="keep"]').focus();
     });
     return app.leavePrompt;
   }
@@ -91,7 +113,7 @@
       setMessage(app, controller.signal.aborted ? '読み込みに時間がかかっています。通信を確認して、もう一度読み込んでください。' : error.message || '通信に失敗しました。再度読み込んでください。', true);
     } finally { clearTimeout(timer); app.busy = false; controls(app); }
   }
-  async function save(app) {
+  async function save(app, { refresh = true } = {}) {
     if (app.busy || app.dragging || !app.data?.canManage || !app.dirty) return;
     let payload;
     try {
@@ -116,14 +138,15 @@
       app.unknown = true;
       setMessage(app, '保存結果を確認できません。「内容を保存」で再確認するか、「やり直し」で最新の情報を読み込んでください。', true);
     } finally { clearTimeout(timer); app.busy = false; controls(app); }
-    if (success) {
+    if (success && refresh) {
       const refreshed = await load(app);
       setMessage(app, refreshed
         ? app.data.date !== payload.date ? payload.date + 'の掲載順位を保存しました。現在の営業日の掲載順を表示しています。'
         : app.data.version === savedVersion ? '掲載順位を保存しました。この日だけ予約サイトに反映されます。' : '掲載順位の保存後に別の変更がありました。最新の保存済み順位を表示しています。'
         : '掲載順位は保存されましたが、最新の表示を取得できませんでした。「やり直し」で確認してください。', !refreshed || app.data.date !== payload.date || app.data.version !== savedVersion);
-      window.__pmKickSync?.();
     }
+    if (success) window.__pmKickSync?.();
+    return success;
   }
   function mount() {
     const host = document.getElementById('staff-listing-ordering') || document.getElementById('staff-public-ordering');

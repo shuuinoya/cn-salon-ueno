@@ -102,5 +102,7 @@
 .so-leave-dialog p { margin:0 0 18px; font-size:14px; line-height:1.7; }
 .so-leave-dialog > div { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
 .so-leave-dialog button { min-height:44px; padding:9px 12px; border:1px solid #bba484; border-radius:5px; background:#fff; color:#644b29; font:inherit; cursor:pointer; }
-.so-leave-dialog [data-leave="discard"] { background:#916d3b; color:white; }
+.so-leave-dialog [data-leave="save"] { background:#916d3b; color:white; }
+.so-leave-dialog .so-leave-status { color:#b42318; font-size:13px; }
+.so-leave-dialog button:disabled { opacity:.6; cursor:default; }
 .so-leave-dialog button:focus-visible { outline:2px solid #906427; outline-offset:2px; }
