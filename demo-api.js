@@ -20,6 +20,7 @@ const bookingDetails = require("./booking-details");
 const companions = require("./booking-companions");
 const staffOrdering = require("./staff-ordering");
 const staffSkills = require("./staff-skills");
+const bulkMail = require("./bulk-mail");
 const { staffLatinName } = require("./staff-names");
 const BOOKING_REMINDER_STOP_REASON = "予約の自動リマインドは停止しています（新規予約時に確認メールを1通送信します）";
 const BOOKING_CHANGE_STOP_REASON = "管理画面での日時・担当・内容の変更メールは停止しています（お客様・店舗とも新規予約時の通知のみ）";
@@ -654,6 +655,7 @@ const state = {
   boothRequestKeys: new Map(),
   bookingDetailsKeys: new Map(),
   customerRecords: null,
+  mailCampaigns: [],
 };
 
 // ---- 永続化（persist.js＝このシステムのデータベース層） ----
@@ -1609,6 +1611,7 @@ const JST_DT = (ms) => {
 // 送信に失敗したメールを1通、安全に再送する（メール管理の「再送」と、台帳の「未送信を再試行」で共通）。
 // パスワード等を含むメール・再送済み・内容が古くなった予約メールは再送しない。送れないときは理由つきで err を投げる
 function resendFailedMail(m) {
+  if (m.type === 'bulk') throw err(409, "cannotResend"); // 結果不明時の重複送信を防ぐ
   if (isBookingReminder(m)) throw err(409, "cannotResend");
   if (isBookingChangeMail(m)) throw err(409, "cannotResend");
   if (bookingUseNoticeIncludedInConfirmation(m)) throw err(409, "cannotResend");
@@ -1687,6 +1690,9 @@ function deliverDueMails(source) {
       m.status = "skipped"; m.skipReason = BOOKING_TICKET_NOTICE_STOP_REASON; continue;
     }
     if (m.status !== "pending" || m.scheduledAt > now) continue;
+    if (!bulkMail.canDeliver(state, m, now)) continue;
+    // 一斉メールは、送信設定が消えた場合に「送信済み」にせず待つ。
+    if (m.type === 'bulk' && !realSendAllowed(m.to)) continue;
     if (m.tpl) {
       try {
         const r = applyMailTemplate(m, true);
@@ -1708,6 +1714,10 @@ function deliverDueMails(source) {
       }
     }
     m.status = "sending";
+    if (m.type === 'bulk') {
+      m.deliveryStartedAt = now;
+      if (!require('./persist').flushNow()) { m.status='pending'; delete m.deliveryStartedAt; continue; }
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
       m.status = "failed";
       m.error = "宛先メールアドレスの形式が不正のため、配信サービスに拒否されました";
@@ -3898,6 +3908,7 @@ function handleDemoApi(req, res, url) {
       else if (P === "/api/demo/ticket-purchase") need = "manager";
       else if (P === "/api/demo/accounts") need = "admin";                // アカウント管理は管理者のみ
       else if (P === "/api/demo/mail-relay") need = "admin";              // メール送信設定は管理者のみ（全メールの送り先になるため）
+      else if (P === "/api/demo/bulk-mail") need = "manager";
       else if (P === "/api/demo/mails" && !isGet) need = "manager";
       else if (P === "/api/demo/mail-lang" && !isGet) need = "manager";       // メールの再送はマネージャー以上
       else if (P === "/api/demo/report" || P === "/api/demo/mailtest") need = "manager";
@@ -3914,6 +3925,22 @@ function handleDemoApi(req, res, url) {
       denyApi(req, res);
       return true;
     }
+  }
+  if (url.pathname === '/api/demo/bulk-mail') {
+    const reply = data => { res.writeHead(200, {'Content-Type':'application/json','Cache-Control':'no-store'}); res.end(req.method==='HEAD' ? undefined : JSON.stringify(data)); };
+    const context = () => ({ now:Date.now(), configured:!!loadMailConfig(), allowed:to=>!!realSendAllowed(to),
+      store:MAIL_STORE,address:MAIL_ADDR,tel:MAIL_TEL,contact:VISIT_CONTACT_MAIL,origin:origin(),
+      flush:()=>require('./persist').flushNow(),queue:(to,subject,body,at)=>queueMail('customer','bulk',to,subject,body,at) });
+    if (req.method==='GET' || req.method==='HEAD') {
+      reply({...bulkMail.recipients(state), configured:!!loadMailConfig(), campaigns:state.mailCampaigns.filter(c=>c.status!=='draft').slice(-50).reverse().map(c=>bulkMail.summary(state,c))});
+    } else if (req.method==='POST') {
+      readJson(req,res,1000000,b=>{
+        if (!['preview','send','cancel'].includes(b.action)) throw err(400,'invalid');
+        const result=bulkMail[b.action](state,b,sessionAccount(req),context());
+        reply(result);
+      });
+    } else { res.writeHead(405);res.end(); }
+    return true;
   }
   if (url.pathname === "/api/demo/staff-ordering") {
     const reply = (status, data) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });

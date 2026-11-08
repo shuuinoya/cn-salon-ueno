@@ -1,0 +1,24 @@
+#bulk-mail{margin:12px 16px;background:#fff;border:1px solid #c6b9ad;border-radius:6px;padding:14px;max-width:1100px}
+#bulk-mail h2{font-size:17px;margin:0 0 8px}#bulk-mail h3{font-size:15px;margin:16px 0 8px}
+#bulk-mail p{line-height:1.65}#bulk-mail .bm-muted{color:#71685f;font-size:12px;margin:5px 0}
+#bulk-mail button,.bm-dialog button{font:inherit;border:1px solid #ad8b62;border-radius:5px;background:white;color:#654b30;padding:8px 14px;cursor:pointer;min-height:38px}
+#bulk-mail .bm-primary,.bm-dialog .bm-primary{background:#987050;color:white;border-color:#987050}
+#bulk-mail button:disabled,.bm-dialog button:disabled{opacity:.5;cursor:default}
+#bulk-mail input:not([type=checkbox]):not([type=radio]),#bulk-mail textarea,#bulk-mail select{font:inherit;border:1px solid #c6b9ad;border-radius:4px;padding:8px;width:100%;min-height:38px;background:#fff;color:#292929}
+#bulk-mail textarea{min-height:150px;resize:vertical;line-height:1.6}
+#bulk-mail .bm-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:14px}
+#bulk-mail label.bm-field{display:grid;gap:6px;margin-bottom:12px;font-weight:bold}
+#bulk-mail .bm-options{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0}
+#bulk-mail input[type=checkbox],#bulk-mail input[type=radio]{width:17px;height:17px;flex-shrink:0;accent-color:#987050;margin:0 7px 0 0}
+#bulk-mail .bm-options label,#bulk-mail .bm-person{display:flex;align-items:center;min-height:36px}
+#bulk-mail .bm-person{border-bottom:1px solid #eee3d9;padding:5px 2px;overflow-wrap:anywhere;gap:3px}
+#bulk-mail .bm-person span{display:grid;gap:2px}#bulk-mail .bm-person small{color:#786c60;font-weight:normal}
+#bulk-mail .bm-recipients{max-height:300px;overflow:auto;margin:6px 0}
+#bulk-mail .bm-row,.bm-dialog .bm-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#bulk-mail .bm-status,.bm-dialog .bm-status{color:#9f2929;white-space:pre-line;line-height:1.6;margin:8px 0}
+#bulk-mail .bm-status:empty,.bm-dialog .bm-status:empty{display:none}
+#bulk-mail details.bm-history{margin-top:18px;border-top:1px solid #ded1c5;padding-top:12px}
+#bulk-mail summary{cursor:pointer;font-weight:bold}#bulk-mail .bm-history-item{padding:10px 0;border-bottom:1px solid #e7ddd4;overflow-wrap:anywhere}
+.bm-dialog{width:min(580px,calc(100vw - 28px));max-height:calc(100dvh - 28px);border:1px solid #c9b299;border-radius:10px;padding:20px;color:#292929;background:#fff;font:14px Arial,'Noto Sans JP',sans-serif;overflow:auto}
+.bm-dialog::backdrop{background:rgb(0 0 0 / .38)}.bm-dialog h2{font-size:19px;margin:0 0 12px}.bm-dialog pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;padding:12px;background:#faf7f2;border:1px solid #e7ddd4;border-radius:5px;max-height:42dvh;overflow:auto}.bm-dialog .bm-subject{overflow-wrap:anywhere;font-weight:bold;line-height:1.6}.bm-dialog details{margin:10px 0}.bm-dialog ul{max-height:140px;overflow:auto;padding-left:22px;overflow-wrap:anywhere}.bm-dialog .bm-row{justify-content:flex-end;margin-top:14px}
+@media(max-width:700px){#bulk-mail{margin:10px;padding:12px}#bulk-mail .bm-fields{grid-template-columns:1fr;gap:4px}#bulk-mail input:not([type=checkbox]):not([type=radio]),#bulk-mail textarea,#bulk-mail select{font-size:16px}header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.bm-dialog{padding:16px}}

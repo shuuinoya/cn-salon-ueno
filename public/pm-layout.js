@@ -826,6 +826,11 @@
       else if (sm.textContent === "閉じる" && !sideOpen) { sm.textContent = "開く"; ic.textContent = "➜"; }
     });
 
+    const mailMenu = [...document.querySelectorAll('.ledger-nav-menu')].find(d => d.querySelector('summary')?.textContent.includes('メール管理'))?.querySelector(':scope > div');
+    if (mailMenu && !mailMenu.querySelector('[data-bulk-mail]')) {
+      const button = document.createElement('button');button.type='button';button.dataset.bulkMail='1';button.textContent='メール一斉送信';
+      button.onclick=()=>{location.href='/admin/mails#bulk-mail';};mailMenu.prepend(button);
+    }
     // 7b) メール管理タブに、生成メールを確認するリンクを追加
     const mailSec = document.querySelector(".ledger-mail");
     if (mailSec && !document.getElementById("pm-maillink")) {
@@ -833,7 +838,7 @@
       a.id = "pm-maillink";
       a.className = "pm-red";
       a.href = "/admin/mails";
-      a.textContent = "送信メールを確認（デモ）";
+      a.textContent = "送信メールを確認";
       a.style.cssText = "display:inline-block;text-decoration:none;margin-left:8px;";
       mailSec.querySelector("button")?.insertAdjacentElement("afterend", a);
       const a2 = document.createElement("a");

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>メール管理（デモ） | CNsalon@board</title>
+<title>メール管理 | CNsalon@board</title>
+<link rel="stylesheet" href="/bulk-mail.css?v=1"/>
 <link rel="icon" href="/favicon.svg"/>
 <style>
   /* 管理画面（PeakManager系）と同じ配色のメールボックス */
@@ -168,8 +169,10 @@
     <b>メール管理</b>
     <a href="/admin">← 予約台帳へ戻る</a>
     <a href="/admin/mail-setup">メール送信設定</a>
+    <a href="#bulk-mail">メール一斉送信</a>
     <a href="/" target="_blank">予約サイトを開く</a>
   </header>
+  <section id="bulk-mail" aria-label="メール一斉送信"></section>
   <p class="note" id="deliveryNote">送信設定を確認しています…</p>
   <div class="note" id="mailLang">
     <b>お客様へのメールの言語</b>
@@ -197,6 +200,7 @@
     ticket:  ["回数券", "b-ticket"],
     ticketRemind: ["回数券期限", "b-ticketRemind"],
     member:  ["会員", "b-member"],
+    bulk: ["店舗のお知らせ", "b-notify"],
   };
   // 回数券を含むメール：送信時点（本文を作った時点）の回数券の状態を表示する
   function ticketSnapHtml(m) {
@@ -250,7 +254,7 @@
         <div class="mailbody">
           <p class="to">宛先：${esc(m.to)}</p>
           ${m.error ? '<p class="mail-error">エラー：' + esc(m.error) + "</p>" : ""}
-          ${m.status === "failed" && !(m.resentAs || []).length && m.type !== "member" && m.type !== "remind" ? '<p><button type="button" class="resend" data-resend="' + m.id + '">再送する</button></p>' : ""}
+          ${m.status === "failed" && !(m.resentAs || []).length && m.type !== "member" && m.type !== "remind" && m.type !== "bulk" ? '<p><button type="button" class="resend" data-resend="' + m.id + '">再送する</button></p>' : ""}
           ${(m.resentAs || []).length ? '<p class="to">再送済み（' + esc(m.resentAs.join("・")) + "）</p>" : ""}
           ${m.resendOf ? '<p class="to">' + esc(m.resendOf) + " の再送</p>" : ""}
           ${m.skipReason ? '<p class="mail-error" style="color:#7a7a7a">送信中止の理由：' + esc(m.skipReason) + "</p>" : ""}
@@ -362,7 +366,7 @@
         note.className = "note";
         note.innerHTML = "メールの送信状態（送信予定→送信処理中→送信済み／送信失敗）を確認できます。店舗宛ての通知先：" + esc(dv.storeMail || "");
       }
-      note.innerHTML += "<br><b>予約後の自動リマインドは停止しています。</b>予約確定時の確認メールを送ります。回数券の購入・期限通知、予約変更・取消の通知は維持します。";
+      note.innerHTML += "<br><b>予約後の自動リマインド・変更通知は停止しています。</b>予約確定時の確認メールを送ります。回数券の購入・期限通知、予約取消の通知は維持します。";
       render();
     } catch {}
   }
@@ -374,5 +378,6 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 })();
 </script>
+<script src="/bulk-mail.js?v=1" defer></script>
 </body>
 </html>

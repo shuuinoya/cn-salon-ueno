@@ -370,6 +370,9 @@ function abortSaves() { savesAborted = true; stopGitChildren(); }
 // 変更の直後に保存する（startSaver が始まるまでは何もしない）
 let saveSoon = () => {};
 function requestSave() { saveSoon(); }
+let saveImmediately = () => !persistenceEnabled();
+// 外部へ送る直前に、送信中の記録を確定する。一斉メールの二重送信防止用。
+function flushNow() { return !savesAborted && saveImmediately() === true; }
 
 // 定期保存を開始する。getSnapshot() が返すオブジェクトを丸ごと保存する。
 function startSaver(getSnapshot) {
@@ -381,19 +384,19 @@ function startSaver(getSnapshot) {
   try { lastWritten = fs.readFileSync(file, "utf8"); } catch {}
 
   const saveNow = () => {
-    if (savesAborted) return;
+    if (savesAborted) return false;
     let json, body;
     try {
       const { savedAt, ...rest } = getSnapshot();
       body = JSON.stringify(rest, replacer);
       // 変化なし＝ディスクに触れない（保存時刻だけが違う場合も書かない。GitHubへの同期も起きない）
-      if (body === lastBody) return;
+      if (body === lastBody) return true;
       json = body === "{}" ? JSON.stringify({ savedAt }) : '{"savedAt":' + JSON.stringify(savedAt) + "," + body.slice(1);
     } catch (e) {
       console.log("（警告）保存データの作成に失敗: " + e.message);
-      return;
+      return false;
     }
-    if (json === lastWritten) { lastBody = body; return; }
+    if (json === lastWritten) { lastBody = body; return true; }
     try {
       const tmp = file + ".tmp";
       // 一時ファイルに書いたら、ディスクへ書き終わるのを待ってから（fsync）差し替える。
@@ -407,10 +410,13 @@ function startSaver(getSnapshot) {
       try { const dfd = fs.openSync(path.dirname(file), "r"); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch {}
       lastWritten = json;
       lastBody = body;
+      return true;
     } catch (e) {
       console.log("（警告）データ保存に失敗（次回の保存で再試行します）: " + e.message);
+      return false;
     }
   };
+  saveImmediately = saveNow;
 
   // GitHubへの同期（有効時のみ）。30秒間隔で変化があれば送る。多重送信は防ぐ
   let ghLastPushed = "";
@@ -467,6 +473,6 @@ function startSaver(getSnapshot) {
 }
 
 module.exports = {
-  persistenceEnabled, loadSnapshot, loadSnapshotWithRemote, startSaver, requestSave,
+  persistenceEnabled, loadSnapshot, loadSnapshotWithRemote, startSaver, requestSave, flushNow,
   dataFile, abortSaves, isCloud, remoteEnabled: GH.enabled,
 };
