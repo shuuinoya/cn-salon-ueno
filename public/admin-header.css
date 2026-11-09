@@ -39,7 +39,9 @@ html:has(.ledger-nav) { scrollbar-gutter: stable; }
 .ledger-nav.ledger-nav > nav {
   grid-column: 1 / -1; grid-row: 2; order: 0;
   display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
-  width: 100%; min-width: 0; margin: 0; padding: 0; gap: 0;
+  /* 大画面でも8項目が離れすぎない。狭い画面では画面幅に合わせる。 */
+  width: 100%; min-width: 0; max-width: 1120px; justify-self: start;
+  margin: 0; padding: 0; gap: 0;
   align-items: stretch; overflow: visible;
 }
 .ledger-nav.ledger-nav > nav > button,
