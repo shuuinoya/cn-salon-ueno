@@ -45,8 +45,13 @@ function bookingUseNoticeIncludedInConfirmation(m) {
 const IS_CLOUD = require("./persist").isCloud();
 const COOKIE_FLAGS = "Path=/; HttpOnly; SameSite=Lax" + (IS_CLOUD ? "; Secure" : "");
 const hashPass = (p) => crypto.createHash("sha256").update(String(p)).digest("hex");
-const ADMIN_ID = "CN-HB@2555";
-const LEGACY_ADMIN_ID = "kudaka1228"; // 旧ID（保存済みデータから起動時に新IDへ自動移行）
+const ADMIN_ID = process.env.ADMIN_LOGIN_ID || "CN-HB@2555";
+const LEGACY_ADMIN_ID = process.env.ADMIN_LOGIN_PREVIOUS_ID || (process.env.ADMIN_LOGIN_ID ? "" : "kudaka1228");
+if (process.env.ADMIN_LOGIN_ID && (!/^[A-Za-z0-9@._-]{4,30}$/.test(ADMIN_ID) ||
+    !/^[a-f0-9]{64}$/.test(process.env.ADMIN_PASS_HASH || "") ||
+    (LEGACY_ADMIN_ID && (!/^[A-Za-z0-9@._-]{4,30}$/.test(LEGACY_ADMIN_ID) || LEGACY_ADMIN_ID === ADMIN_ID)))) {
+  throw new Error("管理者ID変更の非公開設定が不正です");
+}
 // 初期管理者のパスワードハッシュ。本番ホスティングでは環境変数 ADMIN_PASS_HASH で
 // 必ず上書きする（コードを公開リポジトリに置いても、本番のパスワードは漏れない）
 const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH ||
@@ -683,17 +688,22 @@ const persistReady = (() => {
       for (const [k, v] of Object.entries(loaded.data.state)) if (k in state) state[k] = v;
       fillDefaults(state.settings, defaultSettings);
       for (const [t, s2] of loaded.data.sessions || []) adminSessions.set(t, s2);
-      // 旧ID（kudaka1228）で保存されたデータは、新IDの管理者へ自動移行する
-      // ・新IDが無ければ旧IDを改名（パスワードは新初期値／環境変数に更新）
-      // ・新IDが既にあれば旧IDを削除（旧IDでのログインは不可にする）
-      if (state.accounts.has(LEGACY_ADMIN_ID)) {
+      // ID変更は非公開設定で明示した本人のアカウントだけ。古いログインは引き継がない。
+      if (LEGACY_ADMIN_ID && LEGACY_ADMIN_ID !== ADMIN_ID && state.accounts.has(LEGACY_ADMIN_ID)) {
+        const old = state.accounts.get(LEGACY_ADMIN_ID);
+        if (process.env.ADMIN_LOGIN_ID && (old.role !== 'admin' || state.accounts.has(ADMIN_ID))) {
+          throw new Error("管理者ID変更の対象が一致しないか、変更先が使用済みです");
+        }
         if (!state.accounts.has(ADMIN_ID)) {
-          const old = state.accounts.get(LEGACY_ADMIN_ID);
           state.accounts.set(ADMIN_ID, { ...old, user: ADMIN_ID, pass: ADMIN_PASS_HASH });
-          for (const s2 of adminSessions.values()) if (s2.user === LEGACY_ADMIN_ID) s2.user = ADMIN_ID;
         }
         state.accounts.delete(LEGACY_ADMIN_ID);
-        console.log(`管理者IDを ${LEGACY_ADMIN_ID} → ${ADMIN_ID} へ移行しました`);
+        for (const [token, session] of adminSessions) if ([LEGACY_ADMIN_ID, ADMIN_ID].includes(session.user)) adminSessions.delete(token);
+        state.loginFails.delete(LEGACY_ADMIN_ID); state.loginFails.delete(ADMIN_ID);
+        console.log("管理者IDを変更し、以前のログインを無効にしました");
+      }
+      if (process.env.ADMIN_LOGIN_ID && !state.accounts.has(ADMIN_ID)) {
+        throw new Error("管理者ID変更の対象が見つかりません");
       }
       // 保存データにはメールのHTMLを入れていないため、本文から作り直す
       for (const m of state.mails || []) if (!m.html && m.body) m.html = mailHtml(m.body);
@@ -762,7 +772,12 @@ const persistReady = (() => {
       if (!loaded.data.state.mailAlertsSeenAt) state.mailAlertsSeenAt = Date.now();
       // 環境変数でパスワードが指定されている場合は、保存済みアカウントにも常に適用する
       if (process.env.ADMIN_PASS_HASH && state.accounts.has(ADMIN_ID)) {
-        state.accounts.get(ADMIN_ID).pass = process.env.ADMIN_PASS_HASH;
+        const acc = state.accounts.get(ADMIN_ID);
+        if (acc.pass !== process.env.ADMIN_PASS_HASH) {
+          for (const [token, session] of adminSessions) if (session.user === ADMIN_ID) adminSessions.delete(token);
+          state.loginFails.delete(ADMIN_ID);
+          acc.pass = process.env.ADMIN_PASS_HASH;
+        }
       }
       console.log("保存データを読み込みました（予約・設定・回数券・アカウントを復元）");
     } else if (persist.persistenceEnabled()) {
@@ -3883,7 +3898,7 @@ function handleDemoApi(req, res, url) {
       // 停止中アカウントも「存在しない」と同じ応答にする（存在の推測をさせない）
       if (acc && acc.active && (!owner.enabled || (owner.valid && user === owner.user)) && (acc.pass === hashPass(pass) || acc.pass === hashPass(jz(pass)))) {
         state.loginFails.delete(user);
-        if (owner.enabled) {
+        if (owner.enabled && owner.requireCode) {
           try {
             const challenge = await ownerChallenges.issue(req, acc, (to, code) => new Promise((resolve, reject) => {
               const cfg = realSendAllowed(to);
@@ -3901,7 +3916,7 @@ function handleDemoApi(req, res, url) {
           return;
         }
         const token = crypto.randomBytes(24).toString("hex"); // 端末ごとに独立したセッション
-        adminSessions.set(token, { user, created: Date.now() });
+        adminSessions.set(token, { user, created: Date.now(), ...(owner.enabled ? ownerAuth.passwordSession(req, acc) : {}) });
         if (adminSessions.size > 500) adminSessions.delete(adminSessions.keys().next().value);
         authLogPush({ kind: "login", user, ok: true, ip });
         res.writeHead(200, {

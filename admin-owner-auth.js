@@ -9,8 +9,14 @@ function config(env = process.env) {
   const user = String(env.ADMIN_OWNER_USER || '').trim();
   const email = String(env.ADMIN_OWNER_EMAIL || '').trim().toLowerCase();
   const identity = String(env.ADMIN_OWNER_TAILSCALE_LOGIN || '').trim();
-  const enabled = !!(user || email || identity);
-  return { user, email, identity, enabled, valid: !!(user && emailValid(email) && identity) };
+  const mode = String(env.ADMIN_OWNER_MODE || 'email-code').trim();
+  const rawDevices = String(env.ADMIN_OWNER_DEVICE_IPS || '').trim();
+  const devices = rawDevices ? rawDevices.split(',').map(x => x.trim()) : [];
+  const requireCode = mode === 'email-code';
+  const enabled = !!(user || email || identity || rawDevices || env.ADMIN_OWNER_MODE);
+  const valid = !!(user && identity && ['email-code', 'device-password'].includes(mode) &&
+    devices.every(x => net.isIP(x)) && (requireCode ? emailValid(email) : devices.length));
+  return { user, email, identity, mode, devices, requireCode, enabled, valid };
 }
 function networkAllowed(req, env = process.env) {
   const c = config(env);
@@ -21,7 +27,8 @@ function networkAllowed(req, env = process.env) {
   const forwarded = typeof h['x-forwarded-for'] === 'string' ? h['x-forwarded-for'].split(',').pop().trim() : '';
   // 身元を保証するのはローカルのTailscaleだけ。外部・直接接続の自己申告は信用しない。
   return (ip === '127.0.0.1' || ip === '::1') && !!net.isIP(forwarded) &&
-    !Object.hasOwn(h, 'tailscale-funnel-request') && h['tailscale-user-login'] === c.identity;
+    !Object.hasOwn(h, 'tailscale-funnel-request') && h['tailscale-user-login'] === c.identity &&
+    (!c.devices.length || c.devices.includes(forwarded));
 }
 function protectedPath(pathname, method, host) {
   let p;
@@ -35,12 +42,18 @@ function protectedPath(pathname, method, host) {
 }
 function policyFor(account, env = process.env) {
   const c = config(env);
-  return digest(JSON.stringify([c.user, c.email, c.identity, account.pass]));
+  return digest(JSON.stringify([c.user, c.email, c.identity, c.mode, c.devices, account.pass]));
 }
 function sessionAllowed(req, session, account, env = process.env) {
   const c = config(env);
   return !c.enabled || (c.valid && account.user === c.user && networkAllowed(req, env) &&
-    !!session.ownerVerifiedAt && session.ownerPolicy === policyFor(account, env));
+    !!session.ownerVerifiedAt && session.ownerPolicy === policyFor(account, env) &&
+    (c.requireCode || session.ownerDevice === clientKey(req)));
+}
+function passwordSession(req, account, env = process.env) {
+  const c = config(env);
+  if (!c.valid || c.requireCode || account.user !== c.user || !account.active || !networkAllowed(req, env)) throw failure('invalidLogin');
+  return { ownerVerifiedAt: Date.now(), ownerPolicy: policyFor(account, env), ownerDevice: clientKey(req) };
 }
 function challengeCookie(req) {
   return /(?:^|;\s*)pm_owner_challenge=([a-f0-9]{48})(?:;|$)/.exec(req.headers?.cookie || '')?.[1] || '';
@@ -57,7 +70,7 @@ class OwnerChallenges {
   }
   async issue(req, account, send) {
     const c = config(this.env), now = this.now();
-    if (!c.valid || !account.active || account.user !== c.user || !networkAllowed(req, this.env)) throw failure('invalidLogin');
+    if (!c.valid || !c.requireCode || !account.active || account.user !== c.user || !networkAllowed(req, this.env)) throw failure('invalidLogin');
     for (const [id, p] of this.pending) if (p.expires <= now) this.pending.delete(id);
     for (const [key, times] of this.rates) {
       const keep = times.filter(t => t > now - 3600000);
@@ -83,7 +96,7 @@ class OwnerChallenges {
   verify(req, code, accounts) {
     const id = challengeCookie(req), p = this.pending.get(id), now = this.now();
     const account = p && accounts.get(p.user), c = config(this.env);
-    if (!p || !p.ready || p.expires <= now || !c.valid || !account?.active || account.user !== c.user ||
+    if (!p || !p.ready || p.expires <= now || !c.valid || !c.requireCode || !account?.active || account.user !== c.user ||
       p.policy !== policyFor(account, this.env) || !networkAllowed(req, this.env) || p.client !== clientKey(req)) {
       if (p) this.pending.delete(id);
       throw failure('ownerCodeExpired');
@@ -98,4 +111,4 @@ class OwnerChallenges {
     return { account, ownerVerifiedAt: now, ownerPolicy: p.policy };
   }
 }
-module.exports = { config, networkAllowed, protectedPath, sessionAllowed, OwnerChallenges };
+module.exports = { config, networkAllowed, protectedPath, sessionAllowed, passwordSession, OwnerChallenges };
