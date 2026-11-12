@@ -172,28 +172,53 @@ function startServer(show) {
 
 // Tailscale（固定URL）：Tailscale アプリの内部窓口（LocalAPI）で、このMacの443番を本サーバーへ転送・公開する設定を確認する
 function tailscaleLocalApi() {
-  try {
-    const dir = path.join(require("os").homedir(), "Library", "Group Containers");
-    for (const g of fs.readdirSync(dir).filter((x) => /tailscale/i.test(x))) {
-      const f = fs.readdirSync(path.join(dir, g)).find((x) => x.startsWith("sameuserproof-"));
-      if (f) { const [, port, ...tok] = f.split("-"); return { port, token: tok.join("-") }; }
-    }
-  } catch {}
-  return null;
+  // macOSの権限確認で読み取りが止まっても、予約サーバーの起動を止めない。
+  const script = `
+    const fs=require('fs'),path=require('path'),os=require('os');
+    try {
+      const dir=path.join(os.homedir(),'Library','Group Containers');
+      for(const g of fs.readdirSync(dir).filter(x=>/tailscale/i.test(x))){
+        const f=fs.readdirSync(path.join(dir,g)).find(x=>x.startsWith('sameuserproof-'));
+        if(f){const [,port,...tok]=f.split('-');process.stdout.write(JSON.stringify({port,token:tok.join('-')}));break;}
+      }
+    } catch {}
+  `;
+  return new Promise(resolve => {
+    let child, text = "", settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); resolve(value);
+      try { child?.kill("SIGKILL"); } catch {}
+    };
+    const timer = setTimeout(() => finish(null), 5000);
+    try {
+      child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
+      child.stdout.on("data", b => { text += String(b); if (text.length > 4096) finish(null); });
+      child.once("error", () => finish(null));
+      child.once("close", code => {
+        let value;
+        try { value = JSON.parse(text); } catch {}
+        finish(code === 0 && /^\d+$/.test(value?.port || "") && Number(value.port) >= 1 && Number(value.port) <= 65535 &&
+          typeof value?.token === "string" && value.token ? value : null);
+      });
+    } catch { finish(null); }
+  });
 }
-function ensureFunnel(host) {
-  const api = tailscaleLocalApi();
-  if (!api) { console.log("（注意）Tailscale アプリが見つかりません。Tailscale を起動してログインしてください"); return Promise.resolve(false); }
+async function ensureFunnel(host) {
+  const api = await tailscaleLocalApi();
+  if (!api) { console.log("（注意）公開設定の確認ができないため、既存の公開設定を保持してサーバーを起動します"); return false; }
   const call = (method, p, body, headers = {}) => new Promise((resolve) => {
     const rq = require("http").request({ host: "127.0.0.1", port: api.port, path: p, method, auth: ":" + api.token,
       headers: { "Sec-Tailscale": "localapi", ...headers, ...(body ? { "Content-Type": "application/json" } : {}) } }, (r) => {
       let b = ""; r.on("data", (c) => (b += c)); r.on("end", () => resolve({ s: r.statusCode, h: r.headers, b }));
     });
     rq.on("error", () => resolve({ s: 0, h: {}, b: "" }));
+    rq.setTimeout(5000, () => rq.destroy());
     if (body) rq.write(JSON.stringify(body));
     rq.end();
   });
   return call("GET", "/localapi/v0/serve-config").then(async (cur) => {
+    if (cur.s < 200 || cur.s >= 300) return false; // 読めないときに既存設定を推測で上書きしない
     const key = host + ":443";
     const want = { TCP: { 443: { HTTPS: true } }, Web: { [key]: { Handlers: { "/": { Proxy: "http://127.0.0.1:" + PORT } } } }, AllowFunnel: { [key]: true } };
     let have = {}; try { have = JSON.parse(cur.b || "{}") || {}; } catch {}
