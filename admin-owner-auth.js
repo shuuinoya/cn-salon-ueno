@@ -13,10 +13,15 @@ function config(env = process.env) {
   const rawDevices = String(env.ADMIN_OWNER_DEVICE_IPS || '').trim();
   const devices = rawDevices ? rawDevices.split(',').map(x => x.trim()) : [];
   const requireCode = mode === 'email-code';
-  const enabled = !!(user || email || identity || rawDevices || env.ADMIN_OWNER_MODE);
+  const startText = String(env.ADMIN_OWNER_START_AT || '').trim();
+  const startAt = startText ? Date.parse(startText) : 0;
+  const startValid = !startText || (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(startText) && Number.isFinite(startAt));
+  const configured = !!(user || email || identity || rawDevices || env.ADMIN_OWNER_MODE || startText);
   const valid = !!(user && identity && ['email-code', 'device-password'].includes(mode) &&
-    devices.every(x => net.isIP(x)) && (requireCode ? emailValid(email) : devices.length));
-  return { user, email, identity, mode, devices, requireCode, enabled, valid };
+    devices.every(x => net.isIP(x)) && (requireCode ? emailValid(email) : devices.length) && startValid);
+  // 毎回時刻を判定するため、開始時刻にサーバーの再起動は不要。不正な設定は即時拒否。
+  const enabled = configured && (!valid || !startAt || Date.now() >= startAt);
+  return { user, email, identity, mode, devices, requireCode, configured, enabled, valid, startAt };
 }
 function networkAllowed(req, env = process.env) {
   const c = config(env);
@@ -42,7 +47,7 @@ function protectedPath(pathname, method, host) {
 }
 function policyFor(account, env = process.env) {
   const c = config(env);
-  return digest(JSON.stringify([c.user, c.email, c.identity, c.mode, c.devices, account.pass]));
+  return digest(JSON.stringify([c.user, c.email, c.identity, c.mode, c.devices, c.startAt, account.pass]));
 }
 function sessionAllowed(req, session, account, env = process.env) {
   const c = config(env);

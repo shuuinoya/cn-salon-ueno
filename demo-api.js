@@ -3895,6 +3895,11 @@ function handleDemoApi(req, res, url) {
       }
       const acc = state.accounts.get(user);
       const owner = ownerAuth.config();
+      // 入力中に端末制限の開始時刻を過ぎた場合も、パスワード判定前に接続元を再確認する。
+      if (!ownerAuth.networkAllowed(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        return res.end(JSON.stringify({ error: 'ownerDeviceRequired' }));
+      }
       // 停止中アカウントも「存在しない」と同じ応答にする（存在の推測をさせない）
       if (acc && acc.active && (!owner.enabled || (owner.valid && user === owner.user)) && (acc.pass === hashPass(pass) || acc.pass === hashPass(jz(pass)))) {
         state.loginFails.delete(user);
@@ -4233,7 +4238,7 @@ function handleDemoApi(req, res, url) {
         try { b = JSON.parse(raw || "{}"); } catch { return bad("invalid"); }
         const me = sessionAccount(req);
         const owner = ownerAuth.config();
-        if (owner.enabled && String(b.user || '') === owner.user &&
+        if (owner.configured && String(b.user || '') === owner.user &&
             (b.action === 'delete' || (b.action === 'update' &&
               (('active' in b && b.active !== true) || ('role' in b && b.role !== 'admin'))))) return bad('lastAdmin');
         // 「有効な管理者が最後の1人」になる変更（停止・降格・削除）は拒否する

@@ -111,6 +111,38 @@ async function main() {
     assert.equal(restarted.audit.adminSessions.size, 0); assert.equal((await login(restarted)).status, 401);
     process.env.ADMIN_PASS_HASH = hash('test-new-password');
   });
+  await check('日本時間の開始直前は共通ログイン、開始時刻から2端末だけ・旧ログイン無効', async () => {
+    const realNow = Date.now;
+    const begins = Date.parse('2026-11-13T00:00:00+09:00');
+    let now = begins - 1;
+    Date.now = () => now;
+    process.env.ADMIN_OWNER_START_AT = '2026-11-13T00:00:00+09:00';
+    const outside = r => { r.headers['tailscale-funnel-request'] = '1'; delete r.headers['tailscale-user-login']; };
+    try {
+      assert(!auth.config().enabled);
+      const r = await api(app, 'POST', '/api/demo/login', { user: 'test-new-owner', pass: 'test-new-password' }, { ip: '203.0.113.9', change: outside });
+      assert.equal(r.status, 200); assert(r.json.ok && !r.json.needsOwnerCode);
+      const sharedCookie = cookieOf(r);
+      assert.equal((await api(app, 'GET', '/api/demo/accounts', null, { cookie: sharedCookie, ip: '203.0.113.9', change: outside })).status, 200);
+      now = begins;
+      assert(auth.config().enabled);
+      assert.equal((await api(app, 'GET', '/api/demo/accounts', null, { cookie: sharedCookie, ip: '203.0.113.9', change: outside })).status, 403);
+      assert.equal((await api(app, 'GET', '/api/demo/accounts', null, { cookie: sharedCookie })).status, 401);
+      for (const ip of ['100.64.1.2', '100.64.1.3']) {
+        const own = await login(app, ip); assert.equal(own.status, 200); assert(!own.json.needsOwnerCode);
+        assert.equal((await api(app, 'GET', '/api/demo/accounts', null, { cookie: cookieOf(own), ip })).status, 200);
+      }
+      assert.equal((await login(app, '100.64.1.4')).status, 403);
+      assert.equal((await api(app, 'GET', '/api/demo/settings', null, { ip: '203.0.113.9', change: outside })).status, 200);
+      now = begins + 86400000;
+      assert(auth.config().enabled); assert.equal((await login(app, '100.64.1.4')).status, 403);
+      for (const invalid of ['invalid', '2026-11-13T00:00:00']) {
+        assert(!auth.networkAllowed(request(), { ...process.env, ADMIN_OWNER_START_AT: invalid }));
+      }
+      now = begins - 1;
+      assert(!auth.networkAllowed(request(), { ...process.env, ADMIN_OWNER_DEVICE_IPS: '' }));
+    } finally { Date.now = realNow; delete process.env.ADMIN_OWNER_START_AT; }
+  });
   await check('ID重複・対象不明・管理者以外は上書きせず停止', async () => {
     const conflict = fixture(); conflict.state.accounts.set('test-new-owner', { user: 'test-new-owner', role: 'staff' });
     await assert.rejects(load(conflict), /使用済み/); assert.equal(conflict.state.accounts.size, 2);
