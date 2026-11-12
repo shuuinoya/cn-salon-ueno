@@ -4,6 +4,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const ownerAuth = require('./admin-owner-auth');
 
 const { handleDemoApi, isAdminSession, clearSession, ready: demoReady, nominationOf, liveSeq, courseNameOf } = require("./demo-api");
 const { EventEmitter } = require("events");
@@ -693,6 +694,11 @@ const handler = (req, res) => {
   withCompression(req, res);
   const url = new URL(req.url, "http://localhost");
   const head = req.method === "HEAD";
+
+  if (ownerAuth.protectedPath(url.pathname, req.method, req.headers.host) && !ownerAuth.networkAllowed(req)) {
+    res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(head ? undefined : '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>管理画面</title><p style="font-family:sans-serif;padding:24px">この管理画面は所有者専用です。ご本人のTailscaleを接続してから開いてください。</p>');
+  }
 
   // ---- 接続元の検査（二層構え） ----
   // ・お客様の予約サイト（予約ページ・予約/回数券API・静的ファイル）は誰でも開ける

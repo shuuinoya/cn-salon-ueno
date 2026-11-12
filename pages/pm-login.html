@@ -75,6 +75,14 @@
     cursor: pointer;
   }
   .login-btn:hover { background: #d45953; }
+  [hidden] { display: none !important; }
+  .login-btn:disabled { opacity: .65; cursor: wait; }
+  .code-note { font-size: 14px; line-height: 1.7; }
+  .code-back { border: 0; background: none; color: #765336; text-decoration: underline; padding: 12px 0; cursor: pointer; }
+  @media (max-width: 520px), (max-height: 700px) {
+    .login-card { margin: 24px auto; padding: 24px; }
+    .login-logo b { font-size: 28px; }
+  }
   .support {
     text-align: center;
     font-size: 15px;
@@ -112,10 +120,18 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#987050" d="M12 12C-3 13 0-3 9 1c3 1 3 7 3 11ZM12 12C11-3 27 0 23 9c-1 3-7 3-11 3ZM12 12c15-1 12 15 3 11-3-1-3-7-3-11ZM12 12c1 15-15 12-11 3 1-3 7-3 11-3Z"/></svg>
       <b>CNsalon@board</b>
     </div>
+    <div id="password-fields">
     <label for="pm-user">ユーザー</label>
     <input id="pm-user" name="username" autocomplete="username" autofocus/>
     <label for="pm-pass">パスワード</label>
     <input id="pm-pass" name="password" type="password" autocomplete="current-password"/>
+    </div>
+    <div id="owner-code-fields" hidden>
+      <p class="code-note">ご本人のメールアドレスへ確認番号を送りました。10分以内に入力してください。</p>
+      <label for="pm-owner-code">確認番号（6桁）</label>
+      <input id="pm-owner-code" name="owner-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"/>
+      <button type="button" class="code-back" id="owner-code-back">ログインに戻る・番号を送り直す</button>
+    </div>
     <p class="logout-msg" id="logout-msg">ログアウトしました。</p>
     <p class="logout-msg" id="login-error">IDまたはパスワードが違います。</p>
     <button class="login-btn" type="submit">ログイン</button>
@@ -143,30 +159,56 @@
       m.textContent = "接続が切れました（サーバー再起動など）。もう一度ログインしてください。";
       m.classList.add("show");
     }
-    // ログイン（ID・パスワードが一致したときだけ管理画面が開く）
+    let needsOwnerCode = false;
+    const loginButton = document.querySelector('.login-btn');
+    function setCodeStep(on) {
+      needsOwnerCode = on;
+      document.getElementById('password-fields').hidden = on;
+      document.getElementById('owner-code-fields').hidden = !on;
+      document.getElementById('pm-owner-code').required = on;
+      loginButton.textContent = on ? '確認してログイン' : 'ログイン';
+      document.getElementById(on ? 'pm-owner-code' : 'pm-user').focus();
+    }
+    document.getElementById('owner-code-back').addEventListener('click', () => {
+      if (loginButton.disabled) return;
+      setCodeStep(false);
+      document.getElementById('login-error').classList.remove('show');
+      document.getElementById('pm-owner-code').value = '';
+    });
+    // 確認番号を通るまでは、管理用のログイン状態を発行しない。
     // 失敗の理由ごとに正しいメッセージを出す：
     // ・401＝ID/パスワード違い ・429＝連続失敗による一時ロック（正しい入力でも待ちが必要）
     document.getElementById("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
+      if (loginButton.disabled) return;
       const user = document.getElementById("pm-user").value.trim();
       const pass = document.getElementById("pm-pass").value;
       const errEl = document.getElementById("login-error");
       let msg = "IDまたはパスワードが違います。";
+      loginButton.disabled = true;
       try {
-        const r = await fetch("/api/demo/login", {
+        const r = await fetch(needsOwnerCode ? '/api/demo/owner-verify' : '/api/demo/login', {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user, pass }),
+          body: JSON.stringify(needsOwnerCode ? { code: document.getElementById('pm-owner-code').value.trim() } : { user, pass }),
         });
-        if (r.ok) { location.href = "/admin"; return; }
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.needsOwnerCode) {
+          document.getElementById('pm-pass').value = '';
+          errEl.classList.remove('show');
+          setCodeStep(true); return;
+        }
+        if (r.ok && j.ok) { location.href = "/admin"; return; }
         if (r.status === 429) {
-          const j = await r.json().catch(() => ({}));
           const sec = Number(j.retry) > 0 ? Number(j.retry) : 60;
           msg = "安全のため一時的にロックしています。約" + sec + "秒後にもう一度お試しください。";
-        }
+        } else if (j.error === 'invalidOwnerCode') msg = '確認番号が違います。メールの6桁の番号を入力してください。';
+        else if (j.error === 'ownerCodeExpired') msg = '確認番号が期限切れ、または無効です。「ログインに戻る」から送り直してください。';
+        else if (j.error === 'ownerCodeUnavailable') msg = '確認番号を送信できませんでした。少し待ってから、もう一度お試しください。';
+        else if (r.status === 403) msg = 'ご本人のTailscaleを接続してから開いてください。';
       } catch {
         msg = "サーバーに接続できませんでした。サイトの起動を確認してください。";
-      }
+      } finally { loginButton.disabled = false; }
       document.getElementById("logout-msg").classList.remove("show");
       errEl.textContent = msg;
       errEl.classList.add("show");

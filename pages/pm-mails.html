@@ -252,7 +252,7 @@
           <span class="meta">${stat}</span>
         </summary>
         <div class="mailbody">
-          <p class="to">宛先：${esc(m.to)}</p>
+          <p class="to">宛先：${esc(m.deliveryTo || m.to)}${m.deliveryTo && m.deliveryTo !== m.to ? '（限定送信）' : ''}</p>
           ${m.error ? '<p class="mail-error">エラー：' + esc(m.error) + "</p>" : ""}
           ${m.status === "failed" && !(m.resentAs || []).length && m.type !== "member" && m.type !== "remind" && m.type !== "bulk" ? '<p><button type="button" class="resend" data-resend="' + m.id + '">再送する</button></p>' : ""}
           ${(m.resentAs || []).length ? '<p class="to">再送済み（' + esc(m.resentAs.join("・")) + "）</p>" : ""}
@@ -366,6 +366,7 @@
         note.className = "note";
         note.innerHTML = "メールの送信状態（送信予定→送信処理中→送信済み／送信失敗）を確認できます。店舗宛ての通知先：" + esc(dv.storeMail || "");
       }
+      if (dv.bookingMailTo) note.innerHTML += '<br><b>予約メールの送信先：' + esc(dv.bookingMailTo) + ' のみ。お客様本人へは送信しません。</b>';
       note.innerHTML += "<br><b>予約後の自動リマインド・変更通知は停止しています。</b>予約確定時の確認メールを送ります。回数券の購入・期限通知、予約取消の通知は維持します。";
       render();
     } catch {}

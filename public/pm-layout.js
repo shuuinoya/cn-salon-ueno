@@ -2751,7 +2751,7 @@
         mails.map((m) =>
           "<tr><td>" + dt(m.sentAt || m.renderedAt || m.scheduledAt) + "</td>" +
           "<td>" + esc((TYPE[m.type] || m.type) + dayLabel(m.days) + (m.kind === "store" ? "（店舗宛）" : "") + (m.resendOf ? "・再送" : "")) + "</td>" +
-          "<td>" + esc(m.to) + "</td>" +
+          "<td>" + esc(m.deliveryTo || m.to) + "</td>" +
           "<td>" + esc(m.status === "sent" && !m.real ? "記録のみ（届いていません）" : ST[m.status] || m.status) + (m.error ? "<br><small>" + esc(m.error) + "</small>" : "") + (m.skipReason ? "<br><small>" + esc(m.skipReason) + "</small>" : "") +
           (m.status === "failed" && m.type !== "remind" && !m.resentAs.length ? '<br><button type="button" class="tk-resend" data-mail="' + esc(m.id) + '">再送する</button>' : "") +
           (m.resentAs.length ? "<br><small>再送済み（" + esc(m.resentAs.join("・")) + "）</small>" : "") + "</td>" +

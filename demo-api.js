@@ -14,6 +14,9 @@ const tls = require("tls");
 // ・権限は admin > manager > staff の3段階。すべての管理APIはサーバー側で
 //   ログインと権限を検証する（URLを知っているだけでは何も見えない・できない）
 const crypto = require("crypto");
+const ownerAuth = require('./admin-owner-auth');
+const ownerChallenges = new ownerAuth.OwnerChallenges();
+const bookingMailTarget = require('./booking-mail-routing');
 const ledgerOperations = require("./ledger-operations");
 const boothPolicy = require("./booth-policy");
 const bookingDetails = require("./booking-details");
@@ -65,7 +68,7 @@ function sessionAccount(req) {
   if (!s) return null;
   if (Date.now() - s.created > SESSION_MAX_AGE) { adminSessions.delete(token); return null; }
   const acc = state.accounts.get(s.user);
-  return acc && acc.active ? acc : null;
+  return acc && acc.active && ownerAuth.sessionAllowed(req, s, acc) ? acc : null;
 }
 function isAdminSession(req) {
   return !!sessionAccount(req);
@@ -1667,6 +1670,8 @@ function queueMail(kind, type, to, subject, body, scheduledAt, bookingId, tpl) {
     m.tpl = tpl;
     applyMailTemplate(m, false); // プレビュー用に今の内容で一度作る（送信時に作り直す）
   }
+  const deliveryTo = bookingMailTarget(m);
+  if (deliveryTo) m.deliveryTo = deliveryTo;
   state.mails.push(m);
   return m;
 }
@@ -1713,12 +1718,17 @@ function deliverDueMails(source) {
         continue;
       }
     }
+    const deliveryTo = bookingMailTarget(m);
+    if (!deliveryTo) {
+      m.status = "failed"; m.error = "予約メールの限定送信先が不正なため、送信を停止しました"; continue;
+    }
+    m.deliveryTo = deliveryTo;
     m.status = "sending";
     if (m.type === 'bulk') {
       m.deliveryStartedAt = now;
       if (!require('./persist').flushNow()) { m.status='pending'; delete m.deliveryStartedAt; continue; }
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(deliveryTo)) {
       m.status = "failed";
       m.error = "宛先メールアドレスの形式が不正のため、配信サービスに拒否されました";
       continue;
@@ -1732,7 +1742,8 @@ function deliverDueMails(source) {
         if (loc) { send = { ...m, subject: loc.subject, body: loc.body, html: mailHtml(loc.body) }; m.sentLang = loc.lang; m.sentSubject = loc.subject; m.sentBody = loc.body; }
       } catch (e) { m.i18nError = String(e && e.message || e); }
     }
-    const cfg = realSendAllowed(m.to);
+    send = { ...send, to: deliveryTo };
+    const cfg = realSendAllowed(deliveryTo);
     if (cfg && mailHasDevUrl(send)) {
       // 開発用URL（127.0.0.1・localhost 等）を含むメールは、お客様に届くと開けないため実送信しない
       m.status = "failed";
@@ -1765,7 +1776,7 @@ function deliverDueMails(source) {
     m.simulated = true;
     m.simReason = !loadMailConfig()
       ? "メール送信の設定がないため、実際には送信していません（記録のみ）"
-      : RESERVED_MAIL_DOMAIN.test(String(m.to || ""))
+      : RESERVED_MAIL_DOMAIN.test(String(deliveryTo || ""))
         ? "テスト用・仮のアドレスのため、実際には送信していません（記録のみ）"
         : "送信先が許可リストに無いため、実際には送信していません（記録のみ）";
   }
@@ -3829,15 +3840,34 @@ function bookingDetailsContext() {
 function handleDemoApi(req, res, url) {
   // 変更の操作（予約・スタッフ情報・シフト・設定・会員情報など、GET以外）は、返事を返した直後にディスクへ保存する
   if (req.method !== "GET" && req.method !== "HEAD") res.once("finish", () => require("./persist").requestSave());
+  if (ownerAuth.protectedPath(url.pathname, req.method, req.headers.host) && !ownerAuth.networkAllowed(req)) {
+    res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ error: 'ownerDeviceRequired' })); return true;
+  }
+  if (url.pathname === '/api/demo/owner-verify' && req.method === 'POST') {
+    readJson(req, res, 1024, b => {
+      const result = ownerChallenges.verify(req, b?.code, state.accounts), acc = result.account;
+      const token = crypto.randomBytes(24).toString('hex');
+      adminSessions.set(token, { user: acc.user, created: Date.now(), ownerVerifiedAt: result.ownerVerifiedAt, ownerPolicy: result.ownerPolicy });
+      if (adminSessions.size > 500) adminSessions.delete(adminSessions.keys().next().value);
+      authLogPush({ kind: 'login', user: acc.user, ok: true, ip: req.clientIp || req.socket.remoteAddress || '' });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Set-Cookie': [
+        `pm_session=${token}; ${COOKIE_FLAGS}`, `pm_owner_challenge=; ${COOKIE_FLAGS}; Max-Age=0` ] });
+      res.end(JSON.stringify({ ok: true, role: acc.role, name: acc.name }));
+    });
+    return true;
+  }
   if (url.pathname === "/api/demo/login" && req.method === "POST") {
     let raw = "";
     req.on("data", (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
-    req.on("end", () => {
+    req.on("end", async () => {
       let b = {};
       try { b = JSON.parse(raw || "{}"); } catch {}
+      if (!b || typeof b !== 'object' || Array.isArray(b)) b = {};
       // 日本語入力の全角＠は半角@として扱う（IMEの打ち間違いでロックさせない）
-      const jz = (v) => String(v || "").replace(/＠/g, "@").replace(/　/g, " ").trim();
+      const jz = (v) => (typeof v === 'string' ? v : '').replace(/＠/g, "@").replace(/　/g, " ").trim();
       const user = jz(b.user).slice(0, 40);
+      const pass = typeof b.pass === 'string' ? b.pass : '';
       const ip = req.clientIp || req.socket.remoteAddress || "";
       // 連続失敗によるロック（総当たり対策）。インターネットからの試行だけが対象：
       // お店の端末（Tailscaleでつないだ端末）からは、他人がロックさせていてもログインできる
@@ -3849,9 +3879,27 @@ function handleDemoApi(req, res, url) {
         return res.end(JSON.stringify({ error: "tooManyAttempts", retry: Math.ceil((lock.until - Date.now()) / 1000) }));
       }
       const acc = state.accounts.get(user);
+      const owner = ownerAuth.config();
       // 停止中アカウントも「存在しない」と同じ応答にする（存在の推測をさせない）
-      if (acc && acc.active && (acc.pass === hashPass(String(b.pass || "")) || acc.pass === hashPass(jz(b.pass)))) {
+      if (acc && acc.active && (!owner.enabled || (owner.valid && user === owner.user)) && (acc.pass === hashPass(pass) || acc.pass === hashPass(jz(pass)))) {
         state.loginFails.delete(user);
+        if (owner.enabled) {
+          try {
+            const challenge = await ownerChallenges.issue(req, acc, (to, code) => new Promise((resolve, reject) => {
+              const cfg = realSendAllowed(to);
+              if (!cfg) return reject(new Error('notConfigured'));
+              const body = `管理画面のログイン確認番号：${code}\n\n有効期限は10分です。番号は誰にも教えないでください。\n心当たりがない場合は入力せず、管理者パスワードを変更してください。`;
+              (cfg.relayUrl ? relaySend : smtpSend)(cfg, { to, subject: '【CNsalon@board】ログイン確認番号', body, html: mailHtml(body) }, e => e ? reject(e) : resolve());
+            }));
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+              'Set-Cookie': `pm_owner_challenge=${challenge.id}; ${COOKIE_FLAGS}; Max-Age=600` });
+            res.end(JSON.stringify({ needsOwnerCode: true, expiresIn: challenge.expiresIn }));
+          } catch (e) {
+            res.writeHead(e.status || 503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ error: e.status ? e.message : 'ownerCodeUnavailable', ...(e.retry ? { retry: e.retry } : {}) }));
+          }
+          return;
+        }
         const token = crypto.randomBytes(24).toString("hex"); // 端末ごとに独立したセッション
         adminSessions.set(token, { user, created: Date.now() });
         if (adminSessions.size > 500) adminSessions.delete(adminSessions.keys().next().value);
@@ -4169,6 +4217,10 @@ function handleDemoApi(req, res, url) {
         let b = {};
         try { b = JSON.parse(raw || "{}"); } catch { return bad("invalid"); }
         const me = sessionAccount(req);
+        const owner = ownerAuth.config();
+        if (owner.enabled && String(b.user || '') === owner.user &&
+            (b.action === 'delete' || (b.action === 'update' &&
+              (('active' in b && b.active !== true) || ('role' in b && b.role !== 'admin'))))) return bad('lastAdmin');
         // 「有効な管理者が最後の1人」になる変更（停止・降格・削除）は拒否する
         const adminCountWithout = (user) =>
           [...state.accounts.values()].filter((a) => a.active && a.role === "admin" && a.user !== user).length;
@@ -4691,7 +4743,7 @@ function handleDemoApi(req, res, url) {
     const cfg = loadMailConfig();
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(req.method === "HEAD" ? undefined : JSON.stringify({ mails,
-      delivery: { configured: !!cfg, via: cfg ? (cfg.relayUrl ? "relay" : "smtp") : null, allowAll: !!(cfg && cfg.allowAll), allowTo: cfg ? cfg.allowTo.length : 0, storeMail: storeMail() } }));
+      delivery: { configured: !!cfg, via: cfg ? (cfg.relayUrl ? "relay" : "smtp") : null, allowAll: !!(cfg && cfg.allowAll), allowTo: cfg ? cfg.allowTo.length : 0, storeMail: storeMail(), bookingMailTo: String(process.env.BOOKING_MAIL_TO || '').trim() } }));
     return true;
   }
 
