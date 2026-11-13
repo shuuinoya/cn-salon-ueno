@@ -36,6 +36,34 @@ function reviver(key, value) {
   return value;
 }
 
+// 毎秒の変更確認で、変更のない写真（数十MB）を繰り返しJSONへ変換しない。
+// 比較専用の文字列。実際の保存・復元・バックアップの形式は従来のまま。
+function createSnapshotComparison({ minLength = 16384, maxChars = 64 * 1024 * 1024 } = {}) {
+  const prefix = "\u0000cn-snapshot:";
+  const strings = new Map();
+  let chars = 0;
+  return (snapshot) => JSON.stringify(snapshot, function (key, value) {
+    value = replacer(key, value);
+    if (typeof value !== "string") return value;
+    if (value.length < minLength) return value.startsWith(prefix) ? prefix + "literal:" + value : value;
+    let mark = strings.get(value);
+    if (mark) {
+      strings.delete(value); strings.set(value, mark);
+    } else {
+      // UTF-16の符号単位で比較し、単独サロゲートを含む文字列も取り違えない。
+      mark = prefix + value.length + ":" + crypto.createHash("sha256").update(value, "utf16le").digest("hex");
+      if (value.length <= maxChars) {
+        while (chars + value.length > maxChars && strings.size) {
+          const oldest = strings.keys().next().value;
+          chars -= oldest.length; strings.delete(oldest);
+        }
+        strings.set(value, mark); chars += value.length;
+      }
+    }
+    return mark;
+  });
+}
+
 // 保存の有効判定：
 // ・本番（PORT未指定＝5520で起動）は常に保存する
 // ・テスト・開発用に PORT を明示した起動は初期データで動く（本番データと混ざらない）
@@ -381,22 +409,26 @@ function startSaver(getSnapshot) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let lastWritten = "";
   let lastBody = null; // 保存時刻（savedAt）を除いた中身。中身が変わったときだけ書く
+  const compareSnapshot = createSnapshotComparison();
+  let lastComparison = null;
   try { lastWritten = fs.readFileSync(file, "utf8"); } catch {}
 
   const saveNow = () => {
     if (savesAborted) return false;
-    let json, body;
+    let json, body, comparison;
     try {
       const { savedAt, ...rest } = getSnapshot();
+      comparison = compareSnapshot(rest);
+      if (comparison === lastComparison) return true;
       body = JSON.stringify(rest, replacer);
       // 変化なし＝ディスクに触れない（保存時刻だけが違う場合も書かない。GitHubへの同期も起きない）
-      if (body === lastBody) return true;
+      if (body === lastBody) { lastComparison = comparison; return true; }
       json = body === "{}" ? JSON.stringify({ savedAt }) : '{"savedAt":' + JSON.stringify(savedAt) + "," + body.slice(1);
     } catch (e) {
       console.log("（警告）保存データの作成に失敗: " + e.message);
       return false;
     }
-    if (json === lastWritten) { lastBody = body; return true; }
+    if (json === lastWritten) { lastBody = body; lastComparison = comparison; return true; }
     try {
       const tmp = file + ".tmp";
       // 一時ファイルに書いたら、ディスクへ書き終わるのを待ってから（fsync）差し替える。
@@ -410,6 +442,7 @@ function startSaver(getSnapshot) {
       try { const dfd = fs.openSync(path.dirname(file), "r"); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch {}
       lastWritten = json;
       lastBody = body;
+      lastComparison = comparison; // ディスクへの保存成功後にだけ、次回の省略を許可する。
       return true;
     } catch (e) {
       console.log("（警告）データ保存に失敗（次回の保存で再試行します）: " + e.message);

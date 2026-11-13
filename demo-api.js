@@ -951,13 +951,14 @@ function getSchedule(date) {
   const { staff: sorted, counts, month } = staffOrdering.adminView(state, date);
   const ranks = new Map(sorted.map((st, i) => [st.id, i + 1]));
   const staffRow = (st) => ({ ...st, admin_order: ranks.get(st.id), month_work_days: counts.get(st.id), locked: staffLockedOn(st.id, date) ? 1 : 0, info_missing: staffInfoMissing(st), booking_info_missing: staffBookingMissing(st), booking_status: staffBookingStatus(st) });
+  const allStaff = sorted.map(staffRow); // 日別台帳とスタッフ情報で、同じ対応メニューを二重計算しない。
   return {
     syncVersion: sseTag(),
     staffOrderMonth: month,
     // 登録済みスタッフ。シフトのない行は画面の「シフトなしも表示」で切り替える。
-    staff: sorted.filter((st) => shown.has(st.id)).map((st) => ({ ...staffRow(st), name: profileOf(st).nickname || st.name })),
+    staff: allStaff.filter((st) => shown.has(st.id)).map((st) => ({ ...st, name: profileOf(st).nickname || st.name })),
     // スタッフ情報の画面には全員を出す（未入力の人を見つけて入力できるように）
-    allStaff: sorted.map(staffRow),
+    allStaff,
     staffSkillCatalog: state.staffSkillCatalog,
     shifts,
     editTokens: Object.fromEntries(["shift", "shiftDelete", "blockCreate"].map(kind => [kind,
@@ -2930,11 +2931,18 @@ function rejectTestData(who) {
 // スタッフがそのメニューを担当できるか（管理画面のスタッフ情報「コース」のチェック。サーバーに保存された設定で判定）。
 // 保存の形：空の一覧＝「全て」にチェック（今後増えるメニューも含めて全部できる）／メニューIDの一覧＝チェックしたメニューだけ。
 // 「チェックが1つもない」状態は保存できない（下の staff の保存で断る）
+const staffCourseMemo = new WeakMap();
 function staffCanDo(st, courseId) {
-  let list;
-  try { list = JSON.parse(st.courses || "[]"); } catch { return false; } // 壊れた設定は「できない」扱い（誤って割り当てない）
-  if (!Array.isArray(list)) return false;
-  return list.length === 0 || list.includes(courseId);
+  const source = st.courses || "[]";
+  let memo = staffCourseMemo.get(st);
+  if (!memo || memo.source !== source || typeof source !== "string") {
+    let list;
+    try { list = JSON.parse(source); } catch { list = null; }
+    memo = { source, all: Array.isArray(list) && list.length === 0, ids: new Set(Array.isArray(list) ? list : []) };
+    staffCourseMemo.set(st, memo);
+  }
+  // チェックが保存されて文字列が変わったら、直ちに上で読み直す。
+  return memo.all || memo.ids.has(courseId);
 }
 // 予約の担当にしてよいか：担当メニューのチェックと、メニュー名の性別指定（女性限定＝女性スタッフだけ等）。
 // だめなときは理由（"course"＝担当メニュー外／"gender"＝性別が合わない）、よければ null
