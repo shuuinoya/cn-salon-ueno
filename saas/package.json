@@ -1,0 +1,20 @@
+{
+  "name": "reservation-service",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node build-runtime.cjs",
+    "start": "node server.cjs",
+    "test": "node --test test/*.test.cjs",
+    "test:ui": "node build-runtime.cjs && node test-ui.cjs"
+  },
+  "dependencies": {
+    "stripe": "23.1.0"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

@@ -7,3 +7,11 @@ tools/mac-production.env
 
 # Isolated sanitized verification input; never production data in git.
 /safe-state.json
+
+# 他店向けサービス。店舗データ・鍵・生成した実行用コピーは送らない。
+/saas/data/
+/saas/runtime/
+/saas/node_modules/
+/saas/.env
+/saas/test-results/
+/saas/releases/

@@ -1,0 +1,10 @@
+'use strict';
+// 生成時に public/cn-i18n.js へ足す文言。元店の規約・事業者情報は流用しない。
+module.exports = {
+  '現在、新しい予約の受付を停止しています。': ['New bookings are currently paused.','目前暂停接受新预约。','현재 신규 예약 접수가 중단되어 있습니다.','Les nouvelles réservations sont actuellement suspendues.','Actualmente no se aceptan nuevas reservas.','Al momento non si accettano nuove prenotazioni.','Derzeit werden keine neuen Buchungen angenommen.'],
+  '住所を登録すると地図を表示します。': ['The map will appear once an address has been added.','添加地址后将显示地图。','주소를 등록하면 지도가 표시됩니다.','La carte s’affichera une fois l’adresse ajoutée.','El mapa aparecerá cuando se añada una dirección.','La mappa apparirà dopo aver aggiunto un indirizzo.','Die Karte wird angezeigt, sobald eine Adresse hinterlegt ist.'],
+  '現在、予約受付の準備中です。': ['Online booking is being prepared.','在线预约正在准备中。','온라인 예약을 준비 중입니다.','Les réservations en ligne sont en cours de préparation.','Las reservas en línea se están preparando.','Le prenotazioni online sono in preparazione.','Die Onlinebuchung wird vorbereitet.'],
+  'メニューはまだ登録されていません。': ['No services have been added yet.','尚未添加服务项目。','아직 등록된 메뉴가 없습니다.','Aucune prestation n’a encore été ajoutée.','Todavía no se han añadido servicios.','Non sono ancora stati aggiunti servizi.','Es wurden noch keine Leistungen hinzugefügt.'],
+  '利用条件は店舗へお問い合わせください。': ['Please contact the store for its terms of service.','有关使用条款，请联系店铺。','이용 조건은 매장에 문의해 주세요.','Veuillez contacter l’établissement pour connaître ses conditions d’utilisation.','Consulte las condiciones de uso con el establecimiento.','Contatta il negozio per le condizioni di utilizzo.','Bitte erfragen Sie die Nutzungsbedingungen beim Geschäft.'],
+  '個人情報の取り扱いは店舗へお問い合わせください。': ['Please contact the store about how it handles personal information.','有关个人信息的处理方式，请联系店铺。','개인정보 처리에 대해서는 매장에 문의해 주세요.','Veuillez contacter l’établissement au sujet du traitement de vos données personnelles.','Consulte con el establecimiento cómo trata los datos personales.','Contatta il negozio per informazioni sul trattamento dei dati personali.','Bitte wenden Sie sich bei Fragen zum Umgang mit personenbezogenen Daten an das Geschäft.']
+};
