@@ -1,0 +1,327 @@
+[
+  {
+    "id": "364321-4822671",
+    "names": {
+      "ja": "【本日限定】全身整体60分＋足裏マッサージ 60分 通常料金13200円→12000円",
+      "en": "[Today Only] Full-Body Seitai 60 min + Foot Sole Massage 60 min  Regular price 13,200 JPY → 12,000 JPY",
+      "zh": "【今日限定】全身整体60分钟＋足底按摩60分钟 原价13,200 JPY→12,000 JPY",
+      "ko": "【오늘 한정】전신 정체 60분＋발바닥 마사지 60분 정상가 13,200 JPY→12,000 JPY",
+      "fr": "[Aujourd’hui seulement] Seitai du corps entier 60 min + massage de la plante des pieds 60 min  Prix normal 13 200 JPY → 12 000 JPY",
+      "es": "[Solo hoy] Seitai de cuerpo completo 60 min + masaje de la planta de los pies 60 min  Precio normal 13.200 JPY → 12.000 JPY",
+      "it": "[Solo oggi] Seitai total body 60 min + massaggio plantare 60 min  Prezzo normale 13.200 JPY → 12.000 JPY",
+      "de": "[Nur heute] Ganzkörper-Seitai 60 Min. + Fußsohlenmassage 60 Min.  Normalpreis 13.200 JPY → 12.000 JPY"
+    }
+  },
+  {
+    "id": "364321-4822710",
+    "names": {
+      "ja": "今月限定キャンペーン：男性スタッフオイルマッサージ 120分20500円→18500円",
+      "en": "This Month Only: Oil Massage by a Male Therapist 120 min  20,500 JPY → 18,500 JPY",
+      "zh": "本月限定活动：男性技师精油按摩 120分钟 20,500 JPY→18,500 JPY",
+      "ko": "이번 달 한정 캠페인: 남성 스태프 오일 마사지 120분 20,500 JPY→18,500 JPY",
+      "fr": "Offre du mois uniquement : massage à l’huile par un praticien homme 120 min  20 500 JPY → 18 500 JPY",
+      "es": "Campaña solo este mes: masaje con aceite por un terapeuta hombre 120 min  20.500 JPY → 18.500 JPY",
+      "it": "Promozione solo questo mese: massaggio con olio da un operatore uomo 120 min  20.500 JPY → 18.500 JPY",
+      "de": "Nur diesen Monat: Ölmassage durch einen männlichen Therapeuten 120 Min.  20.500 JPY → 18.500 JPY"
+    }
+  },
+  {
+    "id": "364321-4822711",
+    "names": {
+      "ja": "今月限定キャンペーン：女性スタッフオイルマッサージ 120分20500円→18500円",
+      "en": "This Month Only: Oil Massage by a Female Therapist 120 min  20,500 JPY → 18,500 JPY",
+      "zh": "本月限定活动：女性技师精油按摩 120分钟 20,500 JPY→18,500 JPY",
+      "ko": "이번 달 한정 캠페인: 여성 스태프 오일 마사지 120분 20,500 JPY→18,500 JPY",
+      "fr": "Offre du mois uniquement : massage à l’huile par une praticienne femme 120 min  20 500 JPY → 18 500 JPY",
+      "es": "Campaña solo este mes: masaje con aceite por una terapeuta mujer 120 min  20.500 JPY → 18.500 JPY",
+      "it": "Promozione solo questo mese: massaggio con olio da un’operatrice donna 120 min  20.500 JPY → 18.500 JPY",
+      "de": "Nur diesen Monat: Ölmassage durch eine weibliche Therapeutin 120 Min.  20.500 JPY → 18.500 JPY"
+    }
+  },
+  {
+    "id": "364326-4893798",
+    "names": {
+      "ja": "【★女性スタッフ】足裏マッサージ30分＋オイルマッサージ90分　120分",
+      "en": "[★Female Therapist] Foot Sole Massage 30 min + Oil Massage 90 min  120 min",
+      "zh": "【★女性技师】足底按摩30分钟＋精油按摩90分钟 共120分钟",
+      "ko": "【★여성 스태프】발바닥 마사지 30분＋오일 마사지 90분 총 120분",
+      "fr": "[★Praticienne femme] Massage de la plante des pieds 30 min + massage à l’huile 90 min  120 min",
+      "es": "[★Terapeuta mujer] Masaje de la planta de los pies 30 min + masaje con aceite 90 min  120 min",
+      "it": "[★Operatrice donna] Massaggio plantare 30 min + massaggio con olio 90 min  120 min",
+      "de": "[★Weibliche Therapeutin] Fußsohlenmassage 30 Min. + Ölmassage 90 Min.  120 Min."
+    }
+  },
+  {
+    "id": "364326-4893799",
+    "names": {
+      "ja": "【★男性スタッフ】足裏マッサージ30分＋オイルマッサージ90分　120分",
+      "en": "[★Male Therapist] Foot Sole Massage 30 min + Oil Massage 90 min  120 min",
+      "zh": "【★男性技师】足底按摩30分钟＋精油按摩90分钟 共120分钟",
+      "ko": "【★남성 스태프】발바닥 마사지 30분＋오일 마사지 90분 총 120분",
+      "fr": "[★Praticien homme] Massage de la plante des pieds 30 min + massage à l’huile 90 min  120 min",
+      "es": "[★Terapeuta hombre] Masaje de la planta de los pies 30 min + masaje con aceite 90 min  120 min",
+      "it": "[★Operatore uomo] Massaggio plantare 30 min + massaggio con olio 90 min  120 min",
+      "de": "[★Männlicher Therapeut] Fußsohlenmassage 30 Min. + Ölmassage 90 Min.  120 Min."
+    }
+  },
+  {
+    "id": "364326-4822708",
+    "names": {
+      "ja": "【男性スタッフ】オイルリンパマッサージ 60分",
+      "en": "[Male Therapist] Oil Lymphatic Massage 60 min",
+      "zh": "【男性技师】精油淋巴按摩 60分钟",
+      "ko": "【남성 스태프】오일 림프 마사지 60분",
+      "fr": "[Praticien homme] Massage lymphatique à l’huile 60 min",
+      "es": "[Terapeuta hombre] Masaje linfático con aceite 60 min",
+      "it": "[Operatore uomo] Massaggio linfatico con olio 60 min",
+      "de": "[Männlicher Therapeut] Öl-Lymphmassage 60 Min."
+    }
+  },
+  {
+    "id": "364326-4823112",
+    "names": {
+      "ja": "【女性スタッフ】オイルリンパマッサージ 60分",
+      "en": "[Female Therapist] Oil Lymphatic Massage 60 min",
+      "zh": "【女性技师】精油淋巴按摩 60分钟",
+      "ko": "【여성 스태프】오일 림프 마사지 60분",
+      "fr": "[Praticienne femme] Massage lymphatique à l’huile 60 min",
+      "es": "[Terapeuta mujer] Masaje linfático con aceite 60 min",
+      "it": "[Operatrice donna] Massaggio linfatico con olio 60 min",
+      "de": "[Weibliche Therapeutin] Öl-Lymphmassage 60 Min."
+    }
+  },
+  {
+    "id": "364326-4822709",
+    "names": {
+      "ja": "【男性スタッフ】オイルリンパマッサージ 90分",
+      "en": "[Male Therapist] Oil Lymphatic Massage 90 min",
+      "zh": "【男性技师】精油淋巴按摩 90分钟",
+      "ko": "【남성 스태프】오일 림프 마사지 90분",
+      "fr": "[Praticien homme] Massage lymphatique à l’huile 90 min",
+      "es": "[Terapeuta hombre] Masaje linfático con aceite 90 min",
+      "it": "[Operatore uomo] Massaggio linfatico con olio 90 min",
+      "de": "[Männlicher Therapeut] Öl-Lymphmassage 90 Min."
+    }
+  },
+  {
+    "id": "364326-4823113",
+    "names": {
+      "ja": "【女性スタッフ】オイルリンパマッサージ 90分",
+      "en": "[Female Therapist] Oil Lymphatic Massage 90 min",
+      "zh": "【女性技师】精油淋巴按摩 90分钟",
+      "ko": "【여성 스태프】오일 림프 마사지 90분",
+      "fr": "[Praticienne femme] Massage lymphatique à l’huile 90 min",
+      "es": "[Terapeuta mujer] Masaje linfático con aceite 90 min",
+      "it": "[Operatrice donna] Massaggio linfatico con olio 90 min",
+      "de": "[Weibliche Therapeutin] Öl-Lymphmassage 90 Min."
+    }
+  },
+  {
+    "id": "364326-4823102",
+    "names": {
+      "ja": "【人気No.1★男性スタッフ】極上の癒し☆オイルリンパマッサージ120分",
+      "en": "[No.1 Most Popular ★ Male Therapist] Ultimate Relaxation ☆ Oil Lymphatic Massage 120 min",
+      "zh": "【人气No.1★男性技师】极致放松☆精油淋巴按摩120分钟",
+      "ko": "【인기 No.1★남성 스태프】최고의 힐링☆오일 림프 마사지 120분",
+      "fr": "[N°1 en popularité ★ Praticien homme] Détente absolue ☆ Massage lymphatique à l’huile 120 min",
+      "es": "[N.º 1 en popularidad ★ Terapeuta hombre] Relajación suprema ☆ Masaje linfático con aceite 120 min",
+      "it": "[N. 1 per popolarità ★ Operatore uomo] Relax assoluto ☆ Massaggio linfatico con olio 120 min",
+      "de": "[Beliebtestes Angebot Nr. 1 ★ Männlicher Therapeut] Höchste Entspannung ☆ Öl-Lymphmassage 120 Min."
+    }
+  },
+  {
+    "id": "364326-4823114",
+    "names": {
+      "ja": "【人気No.1★女性スタッフ】極上の癒し☆オイルリンパマッサージ120分",
+      "en": "[No.1 Most Popular ★ Female Therapist] Ultimate Relaxation ☆ Oil Lymphatic Massage 120 min",
+      "zh": "【人气No.1★女性技师】极致放松☆精油淋巴按摩120分钟",
+      "ko": "【인기 No.1★여성 스태프】최고의 힐링☆오일 림프 마사지 120분",
+      "fr": "[N°1 en popularité ★ Praticienne femme] Détente absolue ☆ Massage lymphatique à l’huile 120 min",
+      "es": "[N.º 1 en popularidad ★ Terapeuta mujer] Relajación suprema ☆ Masaje linfático con aceite 120 min",
+      "it": "[N. 1 per popolarità ★ Operatrice donna] Relax assoluto ☆ Massaggio linfatico con olio 120 min",
+      "de": "[Beliebtestes Angebot Nr. 1 ★ Weibliche Therapeutin] Höchste Entspannung ☆ Öl-Lymphmassage 120 Min."
+    }
+  },
+  {
+    "id": "364326-4827938",
+    "names": {
+      "ja": "オススメ【男性スタッフ】腸もみオイルリンパマッサージ 120分",
+      "en": "Recommended [Male Therapist] Oil Lymphatic Massage with Abdominal (Gut) Massage 120 min",
+      "zh": "推荐【男性技师】含腹部（肠道）按摩的精油淋巴按摩 120分钟",
+      "ko": "추천【남성 스태프】장 마사지(복부)를 포함한 오일 림프 마사지 120분",
+      "fr": "Recommandé [Praticien homme] Massage lymphatique à l’huile avec massage du ventre (intestins) 120 min",
+      "es": "Recomendado [Terapeuta hombre] Masaje linfático con aceite con masaje abdominal (intestinal) 120 min",
+      "it": "Consigliato [Operatore uomo] Massaggio linfatico con olio con massaggio addominale (intestinale) 120 min",
+      "de": "Empfohlen [Männlicher Therapeut] Öl-Lymphmassage mit Bauchmassage (Darm) 120 Min."
+    }
+  },
+  {
+    "id": "364326-4827940",
+    "names": {
+      "ja": "オススメ【女性スタッフ】腸もみオイルリンパマッサージ 120分",
+      "en": "Recommended [Female Therapist] Oil Lymphatic Massage with Abdominal (Gut) Massage 120 min",
+      "zh": "推荐【女性技师】含腹部（肠道）按摩的精油淋巴按摩 120分钟",
+      "ko": "추천【여성 스태프】장 마사지(복부)를 포함한 오일 림프 마사지 120분",
+      "fr": "Recommandé [Praticienne femme] Massage lymphatique à l’huile avec massage du ventre (intestins) 120 min",
+      "es": "Recomendado [Terapeuta mujer] Masaje linfático con aceite con masaje abdominal (intestinal) 120 min",
+      "it": "Consigliato [Operatrice donna] Massaggio linfatico con olio con massaggio addominale (intestinale) 120 min",
+      "de": "Empfohlen [Weibliche Therapeutin] Öl-Lymphmassage mit Bauchmassage (Darm) 120 Min."
+    }
+  },
+  {
+    "id": "364326-4822715",
+    "names": {
+      "ja": "ハイパーナイフ6【ボディ＆フェイス】オイルマッサージと組み合わせが最適",
+      "en": "HYPER KNIFE 6 [Body & Face] Best when combined with an oil massage",
+      "zh": "HYPER KNIFE 6【身体＆面部】与精油按摩搭配效果最佳",
+      "ko": "HYPER KNIFE 6【바디＆페이스】오일 마사지와 함께 받으시는 것이 가장 좋습니다",
+      "fr": "HYPER KNIFE 6 [Corps & visage] Idéal en association avec un massage à l’huile",
+      "es": "HYPER KNIFE 6 [Cuerpo y rostro] Ideal combinado con un masaje con aceite",
+      "it": "HYPER KNIFE 6 [Corpo e viso] Ideale in abbinamento a un massaggio con olio",
+      "de": "HYPER KNIFE 6 [Körper & Gesicht] Ideal in Kombination mit einer Ölmassage"
+    }
+  },
+  {
+    "id": "364326-4921051",
+    "names": {
+      "ja": "出張マッサージ（120分）25,500円 施術内容はご要望に応じて自由にカスタマイズできます。",
+      "en": "Visiting Massage — our therapist comes to you (120 min) 25,500 JPY. The treatment can be freely customized to your requests.",
+      "zh": "上门按摩（120分钟）25,500 JPY 施术内容可根据您的要求自由定制。",
+      "ko": "출장 마사지(120분) 25,500 JPY 시술 내용은 요청에 따라 자유롭게 맞춤 조정할 수 있습니다.",
+      "fr": "Massage à domicile — le praticien se déplace chez vous (120 min) 25 500 JPY. Le contenu du soin peut être librement adapté à vos demandes.",
+      "es": "Masaje a domicilio — el terapeuta se desplaza hasta usted (120 min) 25.500 JPY. El contenido del tratamiento se puede personalizar libremente según sus peticiones.",
+      "it": "Massaggio a domicilio — l’operatore viene da te (120 min) 25.500 JPY. Il trattamento può essere personalizzato liberamente in base alle tue richieste.",
+      "de": "Massage mit Hausbesuch — der Therapeut kommt zu Ihnen (120 Min.) 25.500 JPY. Der Inhalt der Behandlung kann frei nach Ihren Wünschen gestaltet werden."
+    }
+  },
+  {
+    "id": "364328-4822716",
+    "names": {
+      "ja": "フェイシャル 60分 自然で明るい“本来の笑顔”を引き出し",
+      "en": "Facial 60 min  Brings out your natural, bright “true smile”",
+      "zh": "面部护理 60分钟 唤出自然明亮的“本来的笑容”",
+      "ko": "페이셜 60분 자연스럽고 밝은 ‘본래의 미소’를 이끌어 냅니다",
+      "fr": "Soin du visage 60 min  Fait ressortir votre « vrai sourire », naturel et lumineux",
+      "es": "Tratamiento facial 60 min  Hace aflorar su «sonrisa auténtica», natural y luminosa",
+      "it": "Trattamento viso 60 min  Fa emergere il tuo «vero sorriso», naturale e luminoso",
+      "de": "Gesichtsbehandlung 60 Min.  Bringt Ihr natürliches, strahlendes „wahres Lächeln“ zum Vorschein"
+    }
+  },
+  {
+    "id": "364323-4822706",
+    "names": {
+      "ja": "タイ古式マッサージ",
+      "en": "Traditional Thai Massage",
+      "zh": "泰式古法按摩",
+      "ko": "타이 전통 마사지",
+      "fr": "Massage thaïlandais traditionnel",
+      "es": "Masaje tailandés tradicional",
+      "it": "Massaggio thailandese tradizionale",
+      "de": "Traditionelle Thai-Massage"
+    }
+  },
+  {
+    "id": "364323-4822664",
+    "names": {
+      "ja": "【当店人気メニュー】首肩コリ、頭痛な方にオススメ ヘッドスパ 60分",
+      "en": "[Popular at Our Salon] Recommended for stiff neck and shoulders or headaches  Head Spa 60 min",
+      "zh": "【本店人气项目】推荐给颈肩僵硬、头痛的您 头部SPA 60分钟",
+      "ko": "【당 살롱 인기 메뉴】목·어깨 결림이나 두통이 있는 분께 추천 헤드 스파 60분",
+      "fr": "[Soin populaire du salon] Recommandé en cas de raideurs de la nuque et des épaules ou de maux de tête  Spa crânien 60 min",
+      "es": "[Popular en nuestro salón] Recomendado si tiene rigidez de cuello y hombros o dolor de cabeza  Head spa 60 min",
+      "it": "[Trattamento popolare del salone] Consigliato per rigidità di collo e spalle o mal di testa  Head spa 60 min",
+      "de": "[Beliebt in unserem Salon] Empfohlen bei Nacken- und Schulterverspannungen oder Kopfschmerzen  Head-Spa 60 Min."
+    }
+  },
+  {
+    "id": "364323-4822701",
+    "names": {
+      "ja": "全身整体 60分",
+      "en": "Full-Body Seitai (Japanese bodywork) 60 min",
+      "zh": "全身整体（日式身体调理）60分钟",
+      "ko": "전신 정체(일본식 바디워크) 60분",
+      "fr": "Seitai du corps entier (soin corporel japonais) 60 min",
+      "es": "Seitai de cuerpo completo (terapia corporal japonesa) 60 min",
+      "it": "Seitai total body (trattamento corporeo giapponese) 60 min",
+      "de": "Ganzkörper-Seitai (japanische Körperbehandlung) 60 Min."
+    }
+  },
+  {
+    "id": "364325-4822707",
+    "names": {
+      "ja": "矯正整体(骨盤、姿勢、O脚) 60分",
+      "en": "Corrective Seitai (Pelvis, Posture, Bow Legs) 60 min",
+      "zh": "矫正整体（骨盆、姿势、O型腿）60分钟",
+      "ko": "교정 정체(골반·자세·O자 다리) 60분",
+      "fr": "Seitai correctif (bassin, posture, jambes arquées) 60 min",
+      "es": "Seitai correctivo (pelvis, postura, piernas arqueadas) 60 min",
+      "it": "Seitai correttivo (bacino, postura, gambe arcuate) 60 min",
+      "de": "Korrigierendes Seitai (Becken, Haltung, O-Beine) 60 Min."
+    }
+  },
+  {
+    "id": "364324-4822705",
+    "names": {
+      "ja": "小顔矯正 60分",
+      "en": "Small-Face Contouring 60 min",
+      "zh": "小脸矫正 60分钟",
+      "ko": "소얼굴 교정 60분",
+      "fr": "Correction « petit visage » 60 min",
+      "es": "Corrección «rostro pequeño» 60 min",
+      "it": "Correzione «viso piccolo» 60 min",
+      "de": "Gesichtskonturierung („Small Face“) 60 Min."
+    }
+  },
+  {
+    "id": "364327-4822712",
+    "names": {
+      "ja": "フットマッサージ(足湯＋足裏～ふくらぎ) 60分",
+      "en": "Foot Massage (Footbath + Soles to Calves) 60 min",
+      "zh": "足部按摩（足浴＋足底至小腿）60分钟",
+      "ko": "풋 마사지(족욕＋발바닥~종아리) 60분",
+      "fr": "Massage des pieds (bain de pieds + de la plante des pieds aux mollets) 60 min",
+      "es": "Masaje de pies (baño de pies + de la planta a las pantorrillas) 60 min",
+      "it": "Massaggio ai piedi (pediluvio + dalla pianta ai polpacci) 60 min",
+      "de": "Fußmassage (Fußbad + Fußsohlen bis Waden) 60 Min."
+    }
+  },
+  {
+    "id": "364329-4822717",
+    "names": {
+      "ja": "ハイパーナイフ6【ボディ】腹、背、腕、脚など 選べる1部位10分＋マッサージ10分",
+      "en": "HYPER KNIFE 6 [Body] 1 area of your choice (abdomen, back, arms, legs, etc.) 10 min + massage 10 min",
+      "zh": "HYPER KNIFE 6【身体】腹部、背部、手臂、腿部等任选1个部位10分钟＋按摩10分钟",
+      "ko": "HYPER KNIFE 6【바디】복부·등·팔·다리 등 원하는 1부위 10분＋마사지 10분",
+      "fr": "HYPER KNIFE 6 [Corps] 1 zone au choix (ventre, dos, bras, jambes, etc.) 10 min + massage 10 min",
+      "es": "HYPER KNIFE 6 [Cuerpo] 1 zona a elegir (abdomen, espalda, brazos, piernas, etc.) 10 min + masaje 10 min",
+      "it": "HYPER KNIFE 6 [Corpo] 1 zona a scelta (addome, schiena, braccia, gambe, ecc.) 10 min + massaggio 10 min",
+      "de": "HYPER KNIFE 6 [Körper] 1 Zone nach Wahl (Bauch, Rücken, Arme, Beine usw.) 10 Min. + Massage 10 Min."
+    }
+  },
+  {
+    "id": "364331-4822719",
+    "names": {
+      "ja": "シャワールーム 30分",
+      "en": "Shower Room 30 min",
+      "zh": "淋浴间 30分钟",
+      "ko": "샤워룸 30분",
+      "fr": "Salle de douche 30 min",
+      "es": "Sala de ducha 30 min",
+      "it": "Sala doccia 30 min",
+      "de": "Duschraum 30 Min."
+    }
+  },
+  {
+    "id": "364331-4822720",
+    "names": {
+      "ja": "レンタルルーム 60分　2500円",
+      "en": "Rental Room 60 min  2,500 JPY",
+      "zh": "租赁房间 60分钟 2,500 JPY",
+      "ko": "대여 룸 60분 2,500 JPY",
+      "fr": "Location de salle 60 min  2 500 JPY",
+      "es": "Alquiler de sala 60 min  2.500 JPY",
+      "it": "Noleggio sala 60 min  2.500 JPY",
+      "de": "Raummiete 60 Min.  2.500 JPY"
+    }
+  }
+]
