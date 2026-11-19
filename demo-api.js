@@ -1032,7 +1032,6 @@ function setBookingBooths(bk, plan, actor, at = Date.now()) {
 
 // actor：操作した管理画面のアカウント（{user, role}。権限の確認と移動の記録に使う）
 function postSchedule(body, actor) {
-  if (body?.action === "staff") body = demoPresentation.restoreStaff(body);
   const { action, date } = body;
   if (!action || !validDay(date)) throw err(400, "invalid");
   if (action === "staffReconcile") {
@@ -3861,15 +3860,7 @@ function bookingDetailsContext() {
     bump: date => { ensureDay(date).version++; }, touch: sseTouch };
 }
 
-const demoPresentation = require("./demo-presentation").create(
-  () => state, () => [...courseStore.values()], path.join(path.dirname(require("./persist").dataFile()), "demo-presentation.json"));
-
 function handleDemoApi(req, res, url) {
-  demoPresentation.wrapResponse(res);
-  if (["/api/staff/photo", "/api/demo/staff-photo"].includes(url.pathname) && demoPresentation.photoHidden(url.searchParams.get("id"))) {
-    res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify({ error: "notFound" })); return true;
-  }
   // 変更の操作（予約・スタッフ情報・シフト・設定・会員情報など、GET以外）は、返事を返した直後にディスクへ保存する
   if (req.method !== "GET" && req.method !== "HEAD") res.once("finish", () => require("./persist").requestSave());
   if (ownerAuth.protectedPath(url.pathname, req.method, req.headers.host) && !ownerAuth.networkAllowed(req)) {
@@ -4512,7 +4503,7 @@ function handleDemoApi(req, res, url) {
       req.on("data", (c) => { raw += c; if (raw.length > 4e6) req.destroy(); });
       req.on("end", () => {
         try {
-          const b = demoPresentation.restoreCourse(JSON.parse(raw || "{}"));
+          const b = JSON.parse(raw || "{}");
           const name = String(b.name || "").trim().slice(0, 120);
           const price = Math.floor(Number(b.price));
           const minutes = Math.floor(Number(b.minutes));
@@ -5523,4 +5514,4 @@ function handleDemoApi(req, res, url) {
 // ページと一緒に返すデータ（server.js の pageBoot）用：今の「変わった」合図の番号と、メニュー名
 function liveSeq() { return sseTag(); }
 function courseNameOf(id) { const c = courseStore.get(String(id || "")); return c ? String(c.name || "") : ""; }
-module.exports = { handleDemoApi, isAdminSession, clearSession, ready: persistReady, nominationOf, liveSeq, courseNameOf, demoPresentation };
+module.exports = { handleDemoApi, isAdminSession, clearSession, ready: persistReady, nominationOf, liveSeq, courseNameOf };

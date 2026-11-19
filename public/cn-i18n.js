@@ -608,13 +608,6 @@
   function menu(jaName) {
     const s = String(jaName || "");
     if (cur === "ja" || !s) return s;
-    const demo = /^【テスト】メニュー(\d+)(?:（(男性|女性)スタッフ）)?$/.exec(s);
-    if (demo) {
-      const words = ["Test Menu ","测试项目","테스트 메뉴 ","Soin test ","Tratamiento de prueba ","Trattamento di prova ","Testbehandlung "];
-      const male = ["Male therapist","男性技师","남성 직원","Praticien homme","Terapeuta hombre","Operatore uomo","Männliche Fachkraft"];
-      const female = ["Female therapist","女性技师","여성 직원","Praticienne femme","Terapeuta mujer","Operatrice donna","Weibliche Fachkraft"];
-      return words[IDX[cur]] + demo[1] + (demo[2] ? " (" + (demo[2] === "男性" ? male : female)[IDX[cur]] + ")" : "");
-    }
     const row = MENU[s] || MENU[s.replace(/\s+/g, " ").trim()];
     return row ? row[IDX[cur]] : s;
   }

@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const ownerAuth = require('./admin-owner-auth');
 
-const { handleDemoApi, isAdminSession, clearSession, ready: demoReady, nominationOf, liveSeq, courseNameOf, demoPresentation } = require("./demo-api");
+const { handleDemoApi, isAdminSession, clearSession, ready: demoReady, nominationOf, liveSeq, courseNameOf } = require("./demo-api");
 const { EventEmitter } = require("events");
 
 const ROOT = __dirname;
@@ -55,14 +55,13 @@ let staticVerCache = { at: 0, v: "" };
 let selfSig = "";
 function staticVer() {
   const now = Date.now();
-  const demoVersion = demoPresentation.version();
-  if (staticVerCache.v && staticVerCache.demoVersion === demoVersion && now - staticVerCache.at < 2000) return staticVerCache.v;
+  if (staticVerCache.v && now - staticVerCache.at < 2000) return staticVerCache.v;
   // 配信時の書き換え（サイト名・写真の配信元・公開URL）も中身を変えるので、版に含める
   if (!selfSig) {
     try { selfSig = require("crypto").createHash("sha1").update(fs.readFileSync(__filename)).digest("hex"); } catch { selfSig = String(Date.now()); }
     selfSig += "|" + IMAGE_CDN + "|" + (PUBLIC_HOSTS[0] || "");
   }
-  const h = require("crypto").createHash("sha1").update(selfSig).update(demoVersion);
+  const h = require("crypto").createHash("sha1").update(selfSig);
   for (const d of STATIC_DIRS) {
     let names = [];
     try { names = fs.readdirSync(d).sort(); } catch {}
@@ -70,7 +69,7 @@ function staticVer() {
       try { const st = fs.statSync(path.join(d, n)); h.update(n + ":" + st.size + ":" + Math.floor(st.mtimeMs) + ";"); } catch {}
     }
   }
-  staticVerCache = { at: now, demoVersion, v: h.digest("hex").slice(0, 10) };
+  staticVerCache = { at: now, v: h.digest("hex").slice(0, 10) };
   return staticVerCache.v;
 }
 // HTML・RSC・JSの中の部品の場所（/_next/static/chunks/… と _next/static/css/…）を、版つきの場所に置き換える
@@ -331,7 +330,7 @@ function sendFile(res, file, status, type, head, url, req) {
     // ・Last-Modified＋304で、変わっていないファイルは再ダウンロードさせない
     // ・ハッシュつき（/assets/・/_next/）や ?v= つきは1日、その他は1時間の再利用を許可
     // （HTMLはリクエストごとにURL注入があるため従来どおり毎回検証）
-    if (!isHtml && status === 200 && !(type.startsWith("text/javascript") && demoPresentation.enabled())) {
+    if (!isHtml && status === 200) {
       let mtime = 0;
       try { mtime = Math.floor(fs.statSync(file).mtimeMs / 1000) * 1000; } catch {}
       if (mtime) {
@@ -406,7 +405,7 @@ function sendFile(res, file, status, type, head, url, req) {
         // （画面の部品の準備や通信を待たずに、すぐ絞り込んだ一覧と指名スタッフを出せる。CSSとheadの差し込みなので画面の組み立てとは食い違わない）
         if (url.pathname === "/book" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(url.searchParams.get("staffId") || "")) {
           let nom = null;
-          try { nom = demoPresentation.project(nominationOf(url.searchParams.get("staffId"), url.searchParams.get("date"))); } catch {}
+          try { nom = nominationOf(url.searchParams.get("staffId"), url.searchParams.get("date")); } catch {}
           let css = "";
           if (nom) {
             const row = 'a.menu-row[href^="/book/select-datetime"]';
@@ -473,7 +472,7 @@ function sendFile(res, file, status, type, head, url, req) {
       // （データを取りに行く往復を省く・使わない先読みをやめる・ページ移動の裏側の余分な通信をなくす）。
       // データはブラウザが取りに来たときと同じ中身にするため、上の書き換え（サイト名など）のあとで入れる
       if (isHtml && url) text = text.replace(/<head>/, () => "<head>" + fastHead(boot, url));
-      body = Buffer.from(demoPresentation.asset(text));
+      body = Buffer.from(text);
     }
     // ページ（HTML）には本人の会員情報・管理画面のデータが入ることがあるので、共有のキャッシュには置かせない
     if (!res.getHeader("Cache-Control")) res.setHeader("Cache-Control", isHtml ? "private, no-cache" : "no-cache");
