@@ -15,3 +15,5 @@ tools/mac-production.env
 /saas/.env
 /saas/test-results/
 /saas/releases/
+/saas/sales-private/
+/saas/launch-site/

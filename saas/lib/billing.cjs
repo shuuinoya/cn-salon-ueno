@@ -22,6 +22,9 @@ class Billing {
     return this.locked(store.id,async()=>{
       store=this.db.prepare('SELECT * FROM stores WHERE id=?').get(store.id);
       await this.price();
+      // Checkoutのtrial_endは48時間以上先が必要。残り期間を省いて即時課金しない。
+      const remaining=store.trial_end-Date.now();
+      if(remaining>0 && remaining<2*86400000+60000)throw error(409,'無料期間の終了まで課金されません。有料申込みは無料期間が終了してからお進みください');
       if(store.customer) await this.refresh(store);
       store=this.db.prepare('SELECT * FROM stores WHERE id=?').get(store.id);
       if(store.subscription && ['active','trialing','past_due','unpaid','paused','incomplete'].includes(store.status)) throw error(409,'既存の契約があります。「請求・解約の管理」から確認してください');
@@ -41,9 +44,10 @@ class Billing {
         this.db.prepare('UPDATE stores SET checkout=?,checkout_url=NULL,checkout_expires=0 WHERE id=?').run(operation,store.id);
       }
       const subscriptionData={};
-      if(store.trial_end>Date.now()+2*86400000)subscriptionData.trial_end=Math.floor(store.trial_end/1000);
+      if(store.trial_end>Date.now())subscriptionData.trial_end=Math.floor(store.trial_end/1000);
       const result=await this.client.checkout.sessions.create({mode:'subscription',customer:store.customer,
         line_items:[{price:this.config.priceId,quantity:1}],subscription_data:subscriptionData,
+        automatic_tax:{enabled:true},billing_address_collection:'required',customer_update:{address:'auto'},
         success_url:this.config.origin+'/dashboard?billing=processing',cancel_url:this.config.origin+'/dashboard',
         integration_identifier:'reservation_service_rsvspace',locale:'ja',
         custom_text:{submit:{message:'1店舗あたり月額14,800円（税込）。毎月自動更新。解約は請求・解約の管理から次回更新前までにお手続きください。'}}

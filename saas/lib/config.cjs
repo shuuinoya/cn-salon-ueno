@@ -12,10 +12,10 @@ function config(env = process.env) {
     title: env.SERVICE_NAME || '店舗向け予約サービス', price: 14800, trialDays: 14,
     signupCode: env.SIGNUP_CODE || '', signupOpen: local || env.SIGNUP_OPEN === '1',
     stripeKey: env.STRIPE_RESTRICTED_KEY || '', priceId: env.STRIPE_PRICE_ID || '', webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
-    billingLive: env.BILLING_LIVE === '1', seller: { name: env.SELLER_NAME || '', address: env.SELLER_ADDRESS || '', phone: env.SELLER_PHONE || '', email: env.SELLER_EMAIL || '' },
+    billingLive: env.BILLING_LIVE === '1', taxVerified: env.STRIPE_TAX_VERIFIED === '1', seller: { name: env.SELLER_NAME || '', address: env.SELLER_ADDRESS || '', phone: env.SELLER_PHONE || '', email: env.SELLER_EMAIL || '' },
     legalApproved: env.LEGAL_APPROVED === '1', maxWorkers: Number(env.MAX_ACTIVE_STORES || 16), mailEnabled: env.TENANT_MAIL_ENABLED === '1',
     trustedProxy: env.TRUST_LOCAL_PROXY === '1' };
-  c.billingReady = !!(c.stripeKey && c.priceId && c.webhookSecret && (!c.billingLive || (!local && c.legalApproved && Object.values(c.seller).every(Boolean))));
+  c.billingReady = !!(c.stripeKey && c.priceId && c.webhookSecret && (!c.billingLive || (!local && c.legalApproved && c.taxVerified && Object.values(c.seller).every(Boolean))));
   c.shopOrigin = slug => `${origin.protocol}//${slug}.${tenantDomain}${origin.port ? ':' + origin.port : ''}`;
   if (!Number.isInteger(c.port) || c.port < 1024 || c.port > 65535 || !Number.isInteger(c.maxWorkers) || c.maxWorkers < 1 || c.maxWorkers > 256) throw Error('起動設定が不正です');
   return c;

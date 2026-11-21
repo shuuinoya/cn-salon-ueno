@@ -7,7 +7,7 @@ build();
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'reservation-release-'));
 try {
   const target=path.join(temp,'reservation-service');fs.mkdirSync(target);
-  for(const name of ['server.cjs','worker.cjs','lib','public','runtime','package-lock.json','.env.example','README.md','事業計画.md','検証結果.md','Dockerfile']){
+  for(const name of ['server.cjs','worker.cjs','lib','public','runtime','package-lock.json','.env.example','README.md','事業計画.md','検証結果.md','販売開始の進捗.md','Dockerfile']){
     fs.cpSync(path.join(__dirname,name),path.join(target,name),{recursive:true,dereference:false});
   }
   const pkg=JSON.parse(fs.readFileSync(path.join(__dirname,'package.json'),'utf8'));

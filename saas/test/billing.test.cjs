@@ -3,6 +3,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const Stripe=require('stripe');
 const {Billing}=require('../lib/billing.cjs');
 const {openDatabase,allowed}=require('../lib/database.cjs');
+const {config}=require('../lib/config.cjs');
 function setup(){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'billing-test-')),db=openDatabase(dir),now=Date.now();
   db.prepare('INSERT INTO owners VALUES(?,?,?,?)').run('owner','test@example.test','unused',now);
@@ -11,11 +12,20 @@ function setup(){
   const sdk=new Stripe('sk_test_placeholder_for_offline_test');let calls=0,subs=[];
   const client={prices:{retrieve:async()=>({active:true,livemode:false,currency:'jpy',unit_amount:14800,recurring:{interval:'month',interval_count:1},tax_behavior:'inclusive'})},
     subscriptions:{list:async()=>({data:subs,has_more:false})},
-    checkout:{sessions:{create:async(args)=>{calls++;assert.equal(args.payment_method_types,undefined);return {id:'cs_test',url:'https://checkout.stripe.com/test',expires_at:Math.floor(Date.now()/1000)+1800};},retrieve:async()=>({status:'open',url:'https://checkout.stripe.com/test'})}},webhooks:sdk.webhooks};
+    checkout:{sessions:{create:async(args)=>{calls++;assert.equal(args.payment_method_types,undefined);assert.deepEqual(args.automatic_tax,{enabled:true});assert.equal(args.billing_address_collection,'required');assert.deepEqual(args.customer_update,{address:'auto'});return {id:'cs_test',url:'https://checkout.stripe.com/test',expires_at:Math.floor(Date.now()/1000)+1800};},retrieve:async()=>({status:'open',url:'https://checkout.stripe.com/test'})}},webhooks:sdk.webhooks};
   const billing=new Billing(c,db,client),store=()=>db.prepare('SELECT * FROM stores WHERE id=?').get('store');
   return{db,c,client,billing,store,calls:()=>calls,setSubs:v=>subs=v,close:()=>{db.close();fs.rmSync(dir,{recursive:true,force:true});}};
 }
 test('同時申込みで支払いページが二重作成されない',async()=>{const t=setup();try{await Promise.all(Array.from({length:12},()=>t.billing.checkout(t.store(),{email:'test@example.test'})));assert.equal(t.calls(),1);}finally{t.close();}});
+test('無料期間の残りが48時間未満でも前倒しで課金しない',async()=>{
+ const t=setup();try{t.db.prepare('UPDATE stores SET trial_end=? WHERE id=?').run(Date.now()+86400000,'store');await assert.rejects(()=>t.billing.checkout(t.store(),{email:'test@example.test'}),/無料期間が終了してから/);assert.equal(t.calls(),0);t.db.prepare('UPDATE stores SET trial_end=? WHERE id=?').run(Date.now()-1000,'store');await t.billing.checkout(t.store(),{email:'test@example.test'});assert.equal(t.calls(),1);}finally{t.close();}
+});
+test('税設定が未確認の間は本番請求を開始できない',()=>{
+  const env={SERVICE_ORIGIN:'https://service.example.test',TENANT_DOMAIN:'stores.example.test',BILLING_LIVE:'1',LEGAL_APPROVED:'1',SELLER_NAME:'テスト事業者',SELLER_ADDRESS:'テスト住所',SELLER_PHONE:'000',SELLER_EMAIL:'test@example.test',STRIPE_RESTRICTED_KEY:'placeholder',STRIPE_PRICE_ID:'price_test',STRIPE_WEBHOOK_SECRET:'placeholder'};
+  assert.equal(config(env).billingReady,false);
+  assert.equal(config({...env,STRIPE_TAX_VERIFIED:'1'}).billingReady,true);
+  assert.equal(config({...env,STRIPE_TAX_VERIFIED:'1',LEGAL_APPROVED:'0'}).billingReady,false);
+});
 test('価格違い、署名不正、未払いを拒否し、最新状態で再送を処理する',async()=>{
   const t=setup();try{
     const original=t.client.prices.retrieve;t.client.prices.retrieve=async()=>({...await original(),unit_amount:100});
