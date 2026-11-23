@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>オンライン予約受付停止 | CN Ueno health &amp; beauty</title>
+  <script src="/cn-i18n.js?v=booking-reception-20261124" defer></script>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f3f4f6;color:#29313d;font-family:system-ui,-apple-system,sans-serif}
+    header{background:#fff;border-bottom:1px solid #e2e3e7;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    header strong{font-size:18px}select{max-width:100%;padding:9px;border:1px solid #d7c39f;border-radius:6px;background:#fff;font-size:16px}
+    main{max-width:520px;margin:clamp(24px,8vh,80px) auto;padding:0 16px}section{padding:28px 24px;border:1px solid #e5d5b8;border-radius:14px;background:#fff;text-align:center}
+    h1{font-size:22px;line-height:1.5;margin:0 0 16px;overflow-wrap:anywhere}p{font-size:16px;line-height:1.8;margin:0 0 24px}
+    a{display:inline-block;padding:12px 24px;background:#bd9a56;color:#fff;border-radius:7px;text-decoration:none;line-height:1.5}
+    a:focus-visible,select:focus-visible{outline:3px solid #82612b;outline-offset:3px}
+  </style>
+</head>
+<body>
+  <header><strong>CN Ueno health &amp; beauty</strong><select id="language" aria-label="Language"><option value="ja">日本語</option><option value="en">English</option><option value="zh">中文</option><option value="ko">한국어</option><option value="fr">Français</option><option value="es">Español</option><option value="it">Italiano</option><option value="de">Deutsch</option></select></header>
+  <main><section><h1 data-text="オンライン予約受付停止">オンライン予約受付停止</h1><p data-text="現在、オンライン予約の受付を停止しています。">現在、オンライン予約の受付を停止しています。</p><a href="/" data-text="ホームへ戻る">ホームへ戻る</a></section></main>
+  <script>
+    document.addEventListener('DOMContentLoaded',()=>{
+      const i=window.CNI18N,s=document.getElementById('language');if(!i)return;
+      const render=()=>{document.documentElement.lang=i.lang();s.value=i.lang();document.querySelectorAll('[data-text]').forEach(el=>el.textContent=i.t(el.dataset.text));document.title=i.t('オンライン予約受付停止')+' | CN Ueno health & beauty';};
+      s.addEventListener('change',()=>i.set(s.value));i.onChange(render);render();
+    });
+  </script>
+</body>
+</html>

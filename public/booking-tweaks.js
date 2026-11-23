@@ -153,7 +153,8 @@
       const u = typeof input === "string" ? input : input?.url || "";
       if (u.includes("/api/bookings") && !u.includes("cancel") && init?.method === "POST" && !res.ok) {
         const j2 = await res.clone().json().catch(() => ({}));
-        const msg = { ticketEmpty: "回数券の残り回数が0のため、ご予約いただけません。",
+        const msg = { bookingPaused: "現在、オンライン予約の受付を停止しています。",
+          ticketEmpty: "回数券の残り回数が0のため、ご予約いただけません。",
           ticketExpired: "回数券の有効期限が切れているため、ご予約いただけません。",
           ticketInvalid: "回数券の情報を確認できませんでした（ご予約時のメールアドレスが購入時と一致している必要があります）。",
           ticketMenu: "この回数券は、選択したメニューではご利用いただけません。",

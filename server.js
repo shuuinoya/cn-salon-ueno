@@ -5,6 +5,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const ownerAuth = require('./admin-owner-auth');
+const bookingReception = require('./booking-reception');
 
 const { handleDemoApi, isAdminSession, clearSession, ready: demoReady, nominationOf, liveSeq, courseNameOf } = require("./demo-api");
 const { EventEmitter } = require("events");
@@ -850,6 +851,12 @@ const handler = (req, res) => {
     return res.end();
   }
 
+
+  // 既存予約の完了・照会・取消や管理画面は維持し、新規予約の入口だけを閉じる。
+  if ((req.method === 'GET' || head) && bookingReception.isBookingPage(url.pathname) && bookingReception.isPaused()) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(head ? undefined : fs.readFileSync(path.join(ROOT, 'pages', 'booking-paused.html')));
+  }
 
   // 管理画面（操作デモ）用のAPIは、メモリ上の架空データで再現しています
   if (handleDemoApi(req, res, url)) return;

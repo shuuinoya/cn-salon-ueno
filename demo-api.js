@@ -3393,6 +3393,7 @@ function nowMinJst(now = Date.now()) {
 }
 
 function getAvailability(q, member) {
+  const bookingPaused = require('./booking-reception').isPaused();
   // 日時変更中（ログイン会員本人の予約のみ）：元の予約が使っている枠は空きとして表示する
   let ignoreId;
   const rsId = q.get("reschedule");
@@ -3421,7 +3422,7 @@ function getAvailability(q, member) {
   for (let i = 0; i < 7; i++) {
     const d = addDays(date, i);
     const day = ensureDay(d);
-    const open = day.enabled && d >= today && d <= addDays(today, 84);
+    const open = !bookingPaused && day.enabled && d >= today && d <= addDays(today, 84);
     const slots = [];
     // 店舗マスタの「予約開始時間〜予約締切時間」の範囲だけ受け付ける（終了が27:00を超える枠は不可）
     const sm = state.settings.shopMaster;
@@ -3436,9 +3437,9 @@ function getAvailability(q, member) {
         planBooths(d, m, m + dur, course, people, { online: true, ignoreId }).ok;
       slots.push({ minute: m, available: ok, start: minToMs(d, m) });
     }
-    days.push({ date: d, enabled: day.enabled, slots });
+    days.push({ date: d, enabled: !bookingPaused && day.enabled, slots });
   }
-  return { date, nomination, staff: nominatableStaff(courseId, gpref, date), staffDirectory: staffPickerDirectory(courseId, gpref, date), days };
+  return { date, nomination, staff: nominatableStaff(courseId, gpref, date), staffDirectory: staffPickerDirectory(courseId, gpref, date), days, bookingPaused };
 }
 
 // 同じメールアドレスの予約が既にあれば「リピート」扱いにする
@@ -3471,6 +3472,8 @@ function createPublicBooking(body, member) {
     if (!previous?.fingerprint || previous.fingerprint !== fingerprint) throw err(409, "requestChanged");
     return previous.result;
   }
+  // リクエスト本文の受信完了後、登録・回数券消費・メール生成より前に最新の受付状態を確かめる。
+  if (require('./booking-reception').isPaused()) throw err(409, 'bookingPaused');
   const course = getCourse(body.course);
   // 日時変更（ログイン会員のみ）：元の予約が本人のもの・予約中・開始前であることを先に確認し、
   // 新しい予約が成立した直後に元の予約を取り消す（成立しなければ元の予約はそのまま残る）
@@ -4319,6 +4322,11 @@ function handleDemoApi(req, res, url) {
   }
 
   // ---- 予約サイト用の公開エンドポイント ----
+  if (url.pathname === '/api/booking-reception' && (req.method === 'GET' || req.method === 'HEAD')) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ paused: require('./booking-reception').isPaused() }));
+    return true;
+  }
   if (url.pathname === "/api/availability" && (req.method === "GET" || req.method === "HEAD")) {
     try {
       const data = getAvailability(url.searchParams, memberOf(req));
