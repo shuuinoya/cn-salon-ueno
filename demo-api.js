@@ -4324,7 +4324,8 @@ function handleDemoApi(req, res, url) {
   // ---- 予約サイト用の公開エンドポイント ----
   if (url.pathname === '/api/booking-reception' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ paused: require('./booking-reception').isPaused() }));
+    const reception = require('./booking-reception');
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ paused: reception.isPaused(), siteHidden: reception.isSiteHidden() }));
     return true;
   }
   if (url.pathname === "/api/availability" && (req.method === "GET" || req.method === "HEAD")) {

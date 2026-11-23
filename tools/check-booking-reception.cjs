@@ -36,7 +36,7 @@ const encode=v=>JSON.stringify(v,(_,x)=>x instanceof Map?[...x]:x instanceof Set
  const course=[...a.courseStore.keys()][0];
  for(let i=0;i<=84;i+=7){const d=c.addDays(c.todayJst(),i),r=a.getAvailability(new URLSearchParams({course,date:d,people:'1',staff:'none'}),null);ok(()=>assert(r.bookingPaused&&r.days.length===7&&r.days.every(x=>!x.enabled&&x.slots.length===0)));}
  const api=(method,route,body)=>{const req=Object.assign(new EventEmitter(),{method,headers:{},socket:{remoteAddress:'127.0.0.1'},destroy(){throw Error('destroyed');}});let status,data;const res=Object.assign(new EventEmitter(),{setHeader(){},writeHead(n){status=n;},end(v){data=v?JSON.parse(v):null;this.emit('finish');}});assert(mod.exports.handleDemoApi(req,res,new URL(route,'http://localhost')));if(body)req.emit('data',JSON.stringify(body));req.emit('end');return {status,data};};
- ok(()=>assert.deepEqual(api('GET','/api/booking-reception'),{status:200,data:{paused:true}}));
+ ok(()=>assert.deepEqual(api('GET','/api/booking-reception'),{status:200,data:{paused:true,siteHidden:false}}));
  ok(()=>assert.equal(api('POST','/api/bookings',{name:'テスト直接送信'}).data.error,'bookingPaused'));
  const existing=[...s.events.values()].flatMap(e=>e.bookings).find(b=>b.customer_token);
  if(existing)ok(()=>assert.equal(a.getPublicBooking(existing.id,existing.customer_token,null).booking.id,existing.id));

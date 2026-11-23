@@ -824,6 +824,17 @@ const handler = (req, res) => {
     url.pathname = NAME_HOSTS[hostName];
   }
 
+  if (bookingReception.isSiteHidden() && bookingReception.hideRequest(url.pathname, isAdminSession(req))) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    if (url.pathname.startsWith('/api/')) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(head ? undefined : JSON.stringify({ error: 'siteUnavailable' }));
+    }
+    res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(head ? undefined : fs.readFileSync(path.join(ROOT, 'pages', 'site-unavailable.html')));
+  }
+
   // 管理画面はログイン必須（ID・パスワードはログイン画面から）
   const isAdminPage = url.pathname === "/admin" || url.pathname === "/demo/admin" ||
     url.pathname === "/admin-original" ||

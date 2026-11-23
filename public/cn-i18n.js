@@ -17,6 +17,7 @@
 
   /* 辞書 */
   const D = {
+    "このサイトは現在公開していません。": ["This website is currently unavailable.", "本网站目前不对外开放。", "이 사이트는 현재 공개되지 않습니다.", "Ce site n’est pas accessible actuellement.", "Este sitio web no está disponible actualmente.", "Questo sito non è attualmente disponibile.", "Diese Website ist derzeit nicht öffentlich zugänglich."],
     "現在、オンライン予約の受付を停止しています。": ["Online bookings are currently closed.", "目前暂停接受在线预约。", "현재 온라인 예약 접수를 중단하고 있습니다.", "Les réservations en ligne sont actuellement fermées.", "Actualmente no se aceptan reservas en línea.", "Le prenotazioni online sono attualmente sospese.", "Onlinebuchungen sind derzeit geschlossen."],
     "オンライン予約受付停止": ["Online bookings closed", "在线预约暂停", "온라인 예약 접수 중단", "Réservations en ligne fermées", "Reservas en línea cerradas", "Prenotazioni online sospese", "Onlinebuchungen geschlossen"],
     "ホームへ戻る": ["Back to home", "返回首页", "홈으로 돌아가기", "Retour à l’accueil", "Volver al inicio", "Torna alla home", "Zur Startseite"],
