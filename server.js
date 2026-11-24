@@ -835,7 +835,7 @@ const handler = (req, res) => {
     return res.end(head ? undefined : fs.readFileSync(path.join(ROOT, 'pages', 'site-unavailable.html')));
   }
 
-  // 管理画面はログイン必須（ID・パスワードはログイン画面から）
+  // 管理画面は本人確認必須（設定に応じてID・パスワード、または許可端末で確認）
   const isAdminPage = url.pathname === "/admin" || url.pathname === "/demo/admin" ||
     url.pathname === "/admin-original" ||
     (url.pathname.startsWith("/admin/") && url.pathname !== "/admin/login");
@@ -856,9 +856,13 @@ const handler = (req, res) => {
   // ログアウト経由でログイン画面に来たらセッションを破棄する
   if (url.pathname === "/admin/login" && url.searchParams.get("out") === "1") {
     clearSession(req, res);
+    if (ownerAuth.config().mode === 'device-only' && isAdminSession(req)) {
+      res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+      return res.end();
+    }
   } else if ((url.pathname === "/admin/login" || url.pathname.toLowerCase() === "/cnsalon-board") && isAdminSession(req)) {
     // すでにログイン中なら、ログイン画面を出さずに予約台帳へ（毎回ログインし直さなくてよい）
-    res.writeHead(302, { Location: "/admin" });
+    res.writeHead(302, { Location: "/admin", 'Cache-Control': 'no-store' });
     return res.end();
   }
 

@@ -68,6 +68,10 @@ function sessionTokenOf(req) {
 // ログイン済みかつ有効なアカウントのときだけ、そのアカウントを返す
 // （停止・削除・権限変更は既存セッションにも即時反映される）
 function sessionAccount(req) {
+  const owner = ownerAuth.config();
+  if (owner.enabled && owner.mode === 'device-only') {
+    return ownerAuth.deviceAccount(req, state.accounts.get(owner.user));
+  }
   const token = sessionTokenOf(req);
   const s = adminSessions.get(token);
   if (!s) return null;

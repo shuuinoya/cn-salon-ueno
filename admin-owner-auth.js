@@ -17,7 +17,7 @@ function config(env = process.env) {
   const startAt = startText ? Date.parse(startText) : 0;
   const startValid = !startText || (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(startText) && Number.isFinite(startAt));
   const configured = !!(user || email || identity || rawDevices || env.ADMIN_OWNER_MODE || startText);
-  const valid = !!(user && identity && ['email-code', 'device-password'].includes(mode) &&
+  const valid = !!(user && identity && ['email-code', 'device-password', 'device-only'].includes(mode) &&
     devices.every(x => net.isIP(x)) && (requireCode ? emailValid(email) : devices.length) && startValid);
   // 毎回時刻を判定するため、開始時刻にサーバーの再起動は不要。不正な設定は即時拒否。
   const enabled = configured && (!valid || !startAt || Date.now() >= startAt);
@@ -54,6 +54,13 @@ function sessionAllowed(req, session, account, env = process.env) {
   return !c.enabled || (c.valid && account.user === c.user && networkAllowed(req, env) &&
     !!session.ownerVerifiedAt && session.ownerPolicy === policyFor(account, env) &&
     (c.requireCode || session.ownerDevice === clientKey(req)));
+}
+// 指定端末の本人確認だけで開くモード。Cookie・入力されたIDでは本人を決めない。
+// 毎回、許可端末と現在の所有者アカウントを確認し、設定漏れや停止・降格は拒否する。
+function deviceAccount(req, account, env = process.env) {
+  const c = config(env);
+  return c.enabled && c.valid && c.mode === 'device-only' && networkAllowed(req, env) &&
+    account?.active && account.user === c.user && account.role === 'admin' ? account : null;
 }
 function passwordSession(req, account, env = process.env) {
   const c = config(env);
@@ -116,4 +123,4 @@ class OwnerChallenges {
     return { account, ownerVerifiedAt: now, ownerPolicy: p.policy };
   }
 }
-module.exports = { config, networkAllowed, protectedPath, sessionAllowed, passwordSession, OwnerChallenges };
+module.exports = { config, networkAllowed, protectedPath, sessionAllowed, deviceAccount, passwordSession, OwnerChallenges };
